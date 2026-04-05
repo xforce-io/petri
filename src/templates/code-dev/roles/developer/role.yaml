@@ -2,4 +2,4 @@ persona: soul.md
 skills:
   - petri:file_operations
   - petri:shell_tools
-  - implement.md
+  - implement

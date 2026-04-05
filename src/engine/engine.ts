@@ -45,16 +45,19 @@ export class Engine {
       if (isRepeatBlock(entry)) {
         const result = await this.runRepeatBlock(entry.repeat, input, manifest);
         if (result.status === "blocked") {
+          manifest.save();
           return result;
         }
       } else {
         const result = await this.runStage(entry, input, manifest);
         if (result.status === "blocked") {
+          manifest.save();
           return result;
         }
       }
     }
 
+    manifest.save();
     return { status: "done" };
   }
 
