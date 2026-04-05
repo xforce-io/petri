@@ -1,0 +1,6 @@
+requires: design_completed
+evidence:
+  path: "{stage}/{role}/design.json"
+  check:
+    field: completed
+    equals: true

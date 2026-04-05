@@ -1,0 +1,6 @@
+requires: tests_pass
+evidence:
+  path: "{stage}/{role}/result.json"
+  check:
+    field: tests_passed
+    equals: true

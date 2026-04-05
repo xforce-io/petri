@@ -1,0 +1,6 @@
+requires: review_approved
+evidence:
+  path: "{stage}/{role}/review.json"
+  check:
+    field: approved
+    equals: true

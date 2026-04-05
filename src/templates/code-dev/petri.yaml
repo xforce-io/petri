@@ -1,0 +1,13 @@
+providers:
+  default:
+    type: pi
+
+models:
+  sonnet:
+    provider: default
+    model: claude-sonnet-4-6
+
+defaults:
+  model: sonnet
+  gate_strategy: all
+  max_retries: 3
