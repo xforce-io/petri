@@ -19,12 +19,16 @@ export async function initCommand(opts: { template?: string }) {
 
   const template = opts.template ?? "code-dev";
 
-  // Resolve template directory relative to this source file
+  // Resolve template directory — check dist sibling first (bundled), then src (dev)
   const __dirname = dirname(fileURLToPath(import.meta.url));
-  const templatesRoot = resolve(__dirname, "..", "templates");
-  const templateDir = resolve(templatesRoot, template);
+  const candidates = [
+    resolve(__dirname, "..", "templates", template),           // bundled: dist/../templates
+    resolve(__dirname, "..", "..", "src", "templates", template), // bundled: dist/../../src/templates
+    resolve(__dirname, "..", "src", "templates", template),    // dev: src/cli/../src/templates
+  ];
+  const templateDir = candidates.find((d) => existsSync(d));
 
-  if (!existsSync(templateDir)) {
+  if (!templateDir) {
     console.log(chalk.red(`Error: template "${template}" not found.`));
     console.log(
       chalk.gray(

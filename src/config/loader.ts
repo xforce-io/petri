@@ -100,10 +100,15 @@ export function loadRole(
  * Load a built-in skill from src/skills/{name}.md.
  */
 export function loadBuiltinSkill(name: string): string {
-  // Resolve relative to this file's location: src/config/ -> src/skills/
-  const skillPath = path.join(__dirname, "..", "skills", `${name}.md`);
-  if (!fs.existsSync(skillPath)) {
-    throw new Error(`Built-in skill not found: ${name} (looked at ${skillPath})`);
+  // Resolve relative to this file — check multiple candidates for bundled vs dev
+  const candidates = [
+    path.join(__dirname, "..", "skills", `${name}.md`),             // dev: src/config/../skills
+    path.join(__dirname, "..", "src", "skills", `${name}.md`),      // bundled: dist/../src/skills
+    path.join(__dirname, "..", "..", "src", "skills", `${name}.md`), // bundled: dist/../../src/skills
+  ];
+  const skillPath = candidates.find((p) => fs.existsSync(p));
+  if (!skillPath) {
+    throw new Error(`Built-in skill not found: ${name} (looked at ${candidates.join(", ")})`);
   }
   return fs.readFileSync(skillPath, "utf-8");
 }
