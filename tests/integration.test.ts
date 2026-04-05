@@ -59,32 +59,23 @@ describe("Integration: code-dev pipeline end-to-end", () => {
           async run(): Promise<AgentResult> {
             const artifacts: string[] = [];
 
-            if (config.persona.includes("architect")) {
-              // Designer role: write design.md + design.json
-              const dir = path.join(config.artifactDir, "design", "designer");
-              fs.mkdirSync(dir, { recursive: true });
+            // artifactDir is already role-specific: base/{stage}/{role}/
+            fs.mkdirSync(config.artifactDir, { recursive: true });
 
-              const designMd = path.join(dir, "design.md");
+            if (config.persona.includes("architect")) {
+              const designMd = path.join(config.artifactDir, "design.md");
               fs.writeFileSync(designMd, "# Design\n\nArchitecture overview.");
               artifacts.push(designMd);
 
-              const designJson = path.join(dir, "design.json");
+              const designJson = path.join(config.artifactDir, "design.json");
               fs.writeFileSync(designJson, JSON.stringify({ completed: true }));
               artifacts.push(designJson);
             } else if (config.persona.includes("pragmatic")) {
-              // Developer role: write result.json
-              const dir = path.join(config.artifactDir, "develop", "developer");
-              fs.mkdirSync(dir, { recursive: true });
-
-              const resultJson = path.join(dir, "result.json");
+              const resultJson = path.join(config.artifactDir, "result.json");
               fs.writeFileSync(resultJson, JSON.stringify({ tests_passed: true }));
               artifacts.push(resultJson);
             } else if (config.persona.includes("reviewer")) {
-              // Code reviewer role: write review.json
-              const dir = path.join(config.artifactDir, "review", "code_reviewer");
-              fs.mkdirSync(dir, { recursive: true });
-
-              const reviewJson = path.join(dir, "review.json");
+              const reviewJson = path.join(config.artifactDir, "review.json");
               fs.writeFileSync(reviewJson, JSON.stringify({ approved: true }));
               artifacts.push(reviewJson);
             }

@@ -73,13 +73,16 @@ export class Engine {
     let lastFailureHash = "";
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      console.log(`  Stage "${stage.name}" attempt ${attempt + 1}/${maxRetries + 1}...`);
       // Execute all roles in parallel
       await Promise.all(
         stage.roles.map(async (roleName) => {
           const role = this.roles[roleName];
           if (!role) return;
 
-          const artifactDir = this.artifactBaseDir;
+          const artifactDir = `${this.artifactBaseDir}/${stage.name}/${roleName}`;
+          const { mkdirSync } = await import("node:fs");
+          mkdirSync(artifactDir, { recursive: true });
           const context = buildContext({
             input,
             artifactDir,
@@ -122,9 +125,11 @@ export class Engine {
       );
 
       if (gateResult.passed) {
+        console.log(`  Stage "${stage.name}" PASSED`);
         return { status: "done" };
       }
 
+      console.log(`  Stage "${stage.name}" gate FAILED: ${gateResult.reason}`);
       // Gate failed — build a full failure description including details
       const detailLines = gateResult.details
         .filter((d) => !d.passed)

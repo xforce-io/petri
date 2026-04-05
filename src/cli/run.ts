@@ -8,8 +8,9 @@ import {
 } from "../config/loader.js";
 import { Engine } from "../engine/engine.js";
 import { PiProvider } from "../providers/pi.js";
+import { ClaudeCodeProvider } from "../providers/claude-code.js";
 import { isRepeatBlock } from "../types.js";
-import type { LoadedRole } from "../types.js";
+import type { AgentProvider, LoadedRole } from "../types.js";
 
 interface RunOptions {
   pipeline: string;
@@ -65,17 +66,22 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     roles[name] = loadRole(cwd, name, defaultModel);
   }
 
-  // 5. Build model mappings for PiProvider
-  const modelMappings: Record<string, { piProvider: string; piModel: string }> =
-    {};
-  for (const [alias, mc] of Object.entries(petriConfig.models)) {
-    modelMappings[alias] = {
-      piProvider: "anthropic",
-      piModel: mc.model,
-    };
-  }
+  // 5. Create provider based on config
+  const defaultProviderType = Object.values(petriConfig.providers)[0]?.type ?? "pi";
+  let provider: AgentProvider;
 
-  const provider = new PiProvider(modelMappings);
+  if (defaultProviderType === "claude_code") {
+    provider = new ClaudeCodeProvider(defaultModel);
+  } else {
+    const modelMappings: Record<string, { piProvider: string; piModel: string }> = {};
+    for (const [alias, mc] of Object.entries(petriConfig.models)) {
+      modelMappings[alias] = {
+        piProvider: "anthropic",
+        piModel: mc.model,
+      };
+    }
+    provider = new PiProvider(modelMappings);
+  }
 
   // 6. Create engine
   const artifactBaseDir = path.join(cwd, ".petri", "artifacts");
