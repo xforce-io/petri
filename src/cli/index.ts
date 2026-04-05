@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { runCommand } from "./run.js";
 import { validateCommand } from "./validate.js";
+import { initCommand } from "./init.js";
 
 const program = new Command();
 program.name("petri").description("Multi-agent stage runner").version("0.1.0");
@@ -17,5 +18,11 @@ program
   .command("validate")
   .description("Validate project configuration")
   .action(validateCommand);
+
+program
+  .command("init")
+  .description("Initialize a new Petri project")
+  .option("-t, --template <name>", "Template to use", "code-dev")
+  .action(initCommand);
 
 program.parse();
