@@ -1,0 +1,8 @@
+requires:
+  mystery_created: true
+evidence:
+  type: artifact
+  path: "{stage}/{role}/mystery.json"
+  check:
+    field: complete
+    equals: true

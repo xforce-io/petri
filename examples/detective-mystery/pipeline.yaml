@@ -1,0 +1,15 @@
+name: detective-mystery
+description: A detective investigates a murder mystery
+
+stages:
+  - name: setup
+    roles: [storyteller]
+    max_retries: 2
+
+  - name: investigate
+    roles: [detective]
+    max_retries: 3
+
+  - name: verdict
+    roles: [judge]
+    max_retries: 2

@@ -1,0 +1,13 @@
+providers:
+  default:
+    type: claude_code
+
+models:
+  haiku:
+    provider: default
+    model: haiku
+
+defaults:
+  model: haiku
+  gate_strategy: all
+  max_retries: 3

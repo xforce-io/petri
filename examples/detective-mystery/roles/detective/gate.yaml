@@ -1,0 +1,8 @@
+requires:
+  investigation_complete: true
+evidence:
+  type: artifact
+  path: "{stage}/{role}/investigation.json"
+  check:
+    field: accusation_made
+    equals: true

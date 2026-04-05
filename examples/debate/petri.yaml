@@ -1,0 +1,13 @@
+providers:
+  default:
+    type: claude_code
+
+models:
+  sonnet:
+    provider: default
+    model: sonnet
+
+defaults:
+  model: sonnet
+  gate_strategy: all
+  max_retries: 2

@@ -1,0 +1,8 @@
+requires:
+  verdict_rendered: true
+evidence:
+  type: artifact
+  path: "{stage}/{role}/verdict.json"
+  check:
+    field: verdict_rendered
+    equals: true

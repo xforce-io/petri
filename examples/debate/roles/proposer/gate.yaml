@@ -1,0 +1,8 @@
+requires:
+  argument_submitted: true
+evidence:
+  type: artifact
+  path: "{stage}/{role}/argument.json"
+  check:
+    field: submitted
+    equals: true
