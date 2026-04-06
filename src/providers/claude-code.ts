@@ -19,14 +19,14 @@ export class ClaudeCodeProvider implements AgentProvider {
 
     // Write prompt to temp file to avoid shell escaping issues
     mkdirSync(config.artifactDir, { recursive: true });
-    const promptFile = join(config.artifactDir, ".petri-prompt.md");
+    const promptFile = join(config.artifactDir, "_prompt.md");
     writeFileSync(promptFile, fullPrompt, "utf-8");
 
     const model = config.model === "sonnet" ? "sonnet" : config.model;
 
     // Find the real claude binary (execSync doesn't expand shell aliases)
     const claudeBin = findClaude();
-    const cmd = `cat "${promptFile}" | "${claudeBin}" -p - --model ${model} --output-format json --dangerously-skip-permissions`;
+    const cmd = `cat "${promptFile}" | "${claudeBin}" -p --model ${model} --output-format json --dangerously-skip-permissions`;
 
     console.log(`  [claude-code] Running ${model} in ${config.artifactDir}...`);
 
@@ -45,7 +45,7 @@ export class ClaudeCodeProvider implements AgentProvider {
       // stdout may still have useful output even on non-zero exit
       output = e.stdout ?? "";
     } finally {
-      try { unlinkSync(promptFile); } catch {}
+      // Keep prompt file for observability (renamed without dot prefix so it shows in artifacts)
     }
 
     // Parse JSON output — Claude Code returns { type, result, total_cost_usd, usage: {...} }
@@ -62,6 +62,7 @@ export class ClaudeCodeProvider implements AgentProvider {
       };
       if (parsed.result) {
         console.log(`  [claude-code] Result: ${parsed.result.slice(0, 150)}...`);
+        writeFileSync(join(config.artifactDir, "_result.md"), parsed.result, "utf-8");
       }
     } catch {
       // non-JSON output is fine, agent still may have written files

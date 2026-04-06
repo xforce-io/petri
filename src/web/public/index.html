@@ -95,11 +95,29 @@
           </aside>
           <div class="detail-panel">
             <div class="sub-tabs">
-              <button class="sub-tab active" data-subtab="log">Log</button>
+              <button class="sub-tab active" data-subtab="io">I/O</button>
+              <button class="sub-tab" data-subtab="log">Log</button>
               <button class="sub-tab" data-subtab="artifacts">Artifacts</button>
               <button class="sub-tab" data-subtab="gate">Gate</button>
             </div>
-            <div id="subtab-log" class="sub-tab-content active">
+            <div id="subtab-io" class="sub-tab-content active">
+              <div class="io-section">
+                <div class="io-block">
+                  <div class="io-header" id="io-prompt-toggle">
+                    <span class="io-label">Prompt (Input)</span>
+                    <span class="io-toggle">&#9660;</span>
+                  </div>
+                  <pre id="io-prompt" class="io-content">Select a stage to view agent I/O.</pre>
+                </div>
+                <div class="io-block">
+                  <div class="io-header">
+                    <span class="io-label">Result (Output)</span>
+                  </div>
+                  <pre id="io-result" class="io-content io-result-content"></pre>
+                </div>
+              </div>
+            </div>
+            <div id="subtab-log" class="sub-tab-content">
               <pre id="log-output" class="log-output">Select a stage to view logs.</pre>
             </div>
             <div id="subtab-artifacts" class="sub-tab-content">

@@ -106,6 +106,16 @@ document.addEventListener("DOMContentLoaded", () => {
   // Back to runs list
   $("#back-to-runs").addEventListener("click", showRunsList);
 
+  // Prompt toggle (collapse/expand)
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("#io-prompt-toggle")) {
+      const el = $("#io-prompt");
+      el.classList.toggle("collapsed");
+      const toggle = e.target.closest("#io-prompt-toggle").querySelector(".io-toggle");
+      if (toggle) toggle.textContent = el.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
+    }
+  });
+
   // Load projects then dashboard
   loadProjects();
 });
@@ -380,9 +390,42 @@ function renderRunSummary() {
 function selectStage(index) {
   currentStageIndex = index;
   $$(".stage-item").forEach((el, i) => el.classList.toggle("active", i === index));
+  loadStageIO();
   loadRunLog();
   loadStageArtifacts();
   renderGateDetail();
+}
+
+async function loadStageIO() {
+  const promptEl = $("#io-prompt");
+  const resultEl = $("#io-result");
+
+  const stage = currentRunData.stages?.[currentStageIndex];
+  if (!stage) {
+    promptEl.textContent = "Select a stage to view agent I/O.";
+    resultEl.textContent = "";
+    return;
+  }
+
+  const prefix = stage.stage + "/" + (stage.role || "");
+
+  // Load prompt (_prompt.md)
+  const promptRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_prompt.md");
+  if (promptRes.status === 200 && promptRes.data) {
+    promptEl.textContent = promptRes.data;
+    promptEl.classList.add("collapsed");
+  } else {
+    promptEl.textContent = "(No prompt saved for this stage — available in future runs)";
+    promptEl.classList.remove("collapsed");
+  }
+
+  // Load result (_result.md)
+  const resultRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_result.md");
+  if (resultRes.status === 200 && resultRes.data) {
+    resultEl.textContent = resultRes.data;
+  } else {
+    resultEl.textContent = "(No result saved for this stage — available in future runs)";
+  }
 }
 
 async function loadRunLog() {
