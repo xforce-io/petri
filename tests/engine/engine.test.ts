@@ -279,6 +279,79 @@ describe("Engine", () => {
     expect(capturedContext).toContain("Attempt 2:");
   });
 
+  it("times out hanging agents and treats as failed attempt", async () => {
+    const gate = makeGate("{stage}/{role}/output.json", {
+      field: "approved",
+      equals: true,
+    });
+    const roles: Record<string, LoadedRole> = {
+      worker: makeRole("worker", gate),
+    };
+
+    // Provider whose agent.run() never resolves
+    const hangingProvider: AgentProvider = {
+      createAgent(): PetriAgent {
+        return {
+          run(): Promise<AgentResult> {
+            return new Promise(() => {});  // never resolves
+          },
+        };
+      },
+    };
+
+    const pipeline: PipelineConfig = {
+      name: "test-pipeline",
+      stages: [{ name: "work", roles: ["worker"], max_retries: 1, timeout: 100 }],
+    };
+
+    const engine = new Engine({
+      provider: hangingProvider,
+      roles,
+      artifactBaseDir: tmpDir,
+    });
+
+    const result = await engine.run(pipeline, "Do work");
+    expect(result.status).toBe("blocked");
+    expect(result.reason).toMatch(/timed out|timeout|Stagnation/i);
+  }, 10_000);
+
+  it("respects defaultTimeout from engine options", async () => {
+    const gate = makeGate("{stage}/{role}/output.json", {
+      field: "approved",
+      equals: true,
+    });
+    const roles: Record<string, LoadedRole> = {
+      worker: makeRole("worker", gate),
+    };
+
+    const hangingProvider: AgentProvider = {
+      createAgent(): PetriAgent {
+        return {
+          run(): Promise<AgentResult> {
+            return new Promise(() => {});
+          },
+        };
+      },
+    };
+
+    const pipeline: PipelineConfig = {
+      name: "test-pipeline",
+      stages: [{ name: "work", roles: ["worker"], max_retries: 1 }],
+    };
+
+    const engine = new Engine({
+      provider: hangingProvider,
+      roles,
+      artifactBaseDir: tmpDir,
+      defaultTimeout: 100,
+    });
+
+    const result = await engine.run(pipeline, "Do work");
+    expect(result.status).toBe("blocked");
+    // With identical timeout failures, stagnation detection kicks in
+    expect(result.reason).toMatch(/timed out|timeout|Stagnation/i);
+  }, 10_000);
+
   it("runs a repeat block", async () => {
     // Gate checks {stage}/{role}/output.json with field target_met === true
     const gate: GateConfig = {

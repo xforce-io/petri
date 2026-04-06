@@ -18,6 +18,7 @@ export interface StageConfig {
   roles: string[];
   max_retries?: number;
   gate_strategy?: GateStrategy;
+  timeout?: number;  // per-stage agent timeout in ms
   overrides?: Record<string, { model?: string }>;
 }
 

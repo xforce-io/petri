@@ -24,6 +24,7 @@ export interface EngineOptions {
   artifactBaseDir: string;
   defaultGateStrategy?: GateStrategy;
   defaultMaxRetries?: number;
+  defaultTimeout?: number;  // agent execution timeout in ms (default: 600000 = 10 min)
   logger?: RunLogger;
 }
 
@@ -33,6 +34,7 @@ export class Engine {
   private readonly artifactBaseDir: string;
   private readonly defaultGateStrategy: GateStrategy;
   private readonly defaultMaxRetries: number;
+  private readonly defaultTimeout: number;
   private readonly logger?: RunLogger;
 
   // Gate registry: maps gate id → latest result
@@ -46,6 +48,7 @@ export class Engine {
     this.artifactBaseDir = opts.artifactBaseDir;
     this.defaultGateStrategy = opts.defaultGateStrategy ?? "all";
     this.defaultMaxRetries = opts.defaultMaxRetries ?? 3;
+    this.defaultTimeout = opts.defaultTimeout ?? 600_000;
     this.logger = opts.logger;
   }
 
@@ -123,45 +126,98 @@ export class Engine {
       // Execute all roles in parallel
       const roleTimers: Array<{ roleName: string; timer: import("./logger.js").StageTimer; usage?: import("../types.js").AgentResult["usage"]; artifacts: string[] }> = [];
 
-      await Promise.all(
-        stage.roles.map(async (roleName) => {
-          const role = this.roles[roleName];
-          if (!role) return;
+      let agentTimedOut = false;
+      let timeoutMessage = "";
 
-          const artifactDir = `${this.artifactBaseDir}/${stage.name}/${roleName}`;
-          const { mkdirSync } = await import("node:fs");
-          mkdirSync(artifactDir, { recursive: true });
-          const context = buildContext({
-            input,
-            goal: this.goal,
-            requirements: this.requirements,
-            artifactDir,
-            manifestText: manifest.formatForContext(),
-            failureContext,
-            attemptHistory,
-          });
+      try {
+        await Promise.all(
+          stage.roles.map(async (roleName) => {
+            const role = this.roles[roleName];
+            if (!role) return;
 
-          const model = stage.overrides?.[roleName]?.model ?? role.model;
-          const timer = this.logger?.logRoleStart(stage.name, roleName, model);
+            const artifactDir = `${this.artifactBaseDir}/${stage.name}/${roleName}`;
+            const { mkdirSync } = await import("node:fs");
+            mkdirSync(artifactDir, { recursive: true });
+            const context = buildContext({
+              input,
+              goal: this.goal,
+              requirements: this.requirements,
+              artifactDir,
+              manifestText: manifest.formatForContext(),
+              failureContext,
+              attemptHistory,
+            });
 
-          const agent = this.provider.createAgent({
-            persona: role.persona,
-            skills: role.skills,
-            context,
-            artifactDir,
-            model,
-          });
+            const model = stage.overrides?.[roleName]?.model ?? role.model;
+            const timer = this.logger?.logRoleStart(stage.name, roleName, model);
 
-          const result = await agent.run();
-          if (result.artifacts.length > 0) {
-            manifest.collect(stage.name, roleName, result.artifacts);
-          }
+            const agent = this.provider.createAgent({
+              persona: role.persona,
+              skills: role.skills,
+              context,
+              artifactDir,
+              model,
+            });
 
-          if (timer) {
-            roleTimers.push({ roleName, timer, usage: result.usage, artifacts: result.artifacts });
-          }
-        }),
-      );
+            const agentTimeout = stage.timeout ?? this.defaultTimeout;
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              const id = setTimeout(
+                () => reject(new Error(`Agent timed out after ${agentTimeout}ms`)),
+                agentTimeout,
+              );
+              // Allow the Node process to exit even if the timer is still pending
+              if (typeof id === "object" && "unref" in id) (id as NodeJS.Timeout).unref();
+            });
+
+            const result = await Promise.race([agent.run(), timeoutPromise]);
+            if (result.artifacts.length > 0) {
+              manifest.collect(stage.name, roleName, result.artifacts);
+            }
+
+            if (timer) {
+              roleTimers.push({ roleName, timer, usage: result.usage, artifacts: result.artifacts });
+            }
+          }),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("Agent timed out")) {
+          agentTimedOut = true;
+          timeoutMessage = message;
+          console.log(`  Stage "${stage.name}" agent TIMED OUT: ${message}`);
+        } else {
+          throw err;  // re-throw non-timeout errors
+        }
+      }
+
+      // If agent timed out, treat as a failed attempt
+      if (agentTimedOut) {
+        for (const roleName of stage.roles) {
+          archiveAttempt(`${this.artifactBaseDir}/${stage.name}/${roleName}`, attempt + 1);
+        }
+
+        const failureReason = timeoutMessage;
+        const failureHash = createHash("sha256")
+          .update(failureReason)
+          .digest("hex");
+
+        if (lastFailureHash === failureHash && attempt > 0) {
+          return {
+            status: "blocked",
+            stage: stage.name,
+            reason: `Stagnation detected: same failure repeated`,
+          };
+        }
+
+        lastFailureHash = failureHash;
+        failureContext = failureReason;
+        attemptHistory.push({
+          attempt: attempt + 1,
+          failureReason,
+          failureHash,
+        });
+        continue;
+      }
 
       // Check gates
       const gateInputs: GateInput[] = [];
