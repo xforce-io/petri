@@ -46,21 +46,20 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     process.exit(1);
   }
 
-  // 3. Collect all role names from pipeline stages
+  // 3. Collect all role names from pipeline stages (recursing into nested repeats)
   const roleNames = new Set<string>();
-  for (const entry of pipelineConfig.stages) {
-    if (isRepeatBlock(entry)) {
-      for (const stage of entry.repeat.stages) {
-        for (const role of stage.roles) {
+  function collectRoles(stages: import("../types.js").StageEntry[]): void {
+    for (const entry of stages) {
+      if (isRepeatBlock(entry)) {
+        collectRoles(entry.repeat.stages);
+      } else {
+        for (const role of entry.roles) {
           roleNames.add(role);
         }
       }
-    } else {
-      for (const role of entry.roles) {
-        roleNames.add(role);
-      }
     }
   }
+  collectRoles(pipelineConfig.stages);
 
   // 4. Load all roles
   const defaultModel = petriConfig.defaults.model;
