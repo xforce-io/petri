@@ -190,8 +190,8 @@ evidence:
     expect(role.model).toBe("sonnet");
     expect(role.skills).toHaveLength(1);
     expect(role.gate).not.toBeNull();
-    expect(role.gate!.requires).toEqual({ tests_pass: true });
-    expect(role.gate!.evidence.type).toBe("artifact");
+    expect(role.gate!.id).toBe("tests_pass");
+    expect(role.gate!.evidence.path).toBe("test-results.json");
   });
 
   it("uses default model when role has none", () => {

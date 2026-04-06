@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "postbuild": "cp -r src/web/public dist/web/public",
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx src/cli/index.ts"

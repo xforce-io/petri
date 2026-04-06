@@ -100,20 +100,20 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   });
 
   // 7. Run and print result
-  console.log(chalk.blue(`Running pipeline: ${pipelineConfig.name}`));
+  console.log(chalk.blue(`Running pipeline: ${pipelineConfig.name} (run-${logger.runId})`));
   const result = await engine.run(pipelineConfig, input);
 
   if (result.status === "done") {
     logger.finish("done");
     console.log(chalk.green("Pipeline completed successfully."));
-    console.log(chalk.gray(`Log: ${path.join(petriDir, "run.log")}`));
+    console.log(chalk.gray(`Run: ${logger.runDir}`));
   } else {
     logger.finish("blocked", result.stage, result.reason);
     console.log(chalk.red(`Pipeline blocked at stage: ${result.stage}`));
     if (result.reason) {
       console.log(chalk.red(`Reason: ${result.reason}`));
     }
-    console.log(chalk.gray(`Log: ${path.join(petriDir, "run.log")}`));
+    console.log(chalk.gray(`Run: ${logger.runDir}`));
     process.exit(1);
   }
 }

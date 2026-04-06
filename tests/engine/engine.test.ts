@@ -280,7 +280,14 @@ describe("Engine", () => {
   });
 
   it("runs a repeat block", async () => {
-    const gate = makeGate("{stage}/{role}/output.json");
+    // Gate checks {stage}/{role}/output.json with field target_met === true
+    const gate: GateConfig = {
+      id: "target-met",
+      evidence: {
+        path: "{stage}/{role}/output.json",
+        check: { field: "target_met", equals: true },
+      },
+    };
     const roles: Record<string, LoadedRole> = {
       worker: makeRole("worker", gate),
     };
@@ -290,13 +297,9 @@ describe("Engine", () => {
       iterationCount++;
       const dir = path.join(tmpDir, "step", "worker");
       fs.mkdirSync(dir, { recursive: true });
+      // Gate passes only on iteration >= 2
       fs.writeFileSync(
         path.join(dir, "output.json"),
-        JSON.stringify({ done: true }),
-      );
-      // Write the until-condition artifact
-      fs.writeFileSync(
-        path.join(tmpDir, "status.json"),
         JSON.stringify({ target_met: iterationCount >= 2 }),
       );
     });
@@ -308,11 +311,7 @@ describe("Engine", () => {
           repeat: {
             name: "iterate",
             max_iterations: 5,
-            until: {
-              artifact: "status.json",
-              field: "target_met",
-              equals: true,
-            },
+            until: "target-met",
             stages: [{ name: "step", roles: ["worker"], max_retries: 2 }],
           },
         },
