@@ -10,6 +10,8 @@ import { handleSseRequest } from "./routes/sse.js";
 
 export interface ServerOptions {
   projectDir: string;
+  /** Multiple project directories (overrides projectDir when set) */
+  projectDirs?: { name: string; dir: string }[];
   port: number;
 }
 
@@ -17,6 +19,7 @@ export interface ServerResult {
   server: http.Server;
   port: number;
   activeRuns: Map<string, RunLogger>;
+  projects: { name: string; dir: string }[];
 }
 
 export function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
@@ -89,15 +92,34 @@ function serveStatic(
 }
 
 export function createPetriServer(opts: ServerOptions): Promise<ServerResult> {
-  const { projectDir, port } = opts;
+  const { port } = opts;
+  const projects: { name: string; dir: string }[] = opts.projectDirs && opts.projectDirs.length > 0
+    ? opts.projectDirs
+    : [{ name: path.basename(opts.projectDir), dir: opts.projectDir }];
+
   const publicDir = resolvePublicDir();
   const activeRuns = new Map<string, RunLogger>();
+
+  function resolveProjectDir(url: URL): string {
+    const projectName = url.searchParams.get("project");
+    if (projectName) {
+      const found = projects.find((p) => p.name === projectName);
+      if (found) return found.dir;
+    }
+    return projects[0].dir;
+  }
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const pathname = url.pathname;
 
     try {
+      // Project list endpoint
+      if (pathname === "/api/projects" && req.method === "GET") {
+        sendJson(res, 200, projects.map((p) => p.name));
+        return;
+      }
+
       // SSE events route — match before general /api/ handler
       const eventsMatch = pathname.match(/^\/api\/events\/(.+)$/);
       if (eventsMatch) {
@@ -107,6 +129,7 @@ export function createPetriServer(opts: ServerOptions): Promise<ServerResult> {
 
       // API routes
       if (pathname.startsWith("/api/")) {
+        const projectDir = resolveProjectDir(url);
         await handleApiRequest(req, res, url, projectDir, activeRuns);
         return;
       }
@@ -133,7 +156,7 @@ export function createPetriServer(opts: ServerOptions): Promise<ServerResult> {
     server.listen(port, () => {
       const addr = server.address();
       const actualPort = typeof addr === "object" && addr ? addr.port : port;
-      resolve({ server, port: actualPort, activeRuns });
+      resolve({ server, port: actualPort, activeRuns, projects });
     });
   });
 }

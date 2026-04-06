@@ -50,6 +50,25 @@ nav {
   gap: 0.25rem;
 }
 
+.project-selector {
+  margin-left: auto;
+}
+
+.project-selector select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.project-selector select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .tab {
   background: none;
   border: none;
@@ -85,11 +104,125 @@ main {
   display: block;
 }
 
-/* ── Dashboard Tab ── */
+/* ── Dashboard Tab: Overview ── */
+
+.overview-page {
+  padding: 1.5rem;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.stats-cards {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.stat-card {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+.stat-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.stat-success { color: var(--success-bright); }
+.stat-danger { color: var(--danger); }
+
+.overview-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem;
+}
+
+.overview-section h3 {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.runs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.runs-table th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 0.8rem;
+}
+
+.runs-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.runs-table tbody tr {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.runs-table tbody tr:hover {
+  background: var(--border);
+}
+
+/* ── Breadcrumb ── */
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  font-size: 0.85rem;
+}
+
+.breadcrumb-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+}
+
+.breadcrumb-link:hover {
+  text-decoration: underline;
+}
+
+.breadcrumb-sep {
+  color: var(--text-muted);
+}
+
+.breadcrumb-current {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* ── Run Detail Layout ── */
 
 .dashboard-layout {
   display: flex;
-  height: 100%;
+  height: calc(100% - 42px); /* account for breadcrumb */
 }
 
 .timeline-panel {
@@ -408,34 +541,7 @@ main {
   margin-bottom: 0.75rem;
 }
 
-#runs-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.85rem;
-}
-
-#runs-table th {
-  text-align: left;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-muted);
-  font-weight: 500;
-  font-size: 0.8rem;
-}
-
-#runs-table td {
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-}
-
-#runs-table tbody tr {
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-#runs-table tbody tr:hover {
-  background: var(--border);
-}
+/* runs-table styles are in the overview section above */
 
 .status-badge {
   display: inline-block;

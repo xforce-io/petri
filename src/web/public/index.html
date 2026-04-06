@@ -14,72 +14,107 @@
       <button class="tab" data-tab="runs">Runs</button>
       <button class="tab" data-tab="config">Config</button>
     </nav>
+    <div id="project-selector" class="project-selector" style="display:none;">
+      <select id="project-select"></select>
+    </div>
   </header>
 
   <main>
-    <!-- Dashboard Tab -->
+    <!-- Dashboard Tab: Overview -->
     <section id="tab-dashboard" class="tab-content active">
-      <div class="dashboard-layout">
-        <aside class="timeline-panel">
-          <h3>Pipeline Stages</h3>
-          <div id="stage-list" class="stage-list">
-            <p class="empty-state">No run loaded.</p>
-          </div>
-          <div id="run-summary" class="run-summary"></div>
-        </aside>
-        <div class="detail-panel">
-          <div class="sub-tabs">
-            <button class="sub-tab active" data-subtab="log">Log</button>
-            <button class="sub-tab" data-subtab="artifacts">Artifacts</button>
-            <button class="sub-tab" data-subtab="gate">Gate</button>
-          </div>
-          <div id="subtab-log" class="sub-tab-content active">
-            <pre id="log-output" class="log-output">Select a run to view logs.</pre>
-          </div>
-          <div id="subtab-artifacts" class="sub-tab-content">
-            <div id="artifacts-list" class="artifacts-list">
-              <p class="empty-state">No artifacts.</p>
-            </div>
-            <pre id="artifact-preview" class="artifact-preview"></pre>
-          </div>
-          <div id="subtab-gate" class="sub-tab-content">
-            <div id="gate-detail" class="gate-detail">
-              <p class="empty-state">Select a stage to view gate results.</p>
-            </div>
-          </div>
+      <div class="overview-page">
+        <div id="stats-cards" class="stats-cards"></div>
+        <div class="overview-section">
+          <h3>Recent Runs</h3>
+          <table id="overview-runs-table" class="runs-table">
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th>Pipeline</th>
+                <th>Status</th>
+                <th>Started</th>
+                <th>Duration</th>
+                <th>Cost</th>
+              </tr>
+            </thead>
+            <tbody id="overview-runs-tbody"></tbody>
+          </table>
+          <p id="overview-runs-empty" class="empty-state">No runs yet. Go to Runs tab to start one.</p>
         </div>
       </div>
     </section>
 
-    <!-- Runs Tab -->
+    <!-- Runs Tab: List + Detail -->
     <section id="tab-runs" class="tab-content">
-      <div class="runs-new">
-        <h3>Start New Run</h3>
-        <div class="new-run-form">
-          <label for="run-pipeline">Pipeline</label>
-          <select id="run-pipeline"></select>
-          <label for="run-input">Input</label>
-          <textarea id="run-input" rows="4" placeholder="Describe what you want to build..."></textarea>
-          <button id="run-start-btn" class="btn-primary">Run</button>
-          <div id="run-error" class="error-msg"></div>
+      <!-- Runs list view -->
+      <div id="runs-list-view">
+        <div class="runs-new">
+          <h3>Start New Run</h3>
+          <div class="new-run-form">
+            <label for="run-pipeline">Pipeline</label>
+            <select id="run-pipeline"></select>
+            <label for="run-input">Input</label>
+            <textarea id="run-input" rows="4" placeholder="Describe what you want to build..."></textarea>
+            <button id="run-start-btn" class="btn-primary">Run</button>
+            <div id="run-error" class="error-msg"></div>
+          </div>
+        </div>
+        <div class="runs-history">
+          <h3>Run History</h3>
+          <table id="runs-table" class="runs-table">
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th>Pipeline</th>
+                <th>Status</th>
+                <th>Started</th>
+                <th>Duration</th>
+                <th>Cost</th>
+              </tr>
+            </thead>
+            <tbody id="runs-tbody"></tbody>
+          </table>
+          <p id="runs-empty" class="empty-state">No runs yet.</p>
         </div>
       </div>
-      <div class="runs-history">
-        <h3>Run History</h3>
-        <table id="runs-table">
-          <thead>
-            <tr>
-              <th>Run</th>
-              <th>Pipeline</th>
-              <th>Status</th>
-              <th>Started</th>
-              <th>Duration</th>
-              <th>Cost</th>
-            </tr>
-          </thead>
-          <tbody id="runs-tbody"></tbody>
-        </table>
-        <p id="runs-empty" class="empty-state">No runs yet.</p>
+
+      <!-- Run detail view (hidden by default) -->
+      <div id="runs-detail-view" style="display:none;">
+        <div class="breadcrumb">
+          <button id="back-to-runs" class="breadcrumb-link">Runs</button>
+          <span class="breadcrumb-sep">/</span>
+          <span id="breadcrumb-run" class="breadcrumb-current"></span>
+        </div>
+        <div class="dashboard-layout">
+          <aside class="timeline-panel">
+            <h3>Pipeline Stages</h3>
+            <div id="stage-list" class="stage-list">
+              <p class="empty-state">No stages.</p>
+            </div>
+            <div id="run-summary" class="run-summary"></div>
+          </aside>
+          <div class="detail-panel">
+            <div class="sub-tabs">
+              <button class="sub-tab active" data-subtab="log">Log</button>
+              <button class="sub-tab" data-subtab="artifacts">Artifacts</button>
+              <button class="sub-tab" data-subtab="gate">Gate</button>
+            </div>
+            <div id="subtab-log" class="sub-tab-content active">
+              <pre id="log-output" class="log-output">Select a stage to view logs.</pre>
+            </div>
+            <div id="subtab-artifacts" class="sub-tab-content">
+              <div id="artifacts-list" class="artifacts-list">
+                <p class="empty-state">No artifacts.</p>
+              </div>
+              <pre id="artifact-preview" class="artifact-preview"></pre>
+            </div>
+            <div id="subtab-gate" class="sub-tab-content">
+              <div id="gate-detail" class="gate-detail">
+                <p class="empty-state">Select a stage to view gate results.</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 

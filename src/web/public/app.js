@@ -1,6 +1,8 @@
 // Petri Dashboard — Frontend Application
 
 // ── State ──
+let currentProject = null;
+let projects = [];
 let currentRunId = null;
 let currentRunData = null;
 let currentStageIndex = -1;
@@ -8,9 +10,15 @@ let eventSource = null;
 let currentConfigPath = null;
 
 // ── API Helper ──
-async function api(path, opts = {}) {
+function apiUrl(urlPath) {
+  if (!currentProject) return urlPath;
+  const sep = urlPath.includes("?") ? "&" : "?";
+  return urlPath + sep + "project=" + encodeURIComponent(currentProject);
+}
+
+async function api(urlPath, opts = {}) {
   try {
-    const res = await fetch(path, {
+    const res = await fetch(apiUrl(urlPath), {
       headers: opts.body ? { "Content-Type": "application/json" } : {},
       ...opts,
     });
@@ -47,39 +55,38 @@ function formatTime(iso) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+function formatDate(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 function formatCost(usd) {
   if (usd == null) return "-";
   return "$" + usd.toFixed(4);
 }
 
-function $(sel) {
-  return document.querySelector(sel);
-}
+function $(sel) { return document.querySelector(sel); }
+function $$(sel) { return document.querySelectorAll(sel); }
 
-function $$(sel) {
-  return document.querySelectorAll(sel);
-}
-
-// ── Tab Switching ──
+// ── Init ──
 document.addEventListener("DOMContentLoaded", () => {
-  const tabs = $$(".tab");
-  const contents = $$(".tab-content");
-
-  tabs.forEach((tab) => {
+  // Main tab switching
+  $$(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
       const target = tab.dataset.tab;
-      tabs.forEach((t) => t.classList.remove("active"));
-      contents.forEach((c) => c.classList.remove("active"));
+      $$(".tab").forEach((t) => t.classList.remove("active"));
+      $$(".tab-content").forEach((c) => c.classList.remove("active"));
       tab.classList.add("active");
       document.getElementById("tab-" + target)?.classList.add("active");
 
-      // Load data on tab activation
+      if (target === "dashboard") loadDashboard();
       if (target === "runs") loadRunsTab();
       if (target === "config") loadConfigTab();
     });
   });
 
-  // Sub-tab switching
+  // Sub-tab switching (detail panel)
   $$(".sub-tab").forEach((st) => {
     st.addEventListener("click", () => {
       const target = st.dataset.subtab;
@@ -96,33 +103,217 @@ document.addEventListener("DOMContentLoaded", () => {
   // Save button
   $("#editor-save-btn").addEventListener("click", saveConfigFile);
 
-  // Load dashboard on startup
-  loadDashboard();
+  // Back to runs list
+  $("#back-to-runs").addEventListener("click", showRunsList);
+
+  // Load projects then dashboard
+  loadProjects();
 });
 
-// ── Dashboard Tab ──
+// ── Project Selector ──
+async function loadProjects() {
+  const res = await fetch("/api/projects");
+  if (res.ok) projects = await res.json();
 
-async function loadDashboard(runId) {
-  if (runId) {
-    await loadRun(runId);
-    return;
+  if (projects.length > 1) {
+    const selector = $("#project-selector");
+    const select = $("#project-select");
+    selector.style.display = "";
+    select.innerHTML = projects.map((p) =>
+      `<option value="${escAttr(p)}">${escHtml(p)}</option>`
+    ).join("");
+    currentProject = projects[0];
+    select.addEventListener("change", () => {
+      currentProject = select.value;
+      resetState();
+      loadDashboard();
+    });
+  } else if (projects.length === 1) {
+    currentProject = projects[0];
   }
 
-  // Load latest run
+  loadDashboard();
+}
+
+function resetState() {
+  currentRunId = null;
+  currentRunData = null;
+  currentStageIndex = -1;
+  currentConfigPath = null;
+  if (eventSource) { eventSource.close(); eventSource = null; }
+}
+
+// ══════════════════════════════════════
+// ── Dashboard Tab: Overview
+// ══════════════════════════════════════
+
+async function loadDashboard() {
   const res = await api("/api/runs");
-  if (res.status === 200 && Array.isArray(res.data) && res.data.length > 0) {
-    // Sort by startedAt descending, pick latest
-    const sorted = res.data.sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
-    await loadRun(sorted[0].runId);
+  const runs = (res.status === 200 && Array.isArray(res.data)) ? res.data : [];
+
+  // Stats cards
+  const total = runs.length;
+  const done = runs.filter((r) => r.status === "done").length;
+  const blocked = runs.filter((r) => r.status === "blocked").length;
+  const running = runs.filter((r) => r.status === "running").length;
+  const totalCost = runs.reduce((sum, r) => sum + (r.totalUsage?.costUsd || 0), 0);
+  const successRate = total > 0 ? Math.round((done / total) * 100) : 0;
+
+  $("#stats-cards").innerHTML = `
+    <div class="stat-card">
+      <div class="stat-value">${total}</div>
+      <div class="stat-label">Total Runs</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value stat-success">${successRate}%</div>
+      <div class="stat-label">Success Rate</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${running}</div>
+      <div class="stat-label">Running</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${formatCost(totalCost)}</div>
+      <div class="stat-label">Total Cost</div>
+    </div>
+  `;
+
+  // Recent runs table (latest 10)
+  const sorted = runs.sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
+  const recent = sorted.slice(0, 10);
+  const tbody = $("#overview-runs-tbody");
+  const emptyMsg = $("#overview-runs-empty");
+
+  if (recent.length > 0) {
+    emptyMsg.style.display = "none";
+    $("#overview-runs-table").style.display = "table";
+    tbody.innerHTML = recent.map((r) => renderRunRow(r)).join("");
+    tbody.querySelectorAll("tr").forEach((row) => {
+      row.addEventListener("click", () => openRunDetail(row.dataset.runid));
+    });
   } else {
-    $("#stage-list").innerHTML = '<p class="empty-state">No runs found. Start one from the Runs tab.</p>';
-    $("#run-summary").innerHTML = "";
-    $("#log-output").textContent = "No run loaded.";
+    emptyMsg.style.display = "block";
+    $("#overview-runs-table").style.display = "none";
+    tbody.innerHTML = "";
   }
 }
 
+// ══════════════════════════════════════
+// ── Runs Tab: List + Detail
+// ══════════════════════════════════════
+
+function showRunsList() {
+  currentRunId = null;
+  currentRunData = null;
+  currentStageIndex = -1;
+  if (eventSource) { eventSource.close(); eventSource = null; }
+  $("#runs-list-view").style.display = "";
+  $("#runs-detail-view").style.display = "none";
+  loadRunsTab();
+}
+
+function openRunDetail(runId) {
+  // Switch to Runs tab if not already there
+  switchToTab("runs");
+  $("#runs-list-view").style.display = "none";
+  $("#runs-detail-view").style.display = "";
+  loadRun(runId);
+}
+
+async function loadRunsTab() {
+  // Make sure we're on list view
+  if (currentRunId) return; // detail view is showing, don't overwrite
+
+  // Populate pipeline dropdown
+  const configRes = await api("/api/config/files");
+  const pipelineSelect = $("#run-pipeline");
+  if (configRes.status === 200 && Array.isArray(configRes.data)) {
+    const pipelineFiles = configRes.data.filter((f) =>
+      typeof f === "string" ? f.match(/pipeline.*\.yaml$/i) : (f.path || "").match(/pipeline.*\.yaml$/i)
+    );
+    pipelineSelect.innerHTML = pipelineFiles.map((f) => {
+      const p = typeof f === "string" ? f : f.path;
+      return `<option value="${escAttr(p)}">${escHtml(p)}</option>`;
+    }).join("");
+    if (pipelineFiles.length === 0) {
+      pipelineSelect.innerHTML = '<option value="">No pipelines found</option>';
+    }
+  }
+
+  // Load run history
+  const runsRes = await api("/api/runs");
+  const tbody = $("#runs-tbody");
+  const emptyMsg = $("#runs-empty");
+
+  if (runsRes.status === 200 && Array.isArray(runsRes.data) && runsRes.data.length > 0) {
+    const runs = runsRes.data.sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
+    emptyMsg.style.display = "none";
+    $("#runs-table").style.display = "table";
+    tbody.innerHTML = runs.map((r) => renderRunRow(r)).join("");
+    tbody.querySelectorAll("tr").forEach((row) => {
+      row.addEventListener("click", () => openRunDetail(row.dataset.runid));
+    });
+  } else {
+    emptyMsg.style.display = "block";
+    $("#runs-table").style.display = "none";
+    tbody.innerHTML = "";
+  }
+}
+
+function renderRunRow(r) {
+  const usage = r.totalUsage || {};
+  return `
+    <tr data-runid="${escAttr(r.runId)}">
+      <td>run-${escHtml(r.runId)}</td>
+      <td>${escHtml(r.pipeline)}</td>
+      <td><span class="status-badge ${r.status}">${escHtml(r.status)}</span></td>
+      <td>${formatDate(r.startedAt)}</td>
+      <td>${formatDuration(r.durationMs)}</td>
+      <td>${formatCost(usage.costUsd)}</td>
+    </tr>
+  `;
+}
+
+async function startNewRun() {
+  const btn = $("#run-start-btn");
+  const errorEl = $("#run-error");
+  const pipeline = $("#run-pipeline").value;
+  const input = $("#run-input").value.trim();
+
+  errorEl.textContent = "";
+  if (!input) { errorEl.textContent = "Input is required."; return; }
+
+  btn.disabled = true;
+  btn.textContent = "Starting...";
+
+  const body = { input };
+  if (pipeline) body.pipeline = pipeline;
+
+  const res = await api("/api/runs", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+  btn.disabled = false;
+  btn.textContent = "Run";
+
+  if (res.status === 200 && res.data.runId) {
+    $("#run-input").value = "";
+    openRunDetail(res.data.runId);
+  } else {
+    errorEl.textContent = res.data.error || "Failed to start run.";
+  }
+}
+
+// ══════════════════════════════════════
+// ── Run Detail (inside Runs tab)
+// ══════════════════════════════════════
+
 async function loadRun(runId) {
   currentRunId = runId;
+
+  // Update breadcrumb
+  $("#breadcrumb-run").textContent = `run-${runId}`;
 
   const res = await api("/api/runs/" + runId);
   if (res.status !== 200) {
@@ -142,7 +333,6 @@ async function loadRun(runId) {
     loadRunLog();
   }
 
-  // Connect SSE if run is active
   connectSSE(runId);
 }
 
@@ -169,20 +359,18 @@ function renderStageList() {
   }).join("");
 
   list.querySelectorAll(".stage-item").forEach((el) => {
-    el.addEventListener("click", () => {
-      selectStage(parseInt(el.dataset.index, 10));
-    });
+    el.addEventListener("click", () => selectStage(parseInt(el.dataset.index, 10)));
   });
 }
 
 function renderRunSummary() {
   const r = currentRunData;
   const usage = r.totalUsage || {};
+  const statusClass = r.status === "done" ? "stat-success" : r.status === "blocked" ? "stat-danger" : "";
   $("#run-summary").innerHTML = `
-    <div><span class="label">Run:</span> ${escHtml(r.runId)}</div>
     <div><span class="label">Pipeline:</span> ${escHtml(r.pipeline)}</div>
-    <div><span class="label">Status:</span> ${escHtml(r.status)}</div>
-    <div><span class="label">Started:</span> ${formatTime(r.startedAt)}</div>
+    <div><span class="label">Status:</span> <span class="${statusClass}">${escHtml(r.status)}</span></div>
+    <div><span class="label">Started:</span> ${formatDate(r.startedAt)}</div>
     <div><span class="label">Duration:</span> ${formatDuration(r.durationMs)}</div>
     <div><span class="label">Tokens:</span> ${(usage.inputTokens || 0) + (usage.outputTokens || 0)}</div>
     <div><span class="label">Cost:</span> ${formatCost(usage.costUsd)}</div>
@@ -191,12 +379,7 @@ function renderRunSummary() {
 
 function selectStage(index) {
   currentStageIndex = index;
-
-  // Update active highlight
-  $$(".stage-item").forEach((el, i) => {
-    el.classList.toggle("active", i === index);
-  });
-
+  $$(".stage-item").forEach((el, i) => el.classList.toggle("active", i === index));
   loadRunLog();
   loadStageArtifacts();
   renderGateDetail();
@@ -204,11 +387,36 @@ function selectStage(index) {
 
 async function loadRunLog() {
   const res = await api("/api/runs/" + currentRunId + "/log");
-  if (res.status === 200) {
-    $("#log-output").textContent = res.data;
-  } else {
+  if (res.status !== 200) {
     $("#log-output").textContent = "Failed to load log.";
+    return;
   }
+
+  const stage = currentRunData.stages?.[currentStageIndex];
+  if (!stage) {
+    $("#log-output").textContent = res.data;
+    return;
+  }
+
+  // Filter log lines relevant to the selected stage
+  const lines = res.data.split("\n");
+  const filtered = [];
+  let inStage = false;
+  const stageHeader = `Stage "${stage.stage}"`;
+  const stagePrefix = `  ${stage.stage}/`;
+
+  for (const line of lines) {
+    if (line.includes(stageHeader)) {
+      inStage = true;
+      filtered.push(line);
+    } else if (inStage && (line.includes(stagePrefix) || line.includes("  Gate [") || line.includes("  artifacts:"))) {
+      filtered.push(line);
+    } else if (inStage && line.match(/\] Stage "/) && !line.includes(stageHeader)) {
+      inStage = false;
+    }
+  }
+
+  $("#log-output").textContent = filtered.length > 0 ? filtered.join("\n") : `No log entries for stage "${stage.stage}".`;
 }
 
 async function loadStageArtifacts() {
@@ -221,12 +429,11 @@ async function loadStageArtifacts() {
     return;
   }
 
-  // Filter artifacts for current stage if possible
-  const stage = currentRunData.stages[currentStageIndex];
+  const stage = currentRunData.stages?.[currentStageIndex];
   let artifacts = res.data;
-  if (stage && stage.artifacts && stage.artifacts.length > 0) {
-    const stageArtifactSet = new Set(stage.artifacts);
-    const filtered = artifacts.filter((a) => stageArtifactSet.has(a.path));
+  if (stage) {
+    const prefix = stage.stage + "/" + (stage.role || "");
+    const filtered = artifacts.filter((a) => a.path.startsWith(prefix));
     if (filtered.length > 0) artifacts = filtered;
   }
 
@@ -270,18 +477,10 @@ function renderGateDetail() {
 }
 
 function connectSSE(runId) {
-  // Close any existing connection
-  if (eventSource) {
-    eventSource.close();
-    eventSource = null;
-  }
+  if (eventSource) { eventSource.close(); eventSource = null; }
+  if (currentRunData && (currentRunData.status === "done" || currentRunData.status === "blocked")) return;
 
-  // Only connect if run might be active
-  if (currentRunData && (currentRunData.status === "done" || currentRunData.status === "blocked")) {
-    return;
-  }
-
-  eventSource = new EventSource("/api/events/" + runId);
+  eventSource = new EventSource(apiUrl("/api/events/" + runId));
   const logEl = $("#log-output");
 
   eventSource.onmessage = (event) => {
@@ -292,136 +491,32 @@ function connectSSE(runId) {
         logEl.textContent += "\n" + line;
         logEl.scrollTop = logEl.scrollHeight;
       }
-
-      // Refresh run data on run-end
       if (data.type === "run-end") {
         eventSource.close();
         eventSource = null;
         loadRun(runId);
       }
-    } catch (e) {
-      // ignore parse errors
-    }
+    } catch (e) { /* ignore */ }
   };
 
-  eventSource.onerror = () => {
-    eventSource.close();
-    eventSource = null;
-  };
+  eventSource.onerror = () => { eventSource.close(); eventSource = null; };
 }
 
 function formatSSEEvent(data) {
+  const ts = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   switch (data.type) {
-    case "stage-start":
-      return `[Stage] ${data.stage} started`;
-    case "role-start":
-      return `[Role] ${data.role} started (model: ${data.model || "?"})`;
-    case "role-end":
-      return `[Role] ${data.role} finished (${formatDuration(data.durationMs)})`;
-    case "gate-result":
-      return `[Gate] ${data.stage}: ${data.passed ? "PASSED" : "FAILED"} — ${data.reason || ""}`;
-    case "run-end":
-      return `[Run] Finished — ${data.status}`;
-    default:
-      return `[${data.type}] ${JSON.stringify(data)}`;
+    case "stage-start": return `[${ts}] Stage "${data.stage}" attempt ${data.attempt}/${data.max}`;
+    case "role-start": return `[${ts}] ${data.stage}/${data.role} — model: ${data.model || "?"}`;
+    case "role-end": return `[${ts}] ${data.stage}/${data.role} done (${formatDuration(data.durationMs)})`;
+    case "gate-result": return `[${ts}] Gate [${data.passed ? "PASS" : "FAIL"}]: ${data.reason || ""}`;
+    case "run-end": return `[${ts}] Run finished — ${data.status}`;
+    default: return null;
   }
 }
 
-// ── Runs Tab ──
-
-async function loadRunsTab() {
-  // Populate pipeline dropdown
-  const configRes = await api("/api/config/files");
-  const pipelineSelect = $("#run-pipeline");
-
-  if (configRes.status === 200 && Array.isArray(configRes.data)) {
-    const pipelineFiles = configRes.data.filter((f) =>
-      typeof f === "string" ? f.match(/pipeline.*\.yaml$/i) : (f.path || "").match(/pipeline.*\.yaml$/i)
-    );
-    pipelineSelect.innerHTML = pipelineFiles.map((f) => {
-      const path = typeof f === "string" ? f : f.path;
-      return `<option value="${escAttr(path)}">${escHtml(path)}</option>`;
-    }).join("");
-
-    if (pipelineFiles.length === 0) {
-      pipelineSelect.innerHTML = '<option value="">No pipelines found</option>';
-    }
-  }
-
-  // Load run history
-  const runsRes = await api("/api/runs");
-  const tbody = $("#runs-tbody");
-  const emptyMsg = $("#runs-empty");
-
-  if (runsRes.status === 200 && Array.isArray(runsRes.data) && runsRes.data.length > 0) {
-    const runs = runsRes.data.sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
-    emptyMsg.style.display = "none";
-    $("#runs-table").style.display = "table";
-
-    tbody.innerHTML = runs.map((r) => {
-      const usage = r.totalUsage || {};
-      return `
-        <tr data-runid="${escAttr(r.runId)}">
-          <td>${escHtml(r.runId)}</td>
-          <td>${escHtml(r.pipeline)}</td>
-          <td><span class="status-badge ${r.status}">${escHtml(r.status)}</span></td>
-          <td>${formatTime(r.startedAt)}</td>
-          <td>${formatDuration(r.durationMs)}</td>
-          <td>${formatCost(usage.costUsd)}</td>
-        </tr>
-      `;
-    }).join("");
-
-    tbody.querySelectorAll("tr").forEach((row) => {
-      row.addEventListener("click", () => {
-        switchToTab("dashboard");
-        loadDashboard(row.dataset.runid);
-      });
-    });
-  } else {
-    emptyMsg.style.display = "block";
-    $("#runs-table").style.display = "none";
-    tbody.innerHTML = "";
-  }
-}
-
-async function startNewRun() {
-  const btn = $("#run-start-btn");
-  const errorEl = $("#run-error");
-  const pipeline = $("#run-pipeline").value;
-  const input = $("#run-input").value.trim();
-
-  errorEl.textContent = "";
-
-  if (!input) {
-    errorEl.textContent = "Input is required.";
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = "Starting...";
-
-  const body = { input };
-  if (pipeline) body.pipeline = pipeline;
-
-  const res = await api("/api/runs", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-
-  btn.disabled = false;
-  btn.textContent = "Run";
-
-  if (res.status === 200 && res.data.runId) {
-    $("#run-input").value = "";
-    switchToTab("dashboard");
-    loadDashboard(res.data.runId);
-  } else {
-    errorEl.textContent = res.data.error || "Failed to start run.";
-  }
-}
-
-// ── Config Tab ──
+// ══════════════════════════════════════
+// ── Config Tab
+// ══════════════════════════════════════
 
 async function loadConfigTab() {
   const res = await api("/api/config/files");
@@ -433,8 +528,6 @@ async function loadConfigTab() {
   }
 
   const files = res.data.map((f) => (typeof f === "string" ? f : f.path));
-
-  // Group by directory
   const groups = {};
   files.forEach((f) => {
     const parts = f.split("/");
@@ -443,7 +536,6 @@ async function loadConfigTab() {
     groups[dir].push(f);
   });
 
-  // Sort directories: root first, then alphabetically
   const sortedDirs = Object.keys(groups).sort((a, b) => {
     if (a === ".") return -1;
     if (b === ".") return 1;
@@ -462,7 +554,6 @@ async function loadConfigTab() {
   }
 
   tree.innerHTML = html;
-
   tree.querySelectorAll(".file-item").forEach((el) => {
     el.addEventListener("click", () => {
       loadConfigFile(el.dataset.path);
@@ -497,7 +588,6 @@ async function loadConfigFile(filePath) {
 
 async function saveConfigFile() {
   if (!currentConfigPath) return;
-
   const saveBtn = $("#editor-save-btn");
   const statusEl = $("#editor-status");
   const content = $("#editor-content").value;
@@ -512,7 +602,6 @@ async function saveConfigFile() {
   });
 
   saveBtn.disabled = false;
-
   if (res.status === 200) {
     statusEl.textContent = "Saved";
     statusEl.className = "editor-status success";
@@ -522,7 +611,9 @@ async function saveConfigFile() {
   }
 }
 
-// ── Utilities ──
+// ══════════════════════════════════════
+// ── Utilities
+// ══════════════════════════════════════
 
 function switchToTab(tabName) {
   $$(".tab").forEach((t) => t.classList.remove("active"));
@@ -536,6 +627,4 @@ function escHtml(str) {
   return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function escAttr(str) {
-  return escHtml(str);
-}
+function escAttr(str) { return escHtml(str); }

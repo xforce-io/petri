@@ -98,14 +98,98 @@ export async function handleApiRequest(
   sendJson(res, 404, { error: "Not found" });
 }
 
+function parseStagesFromLog(logText: string): Array<{
+  stage: string; role: string; model: string; gatePassed: boolean;
+  gateReason: string; durationMs: number; artifacts: string[];
+  usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
+}> {
+  const stages: Array<{
+    stage: string; role: string; model: string; gatePassed: boolean;
+    gateReason: string; durationMs: number; artifacts: string[];
+    usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
+  }> = [];
+
+  // Match lines like: "  stage/role done in 12.3s | tokens: 100in+50out | cost: $0.0010"
+  const doneRegex = /(\S+)\/(\S+) done in ([\d.]+)s(?:\s*\|\s*tokens:\s*(\d+)in\+(\d+)out\s*\|\s*cost:\s*\$([\d.]+))?/g;
+  let match;
+  while ((match = doneRegex.exec(logText)) !== null) {
+    const [, stage, role, durStr, tokIn, tokOut, cost] = match;
+    stages.push({
+      stage, role, model: "",
+      gatePassed: false, gateReason: "",
+      durationMs: Math.round(parseFloat(durStr) * 1000),
+      artifacts: [],
+      usage: tokIn ? { inputTokens: parseInt(tokIn), outputTokens: parseInt(tokOut), costUsd: cost ? parseFloat(cost) : undefined } : undefined,
+    });
+  }
+
+  // Match model from "  stage/role — model: xxx"
+  const modelRegex = /(\S+)\/(\S+) — model: (\S+)/g;
+  while ((match = modelRegex.exec(logText)) !== null) {
+    const [, stage, role, model] = match;
+    const entry = stages.find((s) => s.stage === stage && s.role === role && !s.model);
+    if (entry) entry.model = model;
+  }
+
+  // Match gate results: "  Gate [PASS]: reason" or "  Gate [FAIL]: reason"
+  const gateRegex = /Gate \[(PASS|FAIL)\]: (.+)/g;
+  let gateIdx = 0;
+  // Gate results appear after stage completions — map sequentially
+  const stageNames = [...new Set(stages.map((s) => s.stage))];
+  while ((match = gateRegex.exec(logText)) !== null) {
+    const [, result, reason] = match;
+    const passed = result === "PASS";
+    const stageName = stageNames[gateIdx];
+    if (stageName) {
+      for (const s of stages) {
+        if (s.stage === stageName && !s.gateReason) {
+          s.gatePassed = passed;
+          s.gateReason = reason;
+        }
+      }
+      gateIdx++;
+    }
+  }
+
+  return stages;
+}
+
+function makeRunningStub(runDir: string, runId: string): object | null {
+  const logPath = path.join(runDir, "run.log");
+  if (!fs.existsSync(logPath)) return null;
+  const logText = fs.readFileSync(logPath, "utf-8");
+  const pipelineMatch = logText.match(/Pipeline: (.+)/);
+  const startMatch = logText.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/m);
+
+  const stages = parseStagesFromLog(logText);
+  let totalIn = 0, totalOut = 0, totalCost = 0;
+  for (const s of stages) {
+    if (s.usage) {
+      totalIn += s.usage.inputTokens;
+      totalOut += s.usage.outputTokens;
+      totalCost += s.usage.costUsd ?? 0;
+    }
+  }
+
+  return {
+    runId,
+    pipeline: pipelineMatch?.[1] ?? "unknown",
+    status: "running",
+    startedAt: startMatch?.[1] ?? new Date().toISOString(),
+    stages,
+    totalUsage: { inputTokens: totalIn, outputTokens: totalOut, costUsd: totalCost },
+  };
+}
+
 function handleListRuns(res: http.ServerResponse, projectDir: string): void {
   const runsDir = path.join(projectDir, ".petri", "runs");
   const runNames = listRuns(runsDir);
   const runs = runNames.map((name) => {
     const runDir = path.join(runsDir, name);
+    const runId = name.replace("run-", "");
     const log = loadRunLog(runDir);
     if (!log) {
-      return { runId: name.replace("run-", ""), dir: name, status: "unknown" };
+      return makeRunningStub(runDir, runId) ?? { runId, status: "unknown" };
     }
     return log;
   });
@@ -115,11 +199,17 @@ function handleListRuns(res: http.ServerResponse, projectDir: string): void {
 function handleRunDetail(res: http.ServerResponse, projectDir: string, id: string): void {
   const runDir = path.join(projectDir, ".petri", "runs", `run-${id}`);
   const log = loadRunLog(runDir);
-  if (!log) {
-    sendJson(res, 404, { error: "Run not found" });
+  if (log) {
+    sendJson(res, 200, log);
     return;
   }
-  sendJson(res, 200, log);
+  // Run might be in progress (no run.json yet)
+  const stub = makeRunningStub(runDir, id);
+  if (stub) {
+    sendJson(res, 200, stub);
+    return;
+  }
+  sendJson(res, 404, { error: "Run not found" });
 }
 
 function handleRunLog(res: http.ServerResponse, projectDir: string, id: string): void {
