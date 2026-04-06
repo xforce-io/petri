@@ -357,12 +357,15 @@ function renderStageList() {
 
   list.innerHTML = stages.map((s, i) => {
     const dotClass = s.gatePassed === true ? "passed" : s.gatePassed === false ? "failed" : "pending";
+    const usage = s.usage || {};
+    const costStr = usage.costUsd ? ` · ${formatCost(usage.costUsd)}` : "";
+    const modelStr = s.model ? ` · ${s.model}` : "";
     return `
       <div class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}</div>
-          <div class="stage-meta">${escHtml(s.role || "")} &middot; ${formatDuration(s.durationMs)}</div>
+          <div class="stage-meta">${escHtml(s.role || "")}${modelStr} · ${formatDuration(s.durationMs)}${costStr}</div>
         </div>
       </div>
     `;
@@ -509,11 +512,18 @@ function renderGateDetail() {
   const statusClass = passed === true ? "passed" : passed === false ? "failed" : "pending";
   const statusText = passed === true ? "Passed" : passed === false ? "Failed" : "Pending";
 
+  const usage = stage.usage || {};
+  const tokenTotal = (usage.inputTokens || 0) + (usage.outputTokens || 0);
+
   gate.innerHTML = `
     <div class="gate-card">
       <div class="gate-status ${statusClass}">${statusText}</div>
       <div><strong>Stage:</strong> ${escHtml(stage.stage)}</div>
       <div><strong>Role:</strong> ${escHtml(stage.role || "-")}</div>
+      <div><strong>Model:</strong> ${escHtml(stage.model || "-")}</div>
+      <div><strong>Duration:</strong> ${formatDuration(stage.durationMs)}</div>
+      <div><strong>Tokens:</strong> ${usage.inputTokens || 0} in + ${usage.outputTokens || 0} out = ${tokenTotal}</div>
+      <div><strong>Cost:</strong> ${formatCost(usage.costUsd)}</div>
       ${stage.gateReason ? `<div class="gate-reason">${escHtml(stage.gateReason)}</div>` : ""}
     </div>
   `;

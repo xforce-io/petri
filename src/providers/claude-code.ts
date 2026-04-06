@@ -58,6 +58,14 @@ export class ClaudeCodeProvider implements AgentProvider {
       output = e.stdout ?? "";
     }
 
+    // Detect rate limit / quota errors — abort immediately instead of wasting iterations
+    if (output.includes("hit your limit") || output.includes("rate limit") || output.includes("quota exceeded")) {
+      const msg = `[claude-code] RATE LIMITED: API quota exhausted. Pipeline cannot continue. Output: ${output.slice(0, 300)}`;
+      console.error(`  ${msg}`);
+      writeFileSync(join(config.artifactDir, "_error.txt"), msg, "utf-8");
+      throw new Error(msg);
+    }
+
     // Parse JSON output — Claude Code returns { type, result, total_cost_usd, usage: {...} }
     let usage: AgentResult["usage"];
     try {
@@ -71,10 +79,19 @@ export class ClaudeCodeProvider implements AgentProvider {
         costUsd: totalCost,
       };
       if (parsed.result) {
+        // Also check result text for rate limit messages
+        if (parsed.result.includes("hit your limit") || parsed.result.includes("rate limit")) {
+          const msg = `[claude-code] RATE LIMITED: ${parsed.result.slice(0, 300)}`;
+          console.error(`  ${msg}`);
+          writeFileSync(join(config.artifactDir, "_error.txt"), msg, "utf-8");
+          throw new Error(msg);
+        }
         console.log(`  [claude-code] Result: ${parsed.result.slice(0, 150)}...`);
         writeFileSync(join(config.artifactDir, "_result.md"), parsed.result, "utf-8");
       }
-    } catch {
+    } catch (e) {
+      // Re-throw rate limit errors
+      if (e instanceof Error && e.message.includes("RATE LIMITED")) throw e;
       // non-JSON output is fine, agent still may have written files
     }
 
