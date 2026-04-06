@@ -352,6 +352,86 @@ describe("Engine", () => {
     expect(result.reason).toMatch(/timed out|timeout|Stagnation/i);
   }, 10_000);
 
+  it("runs nested repeat blocks", async () => {
+    const innerGate: GateConfig = {
+      id: "inner-done",
+      evidence: {
+        path: "{stage}/{role}/output.json",
+        check: { field: "inner_done", equals: true },
+      },
+    };
+    const outerGate: GateConfig = {
+      id: "outer-done",
+      evidence: {
+        path: "{stage}/{role}/output.json",
+        check: { field: "outer_done", equals: true },
+      },
+    };
+    const roles: Record<string, LoadedRole> = {
+      inner_worker: makeRole("inner_worker", innerGate),
+      outer_checker: makeRole("outer_checker", outerGate),
+    };
+
+    let innerCallCount = 0;
+    let outerCallCount = 0;
+    const provider = createStubProvider((config) => {
+      if (config.persona === "inner_worker persona") {
+        innerCallCount++;
+        const dir = path.join(tmpDir, "inner_step", "inner_worker");
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(
+          path.join(dir, "output.json"),
+          JSON.stringify({ inner_done: innerCallCount % 2 === 0 }),
+        );
+      } else {
+        outerCallCount++;
+        const dir = path.join(tmpDir, "outer_check", "outer_checker");
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(
+          path.join(dir, "output.json"),
+          JSON.stringify({ outer_done: outerCallCount >= 2 }),
+        );
+      }
+    });
+
+    const pipeline: PipelineConfig = {
+      name: "test-nested",
+      stages: [
+        {
+          repeat: {
+            name: "outer",
+            max_iterations: 5,
+            until: "outer-done",
+            stages: [
+              {
+                repeat: {
+                  name: "inner",
+                  max_iterations: 5,
+                  until: "inner-done",
+                  stages: [
+                    { name: "inner_step", roles: ["inner_worker"], max_retries: 0 },
+                  ],
+                },
+              },
+              { name: "outer_check", roles: ["outer_checker"], max_retries: 0 },
+            ],
+          },
+        },
+      ],
+    };
+
+    const engine = new Engine({
+      provider,
+      roles,
+      artifactBaseDir: tmpDir,
+    });
+
+    const result = await engine.run(pipeline, "Nested iterate");
+    expect(result.status).toBe("done");
+    expect(outerCallCount).toBe(2);
+    expect(innerCallCount).toBe(4);
+  });
+
   it("runs a repeat block", async () => {
     // Gate checks {stage}/{role}/output.json with field target_met === true
     const gate: GateConfig = {

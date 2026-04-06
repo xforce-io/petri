@@ -27,7 +27,7 @@ export interface RepeatBlock {
     name: string;
     max_iterations: number;
     until: string;  // gate id to check
-    stages: StageConfig[];
+    stages: StageEntry[];
   };
 }
 

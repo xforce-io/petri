@@ -299,7 +299,7 @@ export class Engine {
   }
 
   private async runRepeatBlock(
-    block: { name: string; max_iterations: number; until: string; stages: StageConfig[] },
+    block: { name: string; max_iterations: number; until: string; stages: import("../types.js").StageEntry[] },
     input: string,
     manifest: ArtifactManifest,
   ): Promise<RunResult> {
@@ -308,18 +308,19 @@ export class Engine {
 
       let untilGateNotMet = false;
 
-      // Run inner stages sequentially
-      for (const stage of block.stages) {
-        const result = await this.runStage(stage, input, manifest);
+      for (const entry of block.stages) {
+        let result: RunResult;
+        if (isRepeatBlock(entry)) {
+          result = await this.runRepeatBlock(entry.repeat, input, manifest);
+        } else {
+          result = await this.runStage(entry, input, manifest);
+        }
         if (result.status === "blocked") {
-          // If the until gate was evaluated and failed, this means "goal not yet met"
-          // — break out of inner stages and continue to the next iteration
           const untilGate = this.gateResults.get(block.until);
           if (untilGate && !untilGate.passed) {
             untilGateNotMet = true;
             break;
           }
-          // Otherwise it's an unrelated stage failure — truly blocked
           return result;
         }
       }
@@ -328,7 +329,6 @@ export class Engine {
         continue;
       }
 
-      // Check until condition: look up gate id from registry
       const gateDetail = this.gateResults.get(block.until);
       if (gateDetail?.passed) {
         return { status: "done" };
