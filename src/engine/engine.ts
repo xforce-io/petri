@@ -74,6 +74,10 @@ export class Engine {
         if (name === this.skipTo) {
           skipping = false;
           console.log(`  Resuming from "${name}"...`);
+        } else if (isRepeatBlock(entry) && this.containsStage(entry.repeat.stages, this.skipTo!)) {
+          // Target is inside this repeat block — enter it, let runRepeatBlock handle skipping
+          skipping = false;
+          console.log(`  Entering "${name}" to find "${this.skipTo}"...`);
         } else {
           console.log(`  Skipping "${name}" (resume mode)`);
           continue;
@@ -103,6 +107,15 @@ export class Engine {
     }
 
     return { status: "done" };
+  }
+
+  private containsStage(stages: import("../types.js").StageEntry[], target: string): boolean {
+    for (const entry of stages) {
+      const name = isRepeatBlock(entry) ? entry.repeat.name : entry.name;
+      if (name === target) return true;
+      if (isRepeatBlock(entry) && this.containsStage(entry.repeat.stages, target)) return true;
+    }
+    return false;
   }
 
   private checkRequirements(): Array<{ id: string; met: boolean; reason: string }> {
@@ -324,12 +337,30 @@ export class Engine {
     input: string,
     manifest: ArtifactManifest,
   ): Promise<RunResult> {
+    // Only skip on the first iteration — after that run normally
+    let skippingInner = !!this.skipTo && this.containsStage(block.stages, this.skipTo);
+
     for (let iteration = 0; iteration < block.max_iterations; iteration++) {
       console.log(`  Repeat "${block.name}" iteration ${iteration + 1}/${block.max_iterations}...`);
 
       let untilGateNotMet = false;
 
       for (const entry of block.stages) {
+        // Skip-to support inside repeat blocks
+        if (this.skipTo && skippingInner) {
+          const name = isRepeatBlock(entry) ? entry.repeat.name : entry.name;
+          if (name === this.skipTo) {
+            skippingInner = false;
+            console.log(`  Resuming from "${name}"...`);
+          } else if (isRepeatBlock(entry) && this.containsStage(entry.repeat.stages, this.skipTo)) {
+            skippingInner = false;
+            console.log(`  Entering "${name}" to find "${this.skipTo}"...`);
+          } else {
+            console.log(`  Skipping "${name}" (resume mode)`);
+            continue;
+          }
+        }
+
         let result: RunResult;
         if (isRepeatBlock(entry)) {
           result = await this.runRepeatBlock(entry.repeat, input, manifest);
@@ -345,6 +376,9 @@ export class Engine {
           return result;
         }
       }
+
+      // After first iteration, stop skipping
+      skippingInner = false;
 
       if (untilGateNotMet) {
         continue;
