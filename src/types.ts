@@ -47,15 +47,22 @@ export interface RoleConfig {
 
 // --- Gate ---
 
+export interface GateCheck {
+  field: string;
+  equals?: unknown;
+  gte?: number;
+  lte?: number;
+  gt?: number;
+  lt?: number;
+  in?: unknown[];
+}
+
 export interface GateConfig {
   id: string;          // canonical gate id, e.g. "tests-pass"
   description?: string;
   evidence: {
     path: string;
-    check?: {
-      field: string;
-      equals?: unknown;
-    };
+    check?: GateCheck;
   };
 }
 
