@@ -195,9 +195,56 @@ describe("Petri Web Server", () => {
   });
 
   describe("POST /api/runs", () => {
-    it("returns 501 placeholder", async () => {
+    it("returns 400 for missing input", async () => {
       const res = await request(result.port, "/api/runs", "POST", "{}");
-      expect(res.status).toBe(501);
+      expect(res.status).toBe(400);
+      const data = JSON.parse(res.body);
+      expect(data.error).toContain("input");
+    });
+
+    it("returns 400 for invalid JSON", async () => {
+      const res = await request(result.port, "/api/runs", "POST", "not-json");
+      expect(res.status).toBe(400);
+    });
+
+    it("starts a run and returns runId", async () => {
+      // Set up a minimal project with proper petri.yaml (with defaults) and
+      // an empty pipeline so the engine finishes immediately without calling any provider.
+      fs.writeFileSync(
+        path.join(tmpDir, "petri.yaml"),
+        [
+          "providers:",
+          "  claude_code:",
+          "    type: claude_code",
+          "defaults:",
+          "  model: sonnet",
+          "  gate_strategy: all",
+          "  max_retries: 1",
+        ].join("\n"),
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "pipeline.yaml"),
+        [
+          "name: test-pipeline",
+          "stages: []",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const res = await request(
+        result.port,
+        "/api/runs",
+        "POST",
+        JSON.stringify({ input: "Build a hello world app" }),
+      );
+      expect(res.status).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data.runId).toBeDefined();
+      expect(typeof data.runId).toBe("string");
+
+      // Wait briefly for the async engine.run() to finish
+      await new Promise((r) => setTimeout(r, 200));
     });
   });
 });

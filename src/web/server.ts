@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { RunLogger } from "../engine/logger.js";
 import { handleApiRequest } from "./routes/api.js";
+import { handleSseRequest } from "./routes/sse.js";
 
 export interface ServerOptions {
   projectDir: string;
@@ -97,6 +98,13 @@ export function createPetriServer(opts: ServerOptions): Promise<ServerResult> {
     const pathname = url.pathname;
 
     try {
+      // SSE events route — match before general /api/ handler
+      const eventsMatch = pathname.match(/^\/api\/events\/(.+)$/);
+      if (eventsMatch) {
+        handleSseRequest(req, res, eventsMatch[1], activeRuns);
+        return;
+      }
+
       // API routes
       if (pathname.startsWith("/api/")) {
         await handleApiRequest(req, res, url, projectDir, activeRuns);

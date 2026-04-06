@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { listRuns, loadRunLog, type RunLogger } from "../../engine/logger.js";
 import { sendJson, readBody } from "../server.js";
+import { startRun } from "../runner.js";
 
 export async function handleApiRequest(
   req: http.IncomingMessage,
@@ -17,9 +18,36 @@ export async function handleApiRequest(
   const method = req.method ?? "GET";
   const pathname = url.pathname;
 
-  // POST /api/runs — placeholder
+  // POST /api/runs — start a new run
   if (pathname === "/api/runs" && method === "POST") {
-    sendJson(res, 501, { error: "Not implemented" });
+    try {
+      const body = await readBody(req);
+      let parsed: { pipeline?: string; input?: string };
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        sendJson(res, 400, { error: "Invalid JSON body" });
+        return;
+      }
+
+      if (!parsed.input || typeof parsed.input !== "string") {
+        sendJson(res, 400, { error: "Missing required field: input" });
+        return;
+      }
+
+      const pipelineFile = parsed.pipeline ?? "pipeline.yaml";
+      const result = startRun({
+        projectDir,
+        pipelineFile,
+        input: parsed.input,
+        activeRuns,
+      });
+
+      sendJson(res, 200, { runId: result.runId });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 400, { error: message });
+    }
     return;
   }
 
