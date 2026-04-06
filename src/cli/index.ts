@@ -16,6 +16,7 @@ program
   .option("-p, --pipeline <file>", "Pipeline file", "pipeline.yaml")
   .option("-i, --input <text>", "Input text")
   .option("--from <file>", "Read input from file")
+  .option("--skip-to <stage>", "Resume from a stage, skipping earlier stages (reuses existing artifacts)")
   .action(runCommand);
 
 program

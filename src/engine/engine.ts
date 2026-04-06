@@ -26,6 +26,7 @@ export interface EngineOptions {
   defaultMaxRetries?: number;
   defaultTimeout?: number;  // agent execution timeout in ms (default: 600000 = 10 min)
   logger?: RunLogger;
+  skipTo?: string;  // stage name to resume from — skips all stages before it
 }
 
 export class Engine {
@@ -36,6 +37,7 @@ export class Engine {
   private readonly defaultMaxRetries: number;
   private readonly defaultTimeout: number;
   private readonly logger?: RunLogger;
+  private readonly skipTo?: string;
 
   // Gate registry: maps gate id → latest result
   private gateResults: Map<string, GateDetail> = new Map();
@@ -50,15 +52,33 @@ export class Engine {
     this.defaultMaxRetries = opts.defaultMaxRetries ?? 3;
     this.defaultTimeout = opts.defaultTimeout ?? 600_000;
     this.logger = opts.logger;
+    this.skipTo = opts.skipTo;
   }
 
   async run(pipeline: PipelineConfig, input: string): Promise<RunResult> {
     this.goal = pipeline.goal;
     this.requirements = pipeline.requirements;
     this.gateResults.clear();
-    const manifest = new ArtifactManifest(this.artifactBaseDir);
+
+    // Resume: load existing manifest if skipping stages, otherwise start fresh
+    const manifest = this.skipTo
+      ? ArtifactManifest.load(this.artifactBaseDir)
+      : new ArtifactManifest(this.artifactBaseDir);
+
+    let skipping = !!this.skipTo;
 
     for (const entry of pipeline.stages) {
+      // Skip stages until we reach the target
+      if (skipping) {
+        const name = isRepeatBlock(entry) ? entry.repeat.name : entry.name;
+        if (name === this.skipTo) {
+          skipping = false;
+          console.log(`  Resuming from "${name}"...`);
+        } else {
+          console.log(`  Skipping "${name}" (resume mode)`);
+          continue;
+        }
+      }
       if (isRepeatBlock(entry)) {
         const result = await this.runRepeatBlock(entry.repeat, input, manifest);
         if (result.status === "blocked") {

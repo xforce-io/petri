@@ -17,6 +17,7 @@ interface RunOptions {
   pipeline: string;
   input?: string;
   from?: string;
+  skipTo?: string;
 }
 
 export async function runCommand(opts: RunOptions): Promise<void> {
@@ -96,6 +97,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     defaultGateStrategy: petriConfig.defaults.gate_strategy,
     defaultMaxRetries: petriConfig.defaults.max_retries,
     logger,
+    skipTo: opts.skipTo,
   });
 
   // 7. Run and print result
