@@ -17,19 +17,88 @@
   </header>
 
   <main>
+    <!-- Dashboard Tab -->
     <section id="tab-dashboard" class="tab-content active">
-      <h2>Dashboard</h2>
-      <p>Overview coming soon.</p>
+      <div class="dashboard-layout">
+        <aside class="timeline-panel">
+          <h3>Pipeline Stages</h3>
+          <div id="stage-list" class="stage-list">
+            <p class="empty-state">No run loaded.</p>
+          </div>
+          <div id="run-summary" class="run-summary"></div>
+        </aside>
+        <div class="detail-panel">
+          <div class="sub-tabs">
+            <button class="sub-tab active" data-subtab="log">Log</button>
+            <button class="sub-tab" data-subtab="artifacts">Artifacts</button>
+            <button class="sub-tab" data-subtab="gate">Gate</button>
+          </div>
+          <div id="subtab-log" class="sub-tab-content active">
+            <pre id="log-output" class="log-output">Select a run to view logs.</pre>
+          </div>
+          <div id="subtab-artifacts" class="sub-tab-content">
+            <div id="artifacts-list" class="artifacts-list">
+              <p class="empty-state">No artifacts.</p>
+            </div>
+            <pre id="artifact-preview" class="artifact-preview"></pre>
+          </div>
+          <div id="subtab-gate" class="sub-tab-content">
+            <div id="gate-detail" class="gate-detail">
+              <p class="empty-state">Select a stage to view gate results.</p>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
+    <!-- Runs Tab -->
     <section id="tab-runs" class="tab-content">
-      <h2>Runs</h2>
-      <p>Run history coming soon.</p>
+      <div class="runs-new">
+        <h3>Start New Run</h3>
+        <div class="new-run-form">
+          <label for="run-pipeline">Pipeline</label>
+          <select id="run-pipeline"></select>
+          <label for="run-input">Input</label>
+          <textarea id="run-input" rows="4" placeholder="Describe what you want to build..."></textarea>
+          <button id="run-start-btn" class="btn-primary">Run</button>
+          <div id="run-error" class="error-msg"></div>
+        </div>
+      </div>
+      <div class="runs-history">
+        <h3>Run History</h3>
+        <table id="runs-table">
+          <thead>
+            <tr>
+              <th>Run</th>
+              <th>Pipeline</th>
+              <th>Status</th>
+              <th>Started</th>
+              <th>Duration</th>
+              <th>Cost</th>
+            </tr>
+          </thead>
+          <tbody id="runs-tbody"></tbody>
+        </table>
+        <p id="runs-empty" class="empty-state">No runs yet.</p>
+      </div>
     </section>
 
+    <!-- Config Tab -->
     <section id="tab-config" class="tab-content">
-      <h2>Config</h2>
-      <p>Configuration editor coming soon.</p>
+      <div class="config-layout">
+        <aside class="file-tree-panel">
+          <h3>Files</h3>
+          <div id="file-tree" class="file-tree"></div>
+        </aside>
+        <div class="editor-panel">
+          <div class="editor-header">
+            <span id="editor-filename" class="editor-filename">No file selected</span>
+            <button id="editor-save-btn" class="btn-primary" disabled>Save</button>
+          </div>
+          <div id="editor-status" class="editor-status"></div>
+          <textarea id="editor-content" class="editor-textarea" disabled placeholder="Select a file to edit..."></textarea>
+        </div>
+      </div>
     </section>
   </main>
 
