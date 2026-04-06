@@ -1,0 +1,7 @@
+id: problem-defined
+description: ML problem must be formally specified with measurable success criteria
+evidence:
+  path: "{stage}/{role}/problem_spec.json"
+  check:
+    field: has_success_criteria
+    equals: true

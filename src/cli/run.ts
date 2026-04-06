@@ -7,6 +7,7 @@ import {
   loadRole,
 } from "../config/loader.js";
 import { Engine } from "../engine/engine.js";
+import { RunLogger } from "../engine/logger.js";
 import { PiProvider } from "../providers/pi.js";
 import { ClaudeCodeProvider } from "../providers/claude-code.js";
 import { isRepeatBlock } from "../types.js";
@@ -25,7 +26,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   const petriConfig = loadPetriConfig(cwd);
   const pipelineConfig = loadPipelineConfig(cwd, opts.pipeline);
 
-  // 2. Resolve input
+  // 2. Resolve input: --input > --from > pipeline goal
   let input: string | undefined;
   if (opts.input) {
     input = opts.input;
@@ -36,10 +37,12 @@ export async function runCommand(opts: RunOptions): Promise<void> {
       process.exit(1);
     }
     input = fs.readFileSync(inputPath, "utf-8");
+  } else if (pipelineConfig.goal) {
+    input = pipelineConfig.goal;
   }
 
   if (!input) {
-    console.error(chalk.red("No input provided. Use --input or --from."));
+    console.error(chalk.red("No input provided. Use --input, --from, or set 'goal' in pipeline.yaml."));
     process.exit(1);
   }
 
@@ -83,14 +86,17 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     provider = new PiProvider(modelMappings);
   }
 
-  // 6. Create engine
-  const artifactBaseDir = path.join(cwd, ".petri", "artifacts");
+  // 6. Create logger and engine
+  const petriDir = path.join(cwd, ".petri");
+  const artifactBaseDir = path.join(petriDir, "artifacts");
+  const logger = new RunLogger(petriDir, pipelineConfig.name, input, pipelineConfig.goal);
   const engine = new Engine({
     provider,
     roles,
     artifactBaseDir,
     defaultGateStrategy: petriConfig.defaults.gate_strategy,
     defaultMaxRetries: petriConfig.defaults.max_retries,
+    logger,
   });
 
   // 7. Run and print result
@@ -98,12 +104,16 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   const result = await engine.run(pipelineConfig, input);
 
   if (result.status === "done") {
+    logger.finish("done");
     console.log(chalk.green("Pipeline completed successfully."));
+    console.log(chalk.gray(`Log: ${path.join(petriDir, "run.log")}`));
   } else {
+    logger.finish("blocked", result.stage, result.reason);
     console.log(chalk.red(`Pipeline blocked at stage: ${result.stage}`));
     if (result.reason) {
       console.log(chalk.red(`Reason: ${result.reason}`));
     }
+    console.log(chalk.gray(`Log: ${path.join(petriDir, "run.log")}`));
     process.exit(1);
   }
 }

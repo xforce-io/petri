@@ -2,6 +2,8 @@ import type { AttemptRecord } from "../types.js";
 
 export interface ContextInput {
   input: string;
+  goal?: string;
+  requirements?: string[];
   artifactDir: string;
   manifestText: string;
   failureContext: string;
@@ -10,6 +12,17 @@ export interface ContextInput {
 
 export function buildContext(ctx: ContextInput): string {
   const sections: string[] = [];
+
+  // Goal
+  if (ctx.goal) {
+    sections.push(`Goal:\n${ctx.goal}`);
+  }
+
+  // Requirements
+  if (ctx.requirements && ctx.requirements.length > 0) {
+    const reqLines = ctx.requirements.map((r) => `- ${r}`);
+    sections.push(`Requirements:\n${reqLines.join("\n")}`);
+  }
 
   // Working directory and instruction
   sections.push(`Working directory: ${ctx.artifactDir}`);

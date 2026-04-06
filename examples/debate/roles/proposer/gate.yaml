@@ -1,7 +1,6 @@
-requires:
-  argument_submitted: true
+id: argument-submitted
+description: Argument must be submitted
 evidence:
-  type: artifact
   path: "{stage}/{role}/argument.json"
   check:
     field: submitted

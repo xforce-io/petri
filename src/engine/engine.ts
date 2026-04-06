@@ -1,10 +1,13 @@
 // src/engine/engine.ts
 
 import { createHash } from "node:crypto";
+import { mkdirSync, readdirSync, renameSync, statSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { ArtifactManifest } from "./manifest.js";
-import { checkGates, type GateInput } from "./gate.js";
+import { checkGates, type GateInput, type GateDetail } from "./gate.js";
 import { buildContext } from "./context.js";
 import { isRepeatBlock } from "../types.js";
+import type { RunLogger } from "./logger.js";
 import type {
   AgentProvider,
   PipelineConfig,
@@ -21,6 +24,7 @@ export interface EngineOptions {
   artifactBaseDir: string;
   defaultGateStrategy?: GateStrategy;
   defaultMaxRetries?: number;
+  logger?: RunLogger;
 }
 
 export class Engine {
@@ -29,6 +33,12 @@ export class Engine {
   private readonly artifactBaseDir: string;
   private readonly defaultGateStrategy: GateStrategy;
   private readonly defaultMaxRetries: number;
+  private readonly logger?: RunLogger;
+
+  // Gate registry: maps gate id → latest result
+  private gateResults: Map<string, GateDetail> = new Map();
+  private goal?: string;
+  private requirements?: string[];
 
   constructor(opts: EngineOptions) {
     this.provider = opts.provider;
@@ -36,9 +46,13 @@ export class Engine {
     this.artifactBaseDir = opts.artifactBaseDir;
     this.defaultGateStrategy = opts.defaultGateStrategy ?? "all";
     this.defaultMaxRetries = opts.defaultMaxRetries ?? 3;
+    this.logger = opts.logger;
   }
 
   async run(pipeline: PipelineConfig, input: string): Promise<RunResult> {
+    this.goal = pipeline.goal;
+    this.requirements = pipeline.requirements;
+    this.gateResults.clear();
     const manifest = new ArtifactManifest(this.artifactBaseDir);
 
     for (const entry of pipeline.stages) {
@@ -58,7 +72,37 @@ export class Engine {
     }
 
     manifest.save();
+
+    // Verify requirements — report only, don't block
+    if (this.requirements && this.requirements.length > 0) {
+      const reqResults = this.checkRequirements();
+      this.logger?.logRequirements(reqResults);
+    }
+
     return { status: "done" };
+  }
+
+  private checkRequirements(): Array<{ id: string; met: boolean; reason: string }> {
+    return (this.requirements ?? []).map((gateId) => {
+      const result = this.gateResults.get(gateId);
+      if (!result) {
+        // Look up gate description from roles
+        const desc = this.findGateDescription(gateId);
+        return { id: gateId, met: false, reason: `Gate "${gateId}" was never evaluated${desc ? ` (${desc})` : ""}` };
+      }
+      return {
+        id: gateId,
+        met: result.passed,
+        reason: result.reason,
+      };
+    });
+  }
+
+  private findGateDescription(gateId: string): string | undefined {
+    for (const role of Object.values(this.roles)) {
+      if (role.gate?.id === gateId) return role.gate.description;
+    }
+    return undefined;
   }
 
   private async runStage(
@@ -74,7 +118,11 @@ export class Engine {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       console.log(`  Stage "${stage.name}" attempt ${attempt + 1}/${maxRetries + 1}...`);
+      this.logger?.logStageAttempt(stage.name, attempt + 1, maxRetries + 1);
+
       // Execute all roles in parallel
+      const roleTimers: Array<{ roleName: string; timer: import("./logger.js").StageTimer; usage?: import("../types.js").AgentResult["usage"]; artifacts: string[] }> = [];
+
       await Promise.all(
         stage.roles.map(async (roleName) => {
           const role = this.roles[roleName];
@@ -85,6 +133,8 @@ export class Engine {
           mkdirSync(artifactDir, { recursive: true });
           const context = buildContext({
             input,
+            goal: this.goal,
+            requirements: this.requirements,
             artifactDir,
             manifestText: manifest.formatForContext(),
             failureContext,
@@ -92,6 +142,7 @@ export class Engine {
           });
 
           const model = stage.overrides?.[roleName]?.model ?? role.model;
+          const timer = this.logger?.logRoleStart(stage.name, roleName, model);
 
           const agent = this.provider.createAgent({
             persona: role.persona,
@@ -104,6 +155,10 @@ export class Engine {
           const result = await agent.run();
           if (result.artifacts.length > 0) {
             manifest.collect(stage.name, roleName, result.artifacts);
+          }
+
+          if (timer) {
+            roleTimers.push({ roleName, timer, usage: result.usage, artifacts: result.artifacts });
           }
         }),
       );
@@ -124,12 +179,35 @@ export class Engine {
         strategy,
       );
 
+      // Record gate results in registry
+      for (const detail of gateResult.details) {
+        this.gateResults.set(detail.gateId, detail);
+      }
+
+      // Log role results now that we know gate outcome
+      for (const rt of roleTimers) {
+        const roleGate = gateResult.details.find((d) => d.roleName === rt.roleName);
+        this.logger?.logRoleEnd(rt.timer, {
+          gatePassed: roleGate?.passed ?? gateResult.passed,
+          gateReason: roleGate?.reason ?? gateResult.reason,
+          usage: rt.usage,
+          artifacts: rt.artifacts,
+        });
+      }
+      this.logger?.logGateResult(stage.name, gateResult.passed, gateResult.reason);
+
       if (gateResult.passed) {
         console.log(`  Stage "${stage.name}" PASSED`);
         return { status: "done" };
       }
 
       console.log(`  Stage "${stage.name}" gate FAILED: ${gateResult.reason}`);
+
+      // Archive failed attempt artifacts
+      for (const roleName of stage.roles) {
+        archiveAttempt(`${this.artifactBaseDir}/${stage.name}/${roleName}`, attempt + 1);
+      }
+
       // Gate failed — build a full failure description including details
       const detailLines = gateResult.details
         .filter((d) => !d.passed)
@@ -165,34 +243,39 @@ export class Engine {
   }
 
   private async runRepeatBlock(
-    block: { name: string; max_iterations: number; until: { artifact: string; field: string; equals: unknown }; stages: StageConfig[] },
+    block: { name: string; max_iterations: number; until: string; stages: StageConfig[] },
     input: string,
     manifest: ArtifactManifest,
   ): Promise<RunResult> {
     for (let iteration = 0; iteration < block.max_iterations; iteration++) {
+      console.log(`  Repeat "${block.name}" iteration ${iteration + 1}/${block.max_iterations}...`);
+
+      let untilGateNotMet = false;
+
       // Run inner stages sequentially
       for (const stage of block.stages) {
         const result = await this.runStage(stage, input, manifest);
         if (result.status === "blocked") {
+          // If the until gate was evaluated and failed, this means "goal not yet met"
+          // — break out of inner stages and continue to the next iteration
+          const untilGate = this.gateResults.get(block.until);
+          if (untilGate && !untilGate.passed) {
+            untilGateNotMet = true;
+            break;
+          }
+          // Otherwise it's an unrelated stage failure — truly blocked
           return result;
         }
       }
 
-      // Check until condition
-      const { artifact, field, equals } = block.until;
-      const fs = await import("node:fs");
-      const path = await import("node:path");
-      const artifactPath = path.join(this.artifactBaseDir, artifact);
+      if (untilGateNotMet) {
+        continue;
+      }
 
-      if (fs.existsSync(artifactPath)) {
-        try {
-          const content = JSON.parse(fs.readFileSync(artifactPath, "utf-8"));
-          if (content[field] === equals) {
-            return { status: "done" };
-          }
-        } catch {
-          // JSON parse error — continue iterating
-        }
+      // Check until condition: look up gate id from registry
+      const gateDetail = this.gateResults.get(block.until);
+      if (gateDetail?.passed) {
+        return { status: "done" };
       }
     }
 
@@ -201,5 +284,28 @@ export class Engine {
       stage: block.name,
       reason: `Max iterations (${block.max_iterations}) exhausted`,
     };
+  }
+}
+
+/**
+ * Move files from artifactDir into artifactDir/attempts/{attemptNum}/.
+ * Only moves top-level files, skips the "attempts" directory itself.
+ */
+function archiveAttempt(artifactDir: string, attemptNum: number): void {
+  if (!existsSync(artifactDir)) return;
+
+  const archiveDir = join(artifactDir, "attempts", String(attemptNum));
+  let hasFiles = false;
+
+  for (const entry of readdirSync(artifactDir)) {
+    if (entry === "attempts" || entry.startsWith(".")) continue;
+    const fullPath = join(artifactDir, entry);
+    try {
+      if (statSync(fullPath).isFile()) {
+        hasFiles = true;
+        mkdirSync(archiveDir, { recursive: true });
+        renameSync(fullPath, join(archiveDir, entry));
+      }
+    } catch { /* skip */ }
   }
 }

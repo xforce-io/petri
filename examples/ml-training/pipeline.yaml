@@ -1,0 +1,37 @@
+name: ml-training
+description: End-to-end machine learning model training pipeline with iterative refinement
+
+goal: |
+  Build a machine learning model to solve the given problem.
+  The problem definer specifies the task, dataset, and success criteria.
+  Then the team iterates: the architect designs/refines the approach,
+  the researcher implements and trains, and the tester evaluates.
+  The loop continues until acceptance criteria are met or max iterations reached.
+
+requirements:
+  - acceptance-passed
+
+stages:
+  - name: problem_definition
+    roles: [problem_definer]
+    max_retries: 2
+
+  - repeat:
+      name: train-eval-loop
+      max_iterations: 3
+      until: acceptance-passed
+      stages:
+        - name: architecture_design
+          roles: [architect]
+          max_retries: 2
+
+        - name: development
+          roles: [researcher]
+          max_retries: 3
+          overrides:
+            researcher:
+              model: sonnet
+
+        - name: acceptance
+          roles: [tester]
+          max_retries: 0

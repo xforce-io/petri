@@ -1,7 +1,6 @@
-requires:
-  verdict_rendered: true
+id: verdict-rendered
+description: Verdict must be rendered
 evidence:
-  type: artifact
   path: "{stage}/{role}/verdict.json"
   check:
     field: verdict_rendered

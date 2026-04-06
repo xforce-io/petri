@@ -1,0 +1,7 @@
+id: architecture-designed
+description: Architecture must include candidate comparison and justified selection
+evidence:
+  path: "{stage}/{role}/architecture.json"
+  check:
+    field: has_justification
+    equals: true

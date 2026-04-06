@@ -1,10 +1,20 @@
 name: detective-mystery
 description: A detective investigates a murder mystery
 
+goal: |
+  Create and solve an original murder mystery.
+  The storyteller sets the scene, the detective investigates and makes an accusation,
+  and the judge renders a final verdict on whether the case is solved.
+
+requirements:
+  - mystery-created
+  - investigation-complete
+  - case-closed
+
 stages:
   - name: setup
     roles: [storyteller]
-    max_retries: 2
+    max_retries: 4
 
   - name: investigate
     roles: [detective]

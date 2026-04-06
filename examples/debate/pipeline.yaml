@@ -1,6 +1,13 @@
 name: structured-debate
 description: A structured debate between a proposer and opponent, judged by an impartial referee
 
+goal: |
+  Debate the topic: "AI will create more jobs than it destroys in the next decade."
+  The proposer argues for, the opponent argues against, and the judge renders a verdict.
+
+requirements:
+  - verdict-rendered
+
 stages:
   - name: opening
     roles: [proposer]

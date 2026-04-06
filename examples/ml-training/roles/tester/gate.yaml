@@ -1,0 +1,7 @@
+id: acceptance-passed
+description: Model must pass accuracy threshold AND inference performance requirement
+evidence:
+  path: "{stage}/{role}/acceptance.json"
+  check:
+    field: all_passed
+    equals: true

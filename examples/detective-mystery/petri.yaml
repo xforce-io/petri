@@ -3,11 +3,11 @@ providers:
     type: claude_code
 
 models:
-  sonnet:
+  haiku:
     provider: default
-    model: sonnet
+    model: haiku
 
 defaults:
-  model: sonnet
+  model: haiku
   gate_strategy: all
   max_retries: 2

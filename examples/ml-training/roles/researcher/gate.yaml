@@ -1,0 +1,7 @@
+id: model-trained
+description: Model must be trained and primary metric must meet success threshold
+evidence:
+  path: "{stage}/{role}/result.json"
+  check:
+    field: meets_threshold
+    equals: true

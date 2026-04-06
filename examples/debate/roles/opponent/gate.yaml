@@ -1,7 +1,6 @@
-requires:
-  rebuttal_submitted: true
+id: rebuttal-submitted
+description: Rebuttal must be submitted
 evidence:
-  type: artifact
   path: "{stage}/{role}/argument.json"
   check:
     field: submitted

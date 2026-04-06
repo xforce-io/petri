@@ -6,6 +6,9 @@ models:
   haiku:
     provider: default
     model: haiku
+  sonnet:
+    provider: default
+    model: sonnet
 
 defaults:
   model: haiku

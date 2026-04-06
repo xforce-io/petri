@@ -1,4 +1,5 @@
-requires: tests_pass
+id: tests-pass
+description: All unit tests must pass
 evidence:
   path: "{stage}/{role}/result.json"
   check:

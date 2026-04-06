@@ -1,4 +1,5 @@
-requires: design_completed
+id: design-complete
+description: Design document must be completed
 evidence:
   path: "{stage}/{role}/design.json"
   check:

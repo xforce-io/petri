@@ -84,7 +84,19 @@ export function loadRole(
   let gate: GateConfig | null = null;
   const gatePath = path.join(roleDir, "gate.yaml");
   if (fs.existsSync(gatePath)) {
-    gate = parseYaml(fs.readFileSync(gatePath, "utf-8")) as GateConfig;
+    const raw = parseYaml(fs.readFileSync(gatePath, "utf-8")) as any;
+    // Resolve gate id: new format uses "id", legacy uses "requires" (string or object key)
+    let gateId = raw.id;
+    if (!gateId && raw.requires) {
+      gateId = typeof raw.requires === "string"
+        ? raw.requires
+        : Object.keys(raw.requires)[0];
+    }
+    gate = {
+      id: gateId,
+      description: raw.description,
+      evidence: raw.evidence,
+    };
   }
 
   return {

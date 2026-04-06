@@ -1,4 +1,5 @@
-requires: review_approved
+id: review-approved
+description: Code review must be approved
 evidence:
   path: "{stage}/{role}/review.json"
   check:

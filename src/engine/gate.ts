@@ -9,10 +9,17 @@ export interface GateInput {
   roleName: string;
 }
 
+export interface GateDetail {
+  gateId: string;
+  roleName: string;
+  passed: boolean;
+  reason: string;
+}
+
 export interface GateResult {
   passed: boolean;
   reason: string;
-  details: { roleName: string; passed: boolean; reason: string }[];
+  details: GateDetail[];
 }
 
 /**
@@ -35,7 +42,7 @@ export async function checkGates(
     return { passed: true, reason: "No gates to check", details: [] };
   }
 
-  const details: GateResult["details"] = [];
+  const details: GateDetail[] = [];
 
   for (const { gate, roleName } of gates) {
     const resolvedPath = resolveGatePath(gate.evidence.path, stageName, roleName);
@@ -43,6 +50,7 @@ export async function checkGates(
 
     if (!fs.existsSync(fullPath)) {
       details.push({
+        gateId: gate.id,
         roleName,
         passed: false,
         reason: `Artifact not found: ${resolvedPath}`,
@@ -57,6 +65,7 @@ export async function checkGates(
 
       if (equals !== undefined && actual !== equals) {
         details.push({
+          gateId: gate.id,
           roleName,
           passed: false,
           reason: `Field "${field}" is ${JSON.stringify(actual)}, expected ${JSON.stringify(equals)}`,
@@ -65,7 +74,7 @@ export async function checkGates(
       }
     }
 
-    details.push({ roleName, passed: true, reason: "Gate passed" });
+    details.push({ gateId: gate.id, roleName, passed: true, reason: "Gate passed" });
   }
 
   const passedCount = details.filter((d) => d.passed).length;

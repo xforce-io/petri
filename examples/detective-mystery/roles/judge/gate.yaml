@@ -1,7 +1,6 @@
-requires:
-  verdict_rendered: true
+id: case-closed
+description: Case must be closed with verdict
 evidence:
-  type: artifact
   path: "{stage}/{role}/verdict.json"
   check:
     field: case_closed

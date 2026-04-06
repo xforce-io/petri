@@ -5,6 +5,8 @@
 export interface PipelineConfig {
   name: string;
   description?: string;
+  goal?: string;
+  requirements?: string[];  // list of gate ids to verify at end
   stages: StageEntry[];
   input?: { description: string };
 }
@@ -23,11 +25,7 @@ export interface RepeatBlock {
   repeat: {
     name: string;
     max_iterations: number;
-    until: {
-      artifact: string;
-      field: string;
-      equals: unknown;
-    };
+    until: string;  // gate id to check
     stages: StageConfig[];
   };
 }
@@ -49,9 +47,9 @@ export interface RoleConfig {
 // --- Gate ---
 
 export interface GateConfig {
-  requires: Record<string, unknown>;
+  id: string;          // canonical gate id, e.g. "tests-pass"
+  description?: string;
   evidence: {
-    type: "artifact";
     path: string;
     check?: {
       field: string;

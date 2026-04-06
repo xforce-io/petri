@@ -35,7 +35,7 @@ export class ClaudeCodeProvider implements AgentProvider {
       output = execSync(cmd, {
         cwd: config.artifactDir,
         encoding: "utf-8",
-        timeout: 300_000,  // 5 min
+        timeout: 900_000,  // 15 min
         maxBuffer: 10 * 1024 * 1024,
         shell: "/bin/bash",
         env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },

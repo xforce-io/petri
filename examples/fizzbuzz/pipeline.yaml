@@ -1,6 +1,16 @@
 name: code-dev
 description: Software development pipeline — design, develop, review
 
+goal: |
+  Write a FizzBuzz program in Python.
+  Print numbers 1-100, replacing multiples of 3 with "Fizz",
+  multiples of 5 with "Buzz", and multiples of both with "FizzBuzz".
+
+requirements:
+  - design-complete
+  - tests-pass
+  - review-approved
+
 stages:
   - name: design
     roles: [designer]

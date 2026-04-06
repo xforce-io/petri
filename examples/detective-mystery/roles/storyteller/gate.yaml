@@ -1,7 +1,6 @@
-requires:
-  mystery_created: true
+id: mystery-created
+description: Mystery scenario must be created
 evidence:
-  type: artifact
   path: "{stage}/{role}/mystery.json"
   check:
     field: complete

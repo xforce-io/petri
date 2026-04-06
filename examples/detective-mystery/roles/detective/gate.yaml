@@ -1,7 +1,6 @@
-requires:
-  investigation_complete: true
+id: investigation-complete
+description: Investigation must be completed with accusation
 evidence:
-  type: artifact
   path: "{stage}/{role}/investigation.json"
   check:
     field: accusation_made
