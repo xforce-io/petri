@@ -157,6 +157,7 @@ export class Engine {
               context,
               artifactDir,
               model,
+              timeout: stage.timeout ?? this.defaultTimeout,
             });
 
             const agentTimeout = stage.timeout ?? this.defaultTimeout;

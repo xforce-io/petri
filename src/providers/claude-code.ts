@@ -28,24 +28,34 @@ export class ClaudeCodeProvider implements AgentProvider {
     const claudeBin = findClaude();
     const cmd = `cat "${promptFile}" | "${claudeBin}" -p --model ${model} --output-format json --dangerously-skip-permissions`;
 
-    console.log(`  [claude-code] Running ${model} in ${config.artifactDir}...`);
+    // Default: 4 hours. Stage timeout is passed through if set.
+    const agentTimeout = config.timeout ?? 4 * 3600_000;
+    const timeoutMin = Math.round(agentTimeout / 60_000);
+    console.log(`  [claude-code] Running ${model} in ${config.artifactDir} (timeout: ${timeoutMin}m)...`);
 
     let output: string;
     try {
       output = execSync(cmd, {
         cwd: config.artifactDir,
         encoding: "utf-8",
-        timeout: 900_000,  // 15 min
+        timeout: agentTimeout,
         maxBuffer: 10 * 1024 * 1024,
         shell: "/bin/bash",
         env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
       });
     } catch (e: any) {
-      console.error(`  [claude-code] Error: ${e.message?.slice(0, 500)}`);
+      const isTimeout = e.killed || e.signal === "SIGTERM";
+      if (isTimeout) {
+        const msg = `[claude-code] TIMEOUT: Agent killed after ${timeoutMin} minutes. If this task needs more time, increase the stage timeout in pipeline.yaml.`;
+        console.error(`  ${msg}`);
+        writeFileSync(join(config.artifactDir, "_error.txt"), msg, "utf-8");
+      } else {
+        const errMsg = e.message?.slice(0, 500) ?? "Unknown error";
+        console.error(`  [claude-code] FAILED: ${errMsg}`);
+        writeFileSync(join(config.artifactDir, "_error.txt"), `[claude-code] FAILED: ${errMsg}`, "utf-8");
+      }
       // stdout may still have useful output even on non-zero exit
       output = e.stdout ?? "";
-    } finally {
-      // Keep prompt file for observability (renamed without dot prefix so it shows in artifacts)
     }
 
     // Parse JSON output — Claude Code returns { type, result, total_cost_usd, usage: {...} }

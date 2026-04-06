@@ -116,6 +116,7 @@ export interface AgentConfig {
   context: string;
   artifactDir: string;
   model: string;
+  timeout?: number;  // ms — passed from stage timeout, provider should respect this
 }
 
 export interface AgentResult {
