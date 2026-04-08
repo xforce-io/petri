@@ -8,7 +8,7 @@ import {
 } from "../config/loader.js";
 import { Engine } from "../engine/engine.js";
 import { RunLogger } from "../engine/logger.js";
-import { acquireLock, releaseLock } from "../engine/lock.js";
+import { acquireLock, releaseLock, killProcessTree } from "../engine/lock.js";
 import { PiProvider } from "../providers/pi.js";
 import { ClaudeCodeProvider } from "../providers/claude-code.js";
 import { isRepeatBlock } from "../types.js";
@@ -105,13 +105,12 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   const lockFile = path.join(petriDir, "run.lock");
   acquireLock(lockFile, logger.runId);
 
-  // Ensure cleanup on signals — kill entire process group so child processes (e.g. python training) are also terminated
+  // Ensure cleanup on signals — kill entire process tree so child processes (e.g. python training) are also terminated
   const cleanup = (signal: string) => {
     console.log(chalk.yellow(`\nReceived ${signal}, shutting down...`));
     logger.finish("blocked", undefined, `Interrupted by ${signal}`);
+    killProcessTree(process.pid);
     releaseLock(lockFile);
-    // Kill entire process group (includes spawned child processes)
-    try { process.kill(-process.pid, signal as NodeJS.Signals); } catch {}
     process.exit(1);
   };
   process.on("SIGINT", () => cleanup("SIGINT"));
