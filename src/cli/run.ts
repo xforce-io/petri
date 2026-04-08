@@ -8,6 +8,7 @@ import {
 } from "../config/loader.js";
 import { Engine } from "../engine/engine.js";
 import { RunLogger } from "../engine/logger.js";
+import { acquireLock, releaseLock } from "../engine/lock.js";
 import { PiProvider } from "../providers/pi.js";
 import { ClaudeCodeProvider } from "../providers/claude-code.js";
 import { isRepeatBlock } from "../types.js";
@@ -100,21 +101,46 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     skipTo: opts.skipTo,
   });
 
-  // 7. Run and print result
-  console.log(chalk.blue(`Running pipeline: ${pipelineConfig.name} (run-${logger.runId})`));
-  const result = await engine.run(pipelineConfig, input);
+  // 7. Acquire lock to prevent concurrent runs
+  const lockFile = path.join(petriDir, "run.lock");
+  acquireLock(lockFile, logger.runId);
 
-  if (result.status === "done") {
-    logger.finish("done");
-    console.log(chalk.green("Pipeline completed successfully."));
-    console.log(chalk.gray(`Run: ${logger.runDir}`));
-  } else {
-    logger.finish("blocked", result.stage, result.reason);
-    console.log(chalk.red(`Pipeline blocked at stage: ${result.stage}`));
-    if (result.reason) {
-      console.log(chalk.red(`Reason: ${result.reason}`));
-    }
-    console.log(chalk.gray(`Run: ${logger.runDir}`));
+  // Ensure cleanup on signals — kill entire process group so child processes (e.g. python training) are also terminated
+  const cleanup = (signal: string) => {
+    console.log(chalk.yellow(`\nReceived ${signal}, shutting down...`));
+    logger.finish("blocked", undefined, `Interrupted by ${signal}`);
+    releaseLock(lockFile);
+    // Kill entire process group (includes spawned child processes)
+    try { process.kill(-process.pid, signal as NodeJS.Signals); } catch {}
     process.exit(1);
+  };
+  process.on("SIGINT", () => cleanup("SIGINT"));
+  process.on("SIGTERM", () => cleanup("SIGTERM"));
+
+  // 8. Run and print result
+  console.log(chalk.blue(`Running pipeline: ${pipelineConfig.name} (run-${logger.runId})`));
+  try {
+    const result = await engine.run(pipelineConfig, input);
+
+    if (result.status === "done") {
+      logger.finish("done");
+      console.log(chalk.green("Pipeline completed successfully."));
+      console.log(chalk.gray(`Run: ${logger.runDir}`));
+    } else {
+      logger.finish("blocked", result.stage, result.reason);
+      console.log(chalk.red(`Pipeline blocked at stage: ${result.stage}`));
+      if (result.reason) {
+        console.log(chalk.red(`Reason: ${result.reason}`));
+      }
+      console.log(chalk.gray(`Run: ${logger.runDir}`));
+      process.exit(1);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.finish("blocked", undefined, `Unexpected error: ${msg}`);
+    console.error(chalk.red(`Pipeline failed: ${msg}`));
+    process.exit(1);
+  } finally {
+    releaseLock(lockFile);
   }
 }
