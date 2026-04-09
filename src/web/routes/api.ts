@@ -13,6 +13,59 @@ import { sendJson, readBody } from "../server.js";
 import { startRun } from "../runner.js";
 import { listFilesRecursive, filterGeneratedFiles } from "../../util/fs.js";
 
+interface TemplateInfo {
+  id: string;
+  name: string;
+  description: string;
+  stages: string[];
+  roles: string[];
+}
+
+function handleListTemplates(res: http.ServerResponse): void {
+  const templatesDir = path.resolve(import.meta.dirname, "../../templates");
+  if (!fs.existsSync(templatesDir)) {
+    sendJson(res, 200, []);
+    return;
+  }
+
+  const templates: TemplateInfo[] = [];
+  for (const entry of fs.readdirSync(templatesDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const pipelinePath = path.join(templatesDir, entry.name, "pipeline.yaml");
+    if (!fs.existsSync(pipelinePath)) continue;
+
+    try {
+      const content = fs.readFileSync(pipelinePath, "utf-8");
+      const parsed = parseYaml(content) as {
+        name?: string;
+        description?: string;
+        stages?: Array<{ name: string; roles?: string[] }>;
+      };
+
+      const stageNames: string[] = [];
+      const rolesSet = new Set<string>();
+      if (Array.isArray(parsed.stages)) {
+        for (const stage of parsed.stages) {
+          if (stage.name) stageNames.push(stage.name);
+          if (Array.isArray(stage.roles)) {
+            for (const role of stage.roles) rolesSet.add(role);
+          }
+        }
+      }
+
+      templates.push({
+        id: entry.name,
+        name: parsed.name ?? entry.name,
+        description: parsed.description ?? "",
+        stages: stageNames,
+        roles: Array.from(rolesSet),
+      });
+    } catch { /* skip malformed templates */ }
+  }
+
+  sendJson(res, 200, templates);
+}
+
 export async function handleApiRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -221,6 +274,11 @@ export async function handleApiRequest(
       }
     }
     return;
+  }
+
+  // GET /api/templates
+  if (pathname === "/api/templates" && method === "GET") {
+    return handleListTemplates(res);
   }
 
   sendJson(res, 404, { error: "Not found" });

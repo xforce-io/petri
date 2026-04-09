@@ -194,6 +194,24 @@ describe("Petri Web Server", () => {
     });
   });
 
+  describe("GET /api/templates", () => {
+    it("returns a JSON array with at least the code-dev template", async () => {
+      const res = await request(result.port, "/api/templates");
+      expect(res.status).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(Array.isArray(data)).toBe(true);
+      expect(data.length).toBeGreaterThanOrEqual(1);
+
+      const codeDev = data.find((t: { id: string }) => t.id === "code-dev");
+      expect(codeDev).toBeDefined();
+      expect(codeDev.id).toBe("code-dev");
+      expect(codeDev.name).toBe("code-dev");
+      expect(codeDev.description).toBe("Software development pipeline — design, develop, review");
+      expect(codeDev.stages).toEqual(["design", "develop", "review"]);
+      expect(codeDev.roles).toEqual(["designer", "developer", "code_reviewer"]);
+    });
+  });
+
   describe("POST /api/runs", () => {
     it("returns 400 for missing input", async () => {
       const res = await request(result.port, "/api/runs", "POST", "{}");
