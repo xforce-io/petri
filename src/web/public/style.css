@@ -140,6 +140,46 @@ main {
   letter-spacing: 0.03em;
 }
 
+.stat-card-action {
+  cursor: pointer;
+  border-style: dashed;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.stat-card-action:hover {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.05);
+}
+
+.stat-card-action .stat-value {
+  color: var(--accent);
+}
+
+.dashboard-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  text-align: center;
+}
+
+.dashboard-empty h2 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.dashboard-empty p {
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.btn-large {
+  padding: 0.75rem 2rem;
+  font-size: 1rem;
+}
+
 .stat-success { color: var(--success-bright); }
 .stat-danger { color: var(--danger); }
 

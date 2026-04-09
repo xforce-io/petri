@@ -248,10 +248,27 @@ async function loadDashboard() {
       row.addEventListener("click", () => openRunDetail(row.dataset.runid));
     });
   } else {
-    emptyMsg.style.display = "block";
+    emptyMsg.style.display = "none";
     $("#overview-runs-table").style.display = "none";
     tbody.innerHTML = "";
+    // Show empty state with CTA
+    $("#stats-cards").innerHTML = `
+      <div class="dashboard-empty">
+        <h2>Welcome to Petri</h2>
+        <p>Create your first pipeline to get started.</p>
+        <button class="btn-primary btn-large" onclick="switchToTab('create'); loadCreateTab();">Create Pipeline</button>
+      </div>
+    `;
+    return;
   }
+
+  // Add create button to stats area when runs exist
+  $("#stats-cards").innerHTML += `
+    <div class="stat-card stat-card-action" onclick="switchToTab('create'); loadCreateTab();">
+      <div class="stat-value">+</div>
+      <div class="stat-label">Create Pipeline</div>
+    </div>
+  `;
 }
 
 // ══════════════════════════════════════
