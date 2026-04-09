@@ -144,11 +144,12 @@ export async function generatePipeline(
 ): Promise<GenerateResult> {
   const generatedDir = path.join(req.projectDir, ".petri", "generated");
 
-  let prompt = buildGenerationPrompt(req.description);
+  const basePrompt = buildGenerationPrompt(req.description);
   let lastErrors: string[] = [];
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    // Add validation errors from previous attempt
+    // Reconstruct prompt with latest errors (avoid accumulating multiple error sections)
+    let prompt = basePrompt;
     if (attempt > 0 && lastErrors.length > 0) {
       prompt += `\n\n## Validation Errors from Previous Attempt\n\nThe following errors were found. Fix them:\n${lastErrors.map((e) => `- ${e}`).join("\n")}`;
     }
