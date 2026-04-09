@@ -9,12 +9,16 @@ let currentStageIndex = -1;
 let eventSource = null;
 let currentConfigPath = null;
 
-// Create tab state
-let generateDescription = null;
-let generatedFiles = [];
-let generatedStatus = null;
-let generatedErrors = [];
-let selectedGeneratedFile = null;
+// Create tab wizard state
+let wizard = {
+  step: 1,
+  description: "",
+  templateId: null,
+  generateResult: null,
+  selectedFile: null,
+  validationPassed: false,
+  templates: [],
+};
 
 // ── API Helper ──
 function apiUrl(urlPath) {
@@ -114,12 +118,39 @@ document.addEventListener("DOMContentLoaded", () => {
   // Back to runs list
   $("#back-to-runs").addEventListener("click", showRunsList);
 
-  // Create tab buttons
-  $("#create-generate-btn").addEventListener("click", startGenerate);
+  // Wizard: step navigation
+  $("#wizard-next-1").addEventListener("click", () => wizardGoTo(2));
+  $("#wizard-back-2").addEventListener("click", () => wizardGoTo(1));
+  $("#wizard-retry").addEventListener("click", () => wizardGoTo(2));
+  $("#wizard-back-3").addEventListener("click", () => wizardGoTo(1));
+  $("#wizard-next-3").addEventListener("click", () => wizardGoTo(4));
+  $("#wizard-back-4").addEventListener("click", () => wizardGoTo(3));
+
+  // Wizard: actions
+  $("#create-description").addEventListener("input", onDescriptionInput);
   $("#gen-editor-save-btn").addEventListener("click", saveGeneratedFile);
   $("#create-validate-btn").addEventListener("click", validateGenerated);
   $("#create-confirm-btn").addEventListener("click", confirmAndRun);
-  $("#create-regen-btn").addEventListener("click", showCreateInput);
+
+  // Wizard: review sub-tabs
+  $$(".review-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const target = tab.dataset.reviewTab;
+      $$(".review-tab").forEach((t) => t.classList.remove("active"));
+      $$(".review-tab-content").forEach((c) => c.classList.remove("active"));
+      tab.classList.add("active");
+      document.getElementById("review-" + target)?.classList.add("active");
+    });
+  });
+
+  // Wizard: step bar click navigation
+  $$(".step-item").forEach((el) => {
+    el.addEventListener("click", () => {
+      if (el.classList.contains("completed")) {
+        wizardGoTo(parseInt(el.dataset.step, 10));
+      }
+    });
+  });
 
   // Prompt toggle (collapse/expand)
   document.addEventListener("click", (e) => {
@@ -680,82 +711,137 @@ async function saveConfigFile() {
 }
 
 // ══════════════════════════════════════
-// ── Create Tab
+// ── Create Tab: Wizard
 // ══════════════════════════════════════
 
+function onDescriptionInput() {
+  const val = $("#create-description").value.trim();
+  $("#wizard-next-1").disabled = !val;
+}
+
 function loadCreateTab() {
-  if (generatedFiles.length > 0) {
-    showCreateReview();
-  } else {
-    showCreateInput();
+  loadTemplates();
+  wizardRenderStep();
+}
+
+async function loadTemplates() {
+  if (wizard.templates.length > 0) return;
+  const res = await api("/api/templates");
+  if (res.status === 200 && Array.isArray(res.data)) {
+    wizard.templates = res.data;
+    renderTemplateGrid();
   }
 }
 
-function showCreateInput() {
-  $("#create-input-view").style.display = "";
-  $("#create-review-view").style.display = "none";
-  if (generateDescription) {
-    $("#create-description").value = generateDescription;
+function renderTemplateGrid() {
+  const grid = $("#template-grid");
+  let html = '<div class="template-card blank-card' + (wizard.templateId === null ? " selected" : "") + '" data-template-id="">' +
+    '<div class="template-name">Blank</div>' +
+    '<div class="template-desc">Start from scratch with a custom description.</div>' +
+    '</div>';
+  for (const t of wizard.templates) {
+    const sel = wizard.templateId === t.id ? " selected" : "";
+    html += '<div class="template-card' + sel + '" data-template-id="' + escAttr(t.id) + '">' +
+      '<div class="template-name">' + escHtml(t.name) + '</div>' +
+      '<div class="template-desc">' + escHtml(t.description) + '</div>' +
+      '<div class="template-meta">' + t.stages.length + ' stages · ' + t.roles.join(", ") + '</div>' +
+      '</div>';
+  }
+  grid.innerHTML = html;
+  grid.querySelectorAll(".template-card").forEach((card) => {
+    card.addEventListener("click", () => selectTemplate(card.dataset.templateId));
+  });
+}
+
+function selectTemplate(templateId) {
+  const tmpl = wizard.templates.find((t) => t.id === templateId);
+  wizard.templateId = templateId || null;
+  if (tmpl) {
+    $("#create-description").value = tmpl.description;
+  }
+  onDescriptionInput();
+  renderTemplateGrid();
+}
+
+function wizardGoTo(step) {
+  const prev = wizard.step;
+  wizard.step = step;
+  wizardRenderStep();
+
+  if (step === 2 && prev === 1) {
+    wizard.description = $("#create-description").value.trim();
+    startGenerate();
+  }
+  if (step === 3 && prev !== 4) {
+    renderReviewStep();
+  }
+  if (step === 4) {
+    renderRunStep();
   }
 }
 
-function showCreateReview() {
-  $("#create-input-view").style.display = "none";
-  $("#create-review-view").style.display = "";
-  renderGeneratedFileTree();
-  renderStatusBanner();
+function wizardRenderStep() {
+  $$(".step-item").forEach((el) => {
+    const s = parseInt(el.dataset.step, 10);
+    el.classList.remove("active", "completed");
+    if (s === wizard.step) el.classList.add("active");
+    else if (s < wizard.step) el.classList.add("completed");
+  });
+  $$(".wizard-step").forEach((el) => el.classList.remove("active"));
+  const stepEl = $("#wizard-step-" + wizard.step);
+  if (stepEl) stepEl.classList.add("active");
 }
 
 async function startGenerate() {
-  const btn = $("#create-generate-btn");
-  const errorEl = $("#create-error");
-  const loadingEl = $("#create-loading");
-  const description = $("#create-description").value.trim();
-
-  errorEl.textContent = "";
-  if (!description) {
-    errorEl.textContent = "Please enter a description.";
-    return;
-  }
-
-  generateDescription = description;
-  btn.disabled = true;
-  loadingEl.style.display = "flex";
+  const spinnerEl = $("#wizard-step-2 .spinner");
+  const msgEl = $("#wizard-step-2 .generate-msg");
+  if (spinnerEl) spinnerEl.style.display = "";
+  if (msgEl) msgEl.style.display = "";
+  $("#generate-error").style.display = "none";
 
   const res = await api("/api/generate", {
     method: "POST",
-    body: JSON.stringify({ description }),
+    body: JSON.stringify({ description: wizard.description }),
   });
 
-  btn.disabled = false;
-  loadingEl.style.display = "none";
-
   if (res.status === 200 && res.data.files) {
-    generatedFiles = res.data.files;
-    generatedStatus = res.data.status;
-    generatedErrors = res.data.errors || [];
-    selectedGeneratedFile = null;
-    showCreateReview();
+    wizard.generateResult = {
+      status: res.data.status,
+      files: res.data.files,
+      errors: res.data.errors || [],
+    };
+    wizard.validationPassed = res.data.status === "ok";
+    wizard.selectedFile = null;
+    wizardGoTo(3);
   } else {
-    errorEl.textContent = (res.data && res.data.error) || "Generation failed.";
+    if (spinnerEl) spinnerEl.style.display = "none";
+    if (msgEl) msgEl.style.display = "none";
+    $("#generate-error").style.display = "";
+    $("#generate-error-msg").textContent = (res.data && res.data.error) || "Generation failed.";
   }
+}
+
+function renderReviewStep() {
+  if (!wizard.generateResult) return;
+  renderStatusBanner();
+  renderGeneratedFileTree();
+  renderPipelinePreview();
 }
 
 function renderStatusBanner() {
   const banner = $("#create-status-banner");
-  if (generatedStatus === "ok") {
+  if (wizard.generateResult.status === "ok" || wizard.validationPassed) {
     banner.className = "create-status-banner success";
-    banner.textContent = "Pipeline generated successfully. Review the files below, then confirm to run.";
-  } else if (generatedStatus === "validation_failed") {
+    banner.textContent = "Pipeline generated successfully. Review the files below, then proceed to run.";
+  } else if (wizard.generateResult.status === "validation_failed") {
     banner.className = "create-status-banner warning";
-    banner.textContent = "Generated with validation errors: " + generatedErrors.join("; ");
+    banner.textContent = "Generated with validation errors: " + wizard.generateResult.errors.join("; ");
   }
 }
 
 function renderGeneratedFileTree() {
   const tree = $("#gen-file-tree");
-  const files = generatedFiles;
-
+  const files = wizard.generateResult.files;
   const groups = {};
   files.forEach((f) => {
     const parts = f.split("/");
@@ -763,24 +849,21 @@ function renderGeneratedFileTree() {
     if (!groups[dir]) groups[dir] = [];
     groups[dir].push(f);
   });
-
   const sortedDirs = Object.keys(groups).sort((a, b) => {
     if (a === ".") return -1;
     if (b === ".") return 1;
     return a.localeCompare(b);
   });
-
   let html = "";
   for (const dir of sortedDirs) {
     const label = dir === "." ? "Project Root" : dir;
-    html += `<div class="file-group-label">${escHtml(label)}</div>`;
+    html += '<div class="file-group-label">' + escHtml(label) + '</div>';
     groups[dir].sort().forEach((f) => {
       const name = f.split("/").pop();
-      const activeClass = f === selectedGeneratedFile ? " active" : "";
-      html += `<div class="file-item${activeClass}" data-path="${escAttr(f)}">${escHtml(name)}</div>`;
+      const activeClass = f === wizard.selectedFile ? " active" : "";
+      html += '<div class="file-item' + activeClass + '" data-path="' + escAttr(f) + '">' + escHtml(name) + '</div>';
     });
   }
-
   tree.innerHTML = html;
   tree.querySelectorAll(".file-item").forEach((el) => {
     el.addEventListener("click", () => {
@@ -789,27 +872,23 @@ function renderGeneratedFileTree() {
       el.classList.add("active");
     });
   });
-
-  // Auto-select first file
-  if (files.length > 0 && !selectedGeneratedFile) {
+  if (files.length > 0 && !wizard.selectedFile) {
     loadGeneratedFile(files[0]);
     tree.querySelector(".file-item")?.classList.add("active");
   }
 }
 
 async function loadGeneratedFile(filePath) {
-  selectedGeneratedFile = filePath;
+  wizard.selectedFile = filePath;
   const editor = $("#gen-editor-content");
   const filenameEl = $("#gen-editor-filename");
   const saveBtn = $("#gen-editor-save-btn");
   const statusEl = $("#gen-editor-status");
-
   filenameEl.textContent = filePath;
   statusEl.textContent = "";
   statusEl.className = "editor-status";
   editor.disabled = true;
   saveBtn.disabled = true;
-
   const res = await api("/api/generate/file?path=" + encodeURIComponent(filePath));
   if (res.status === 200) {
     editor.value = typeof res.data === "string" ? res.data : res.data.content || "";
@@ -821,20 +900,17 @@ async function loadGeneratedFile(filePath) {
 }
 
 async function saveGeneratedFile() {
-  if (!selectedGeneratedFile) return;
+  if (!wizard.selectedFile) return;
   const saveBtn = $("#gen-editor-save-btn");
   const statusEl = $("#gen-editor-status");
   const content = $("#gen-editor-content").value;
-
   saveBtn.disabled = true;
   statusEl.textContent = "Saving...";
   statusEl.className = "editor-status";
-
-  const res = await api("/api/generate/file?path=" + encodeURIComponent(selectedGeneratedFile), {
+  const res = await api("/api/generate/file?path=" + encodeURIComponent(wizard.selectedFile), {
     method: "PUT",
     body: JSON.stringify({ content }),
   });
-
   saveBtn.disabled = false;
   if (res.status === 200) {
     statusEl.textContent = "Saved";
@@ -849,59 +925,100 @@ async function validateGenerated() {
   const btn = $("#create-validate-btn");
   btn.disabled = true;
   btn.textContent = "Validating...";
-
   const res = await api("/api/generate/validate", { method: "POST" });
-
   btn.disabled = false;
   btn.textContent = "Validate";
-
   if (res.status === 200) {
     if (res.data.valid) {
-      generatedStatus = "ok";
-      generatedErrors = [];
+      wizard.generateResult.status = "ok";
+      wizard.generateResult.errors = [];
+      wizard.validationPassed = true;
     } else {
-      generatedStatus = "validation_failed";
-      generatedErrors = res.data.errors || [];
+      wizard.generateResult.status = "validation_failed";
+      wizard.generateResult.errors = res.data.errors || [];
+      wizard.validationPassed = false;
     }
     renderStatusBanner();
   }
 }
 
+async function renderPipelinePreview() {
+  const container = $("#pipeline-preview");
+  const res = await api("/api/generate/file?path=pipeline.yaml");
+  if (res.status !== 200) {
+    container.innerHTML = '<p class="empty-state">No pipeline to preview.</p>';
+    return;
+  }
+  const content = typeof res.data === "string" ? res.data : res.data.content || "";
+  let html = "";
+  const nameMatch = content.match(/^name:\s*(.+)$/m);
+  const descMatch = content.match(/^description:\s*(.+)$/m);
+  const goalMatch = content.match(/^goal:\s*(.+)$/m);
+  html += '<div class="preview-header">';
+  if (nameMatch) html += "<h3>" + escHtml(nameMatch[1]) + "</h3>";
+  if (descMatch) html += "<p>" + escHtml(descMatch[1]) + "</p>";
+  if (goalMatch) html += "<p>" + escHtml(goalMatch[1]) + "</p>";
+  html += "</div>";
+  const stageRegex = /- name:\s*(.+)\n\s*roles:\s*\[([^\]]*)\]/g;
+  const stages = [];
+  let match;
+  while ((match = stageRegex.exec(content)) !== null) {
+    stages.push({ name: match[1].trim(), roles: match[2].trim() });
+  }
+  for (let i = 0; i < stages.length; i++) {
+    if (i > 0) html += '<div class="preview-arrow">↓</div>';
+    html += '<div class="preview-stage">' +
+      '<div class="preview-stage-name">' + (i + 1) + ". " + escHtml(stages[i].name) + "</div>" +
+      '<div class="preview-stage-meta">→ ' + escHtml(stages[i].roles) + "</div>" +
+      "</div>";
+  }
+  container.innerHTML = html || '<p class="empty-state">Could not parse pipeline structure.</p>';
+}
+
+function renderRunStep() {
+  if (!wizard.generateResult) return;
+  const info = $("#run-summary-info");
+  const files = wizard.generateResult.files;
+  info.innerHTML =
+    "<div><strong>Pipeline:</strong> " + escHtml(wizard.description.slice(0, 100)) + (wizard.description.length > 100 ? "..." : "") + "</div>" +
+    "<div><strong>Files to promote:</strong> " + files.length + " files</div>";
+  $("#run-confirm-error").textContent = "";
+}
+
 async function confirmAndRun() {
   const btn = $("#create-confirm-btn");
+  const errorEl = $("#run-confirm-error");
   btn.disabled = true;
   btn.textContent = "Promoting...";
-
-  // 1. Promote files
+  errorEl.textContent = "";
   const promoteRes = await api("/api/generate/promote", { method: "POST" });
   if (promoteRes.status !== 200) {
     btn.disabled = false;
     btn.textContent = "Confirm & Run";
-    const banner = $("#create-status-banner");
-    banner.className = "create-status-banner warning";
-    banner.textContent = "Promote failed: " + ((promoteRes.data && promoteRes.data.error) || "Unknown error");
+    errorEl.textContent = "Promote failed: " + ((promoteRes.data && promoteRes.data.error) || "Unknown error");
     return;
   }
-
-  // 2. Start a run with the generated pipeline
   btn.textContent = "Starting run...";
-  const input = generateDescription || "";
+  const input = wizard.description || "";
   const runRes = await api("/api/runs", {
     method: "POST",
     body: JSON.stringify({ input }),
   });
-
   btn.disabled = false;
   btn.textContent = "Confirm & Run";
-
   if (runRes.status === 200 && runRes.data.runId) {
-    // Reset create state
-    generatedFiles = [];
-    generatedStatus = null;
-    generatedErrors = [];
-    selectedGeneratedFile = null;
-    // Navigate to run detail
+    wizard = {
+      step: 1,
+      description: "",
+      templateId: null,
+      generateResult: null,
+      selectedFile: null,
+      validationPassed: false,
+      templates: wizard.templates,
+    };
     openRunDetail(runRes.data.runId);
+  } else {
+    errorEl.textContent = (runRes.data && runRes.data.error) || "Failed to start run.";
   }
 }
 
