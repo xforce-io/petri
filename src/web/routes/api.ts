@@ -5,6 +5,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { listRuns, loadRunLog, type RunLogger } from "../../engine/logger.js";
+import { generatePipeline } from "../../engine/generator.js";
+import { promoteGenerated } from "../../engine/promote.js";
+import { validateProject } from "../../engine/validate.js";
+import { ClaudeCodeProvider } from "../../providers/claude-code.js";
+import { PiProvider } from "../../providers/pi.js";
+import { loadPetriConfig } from "../../config/loader.js";
+import type { AgentProvider } from "../../types.js";
 import { sendJson, readBody } from "../server.js";
 import { startRun } from "../runner.js";
 
@@ -93,6 +100,129 @@ export async function handleApiRequest(
   // PUT /api/config/file
   if (pathname === "/api/config/file" && method === "PUT") {
     return handleConfigFileWrite(req, res, url, projectDir);
+  }
+
+  // POST /api/generate
+  if (pathname === "/api/generate" && method === "POST") {
+    try {
+      const body = await readBody(req);
+      let parsed: { description?: string };
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        sendJson(res, 400, { error: "Invalid JSON body" });
+        return;
+      }
+      if (!parsed.description || typeof parsed.description !== "string") {
+        sendJson(res, 400, { error: "Missing required field: description" });
+        return;
+      }
+      const provider = createProvider(projectDir);
+      const result = await generatePipeline(
+        { description: parsed.description, projectDir },
+        provider,
+      );
+      sendJson(res, 200, result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 500, { error: message });
+    }
+    return;
+  }
+
+  // POST /api/generate/promote
+  if (pathname === "/api/generate/promote" && method === "POST") {
+    try {
+      const files = promoteGenerated(projectDir);
+      sendJson(res, 200, { files });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 500, { error: message });
+    }
+    return;
+  }
+
+  // GET /api/generate/files
+  if (pathname === "/api/generate/files" && method === "GET") {
+    const genDir = path.join(projectDir, ".petri", "generated");
+    if (!fs.existsSync(genDir)) {
+      sendJson(res, 200, []);
+      return;
+    }
+    const files = listGeneratedFiles(genDir);
+    sendJson(res, 200, files);
+    return;
+  }
+
+  // GET /api/generate/file?path=...
+  if (pathname === "/api/generate/file" && method === "GET") {
+    const relPath = url.searchParams.get("path");
+    if (!relPath) {
+      sendJson(res, 400, { error: "Missing path parameter" });
+      return;
+    }
+    const genDir = path.join(projectDir, ".petri", "generated");
+    const absPath = path.resolve(genDir, relPath);
+    if (!absPath.startsWith(genDir) || !fs.existsSync(absPath)) {
+      sendJson(res, 404, { error: "File not found" });
+      return;
+    }
+    const content = fs.readFileSync(absPath, "utf-8");
+    sendJson(res, 200, { path: relPath, content });
+    return;
+  }
+
+  // PUT /api/generate/file?path=...
+  if (pathname === "/api/generate/file" && method === "PUT") {
+    const relPath = url.searchParams.get("path");
+    if (!relPath) {
+      sendJson(res, 400, { error: "Missing path parameter" });
+      return;
+    }
+    const genDir = path.join(projectDir, ".petri", "generated");
+    const absPath = path.resolve(genDir, relPath);
+    if (!absPath.startsWith(genDir)) {
+      sendJson(res, 403, { error: "Forbidden" });
+      return;
+    }
+    const body = await readBody(req);
+    let parsed: { content?: string };
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      sendJson(res, 400, { error: "Invalid JSON body" });
+      return;
+    }
+    if (typeof parsed.content !== "string") {
+      sendJson(res, 400, { error: "Missing content field" });
+      return;
+    }
+    fs.mkdirSync(path.dirname(absPath), { recursive: true });
+    fs.writeFileSync(absPath, parsed.content, "utf-8");
+    sendJson(res, 200, { path: relPath, saved: true });
+    return;
+  }
+
+  // POST /api/generate/validate
+  if (pathname === "/api/generate/validate" && method === "POST") {
+    const genDir = path.join(projectDir, ".petri", "generated");
+    const petriSrc = path.join(projectDir, "petri.yaml");
+    const petriDst = path.join(genDir, "petri.yaml");
+    let copiedPetri = false;
+    if (fs.existsSync(petriSrc) && !fs.existsSync(petriDst)) {
+      fs.mkdirSync(genDir, { recursive: true });
+      fs.copyFileSync(petriSrc, petriDst);
+      copiedPetri = true;
+    }
+    try {
+      const result = validateProject(genDir);
+      sendJson(res, 200, result);
+    } finally {
+      if (copiedPetri && fs.existsSync(petriDst)) {
+        fs.unlinkSync(petriDst);
+      }
+    }
+    return;
   }
 
   sendJson(res, 404, { error: "Not found" });
@@ -396,4 +526,38 @@ async function handleConfigFileWrite(
   }
   fs.writeFileSync(absPath, parsed.content, "utf-8");
   sendJson(res, 200, { path: relPath, saved: true });
+}
+
+function createProvider(projectDir: string): AgentProvider {
+  const petriConfig = loadPetriConfig(projectDir);
+  const providerEntries = Object.entries(petriConfig.providers);
+  const hasClaudeCode = providerEntries.some(([, v]) => v.type === "claude_code");
+  const defaultModel = petriConfig.defaults.model;
+
+  if (hasClaudeCode) {
+    return new ClaudeCodeProvider(defaultModel);
+  }
+
+  const modelMappings: Record<string, { piProvider: string; piModel: string }> = {};
+  for (const [modelAlias, modelCfg] of Object.entries(petriConfig.models ?? {})) {
+    const provCfg = petriConfig.providers[modelCfg.provider];
+    if (provCfg) {
+      modelMappings[modelAlias] = { piProvider: modelCfg.provider, piModel: modelCfg.model };
+    }
+  }
+  return new PiProvider(modelMappings);
+}
+
+function listGeneratedFiles(dir: string, prefix = ""): string[] {
+  const results: string[] = [];
+  if (!fs.existsSync(dir)) return results;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      results.push(...listGeneratedFiles(path.join(dir, entry.name), rel));
+    } else {
+      results.push(rel);
+    }
+  }
+  return results;
 }
