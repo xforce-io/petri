@@ -18,10 +18,7 @@ export function createProviderFromConfig(projectDir: string): AgentProvider {
 
   const modelMappings: Record<string, { piProvider: string; piModel: string }> = {};
   for (const [modelAlias, modelCfg] of Object.entries(petriConfig.models ?? {})) {
-    const provCfg = petriConfig.providers[modelCfg.provider];
-    if (provCfg) {
-      modelMappings[modelAlias] = { piProvider: modelCfg.provider, piModel: modelCfg.model };
-    }
+    modelMappings[modelAlias] = { piProvider: "anthropic", piModel: modelCfg.model };
   }
   return new PiProvider(modelMappings);
 }
