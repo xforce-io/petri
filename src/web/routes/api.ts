@@ -14,6 +14,7 @@ import { loadPetriConfig } from "../../config/loader.js";
 import type { AgentProvider } from "../../types.js";
 import { sendJson, readBody } from "../server.js";
 import { startRun } from "../runner.js";
+import { listFilesRecursive } from "../../util/fs.js";
 
 export async function handleApiRequest(
   req: http.IncomingMessage,
@@ -149,7 +150,7 @@ export async function handleApiRequest(
       sendJson(res, 200, []);
       return;
     }
-    const files = listGeneratedFiles(genDir);
+    const files = listFilesRecursive(genDir);
     sendJson(res, 200, files);
     return;
   }
@@ -163,7 +164,7 @@ export async function handleApiRequest(
     }
     const genDir = path.join(projectDir, ".petri", "generated");
     const absPath = path.resolve(genDir, relPath);
-    if (!absPath.startsWith(genDir) || !fs.existsSync(absPath)) {
+    if (!absPath.startsWith(genDir + "/") || !fs.existsSync(absPath)) {
       sendJson(res, 404, { error: "File not found" });
       return;
     }
@@ -181,7 +182,7 @@ export async function handleApiRequest(
     }
     const genDir = path.join(projectDir, ".petri", "generated");
     const absPath = path.resolve(genDir, relPath);
-    if (!absPath.startsWith(genDir)) {
+    if (!absPath.startsWith(genDir + "/")) {
       sendJson(res, 403, { error: "Forbidden" });
       return;
     }
@@ -548,16 +549,3 @@ function createProvider(projectDir: string): AgentProvider {
   return new PiProvider(modelMappings);
 }
 
-function listGeneratedFiles(dir: string, prefix = ""): string[] {
-  const results: string[] = [];
-  if (!fs.existsSync(dir)) return results;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      results.push(...listGeneratedFiles(path.join(dir, entry.name), rel));
-    } else {
-      results.push(rel);
-    }
-  }
-  return results;
-}

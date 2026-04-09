@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateProject } from "./validate.js";
+import { listFilesRecursive } from "../util/fs.js";
 import type { AgentProvider } from "../types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -244,20 +245,6 @@ function writeGeneratedFiles(dir: string, files: Map<string, string>): void {
     fs.mkdirSync(path.dirname(absPath), { recursive: true });
     fs.writeFileSync(absPath, content, "utf-8");
   }
-}
-
-function listFilesRecursive(dir: string, prefix = ""): string[] {
-  const results: string[] = [];
-  if (!fs.existsSync(dir)) return results;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      results.push(...listFilesRecursive(path.join(dir, entry.name), rel));
-    } else {
-      results.push(rel);
-    }
-  }
-  return results;
 }
 
 function safeRead(filePath: string): string {
