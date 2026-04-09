@@ -850,33 +850,113 @@ main {
   margin-bottom: 0;
 }
 
-/* ── Create Tab ── */
+/* ── Create Tab: Wizard ── */
 
-.create-input-view {
-  padding: 1.5rem;
-  overflow-y: auto;
-  height: 100%;
+.step-bar {
   display: flex;
+  align-items: center;
   justify-content: center;
+  gap: 0;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
 }
 
-.create-form {
-  max-width: 700px;
-  width: 100%;
+.step-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: default;
+  opacity: 0.4;
+  transition: opacity 0.2s;
 }
 
-.create-form h3 {
-  font-size: 1rem;
+.step-item.active {
+  opacity: 1;
+}
+
+.step-item.completed {
+  opacity: 0.8;
+  cursor: pointer;
+}
+
+.step-number {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+
+.step-item.active .step-number {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.1);
+}
+
+.step-item.completed .step-number {
+  border-color: var(--success-bright);
+  color: var(--success-bright);
+  background: rgba(45, 106, 79, 0.2);
+}
+
+.step-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.step-item.active .step-label {
+  color: var(--text);
+}
+
+.step-line {
+  width: 40px;
+  height: 2px;
+  background: var(--border);
+  margin: 0 0.5rem;
+}
+
+.wizard-step {
+  display: none;
+  height: calc(100% - 62px);
+}
+
+.wizard-step.active {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Step 1: Choose */
+
+.choose-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.choose-left {
+  flex: 1;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  max-width: 50%;
+}
+
+.choose-left h3 {
+  font-size: 1.1rem;
   margin-bottom: 0.5rem;
 }
 
-.create-hint {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  margin-bottom: 1rem;
-}
-
-.create-form textarea {
+.choose-left textarea {
+  flex: 1;
+  min-height: 120px;
   width: 100%;
   background: var(--bg-secondary);
   color: var(--text);
@@ -885,33 +965,113 @@ main {
   padding: 0.75rem;
   font-size: 0.875rem;
   font-family: inherit;
-  resize: vertical;
+  resize: none;
   line-height: 1.5;
 }
 
-.create-form textarea:focus {
+.choose-left textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+}
+
+.choose-right {
+  flex: 1;
+  padding: 1.5rem;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  max-width: 50%;
+}
+
+.choose-right h3 {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+}
+
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+.template-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.template-card:hover {
+  border-color: var(--text-muted);
+}
+
+.template-card.selected {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.05);
+}
+
+.template-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 0.35rem;
+}
+
+.template-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.template-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.create-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
 }
 
 .create-actions {
   margin-top: 0.75rem;
 }
 
-.create-loading {
+/* Step 2: Generate */
+
+.generate-view {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
-  margin-top: 1rem;
+  justify-content: center;
+  flex: 1;
+  gap: 1rem;
+}
+
+.generate-msg {
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: 0.9rem;
+}
+
+.generate-error {
+  text-align: center;
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+.generate-error-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-top: 0.75rem;
 }
 
 .spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--border);
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -919,6 +1079,146 @@ main {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Step 3: Review */
+
+.review-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  padding: 0 1rem;
+}
+
+.review-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  padding: 0.6rem 1rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.review-tab:hover {
+  color: var(--text);
+}
+
+.review-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.review-tab-content {
+  display: none;
+  flex: 1;
+  overflow: hidden;
+}
+
+.review-tab-content.active {
+  display: flex;
+  flex-direction: column;
+}
+
+.pipeline-preview {
+  padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.preview-header {
+  margin-bottom: 1.5rem;
+}
+
+.preview-header h3 {
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.preview-header p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.preview-stage {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  max-width: 300px;
+  margin: 0 auto;
+}
+
+.preview-stage-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.preview-stage-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.preview-arrow {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  line-height: 2rem;
+}
+
+.wizard-bottom-bar {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.wizard-bottom-bar .btn-primary {
+  margin-left: auto;
+}
+
+/* Step 4: Run */
+
+.run-confirm-view {
+  padding: 2rem;
+  max-width: 500px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 1;
+}
+
+.run-confirm-view h3 {
+  font-size: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.run-summary-info {
+  font-size: 0.9rem;
+  line-height: 1.8;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+.run-summary-info strong {
+  color: var(--text);
+}
+
+.run-confirm-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+.run-confirm-view .wizard-bottom-bar {
+  padding: 0;
+  border: none;
+  background: none;
+  margin-top: 0.5rem;
 }
 
 .create-status-banner {
@@ -937,14 +1237,6 @@ main {
   color: var(--warning);
 }
 
-.create-review-actions {
-  display: flex;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
-  border-top: 1px solid var(--border);
-  background: var(--bg-secondary);
-}
-
 .btn-secondary {
   background: transparent;
   color: var(--text-muted);
@@ -961,13 +1253,7 @@ main {
   border-color: var(--text-muted);
 }
 
-#create-review-view {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-#create-review-view .config-layout {
+#wizard-step-3 .config-layout {
   flex: 1;
   overflow: hidden;
 }
