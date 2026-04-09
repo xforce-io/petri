@@ -590,6 +590,10 @@ function connectSSE(runId) {
         logEl.textContent += "\n" + line;
         logEl.scrollTop = logEl.scrollHeight;
       }
+      // Refresh stage list on stage completion or gate results
+      if (data.type === "role-end" || data.type === "gate-result") {
+        loadRun(runId);
+      }
       if (data.type === "run-end") {
         eventSource.close();
         eventSource = null;
