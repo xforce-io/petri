@@ -8,13 +8,10 @@ import { listRuns, loadRunLog, type RunLogger } from "../../engine/logger.js";
 import { generatePipeline } from "../../engine/generator.js";
 import { promoteGenerated } from "../../engine/promote.js";
 import { validateProject } from "../../engine/validate.js";
-import { ClaudeCodeProvider } from "../../providers/claude-code.js";
-import { PiProvider } from "../../providers/pi.js";
-import { loadPetriConfig } from "../../config/loader.js";
-import type { AgentProvider } from "../../types.js";
+import { createProviderFromConfig } from "../../util/provider.js";
 import { sendJson, readBody } from "../server.js";
 import { startRun } from "../runner.js";
-import { listFilesRecursive } from "../../util/fs.js";
+import { listFilesRecursive, filterGeneratedFiles } from "../../util/fs.js";
 
 export async function handleApiRequest(
   req: http.IncomingMessage,
@@ -118,7 +115,7 @@ export async function handleApiRequest(
         sendJson(res, 400, { error: "Missing required field: description" });
         return;
       }
-      const provider = createProvider(projectDir);
+      const provider = createProviderFromConfig(projectDir);
       const result = await generatePipeline(
         { description: parsed.description, projectDir },
         provider,
@@ -150,7 +147,7 @@ export async function handleApiRequest(
       sendJson(res, 200, []);
       return;
     }
-    const files = listFilesRecursive(genDir);
+    const files = filterGeneratedFiles(listFilesRecursive(genDir));
     sendJson(res, 200, files);
     return;
   }
@@ -529,23 +526,4 @@ async function handleConfigFileWrite(
   sendJson(res, 200, { path: relPath, saved: true });
 }
 
-function createProvider(projectDir: string): AgentProvider {
-  const petriConfig = loadPetriConfig(projectDir);
-  const providerEntries = Object.entries(petriConfig.providers);
-  const hasClaudeCode = providerEntries.some(([, v]) => v.type === "claude_code");
-  const defaultModel = petriConfig.defaults.model;
-
-  if (hasClaudeCode) {
-    return new ClaudeCodeProvider(defaultModel);
-  }
-
-  const modelMappings: Record<string, { piProvider: string; piModel: string }> = {};
-  for (const [modelAlias, modelCfg] of Object.entries(petriConfig.models ?? {})) {
-    const provCfg = petriConfig.providers[modelCfg.provider];
-    if (provCfg) {
-      modelMappings[modelAlias] = { piProvider: modelCfg.provider, piModel: modelCfg.model };
-    }
-  }
-  return new PiProvider(modelMappings);
-}
 

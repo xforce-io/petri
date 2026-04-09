@@ -877,6 +877,9 @@ async function confirmAndRun() {
   if (promoteRes.status !== 200) {
     btn.disabled = false;
     btn.textContent = "Confirm & Run";
+    const banner = $("#create-status-banner");
+    banner.className = "create-status-banner warning";
+    banner.textContent = "Promote failed: " + ((promoteRes.data && promoteRes.data.error) || "Unknown error");
     return;
   }
 

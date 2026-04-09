@@ -3,8 +3,7 @@ import { loadPetriConfig, loadPipelineConfig, loadRole } from "../config/loader.
 import { RunLogger } from "../engine/logger.js";
 import { Engine } from "../engine/engine.js";
 import { isRepeatBlock } from "../types.js";
-import { PiProvider } from "../providers/pi.js";
-import { ClaudeCodeProvider } from "../providers/claude-code.js";
+import { createProviderFromConfig } from "../util/provider.js";
 import type { AgentProvider, PipelineConfig, StageConfig } from "../types.js";
 
 export interface StartRunOpts {
@@ -65,26 +64,7 @@ export function startRun(opts: StartRunOpts): StartRunResult {
   }
 
   // 4. Create provider
-  let provider: AgentProvider;
-  const providerEntries = Object.entries(petriConfig.providers);
-  const hasClaudeCode = providerEntries.some(([, v]) => v.type === "claude_code");
-
-  if (hasClaudeCode) {
-    provider = new ClaudeCodeProvider(defaultModel);
-  } else {
-    // Build model mappings for PiProvider
-    const modelMappings: Record<string, { piProvider: string; piModel: string }> = {};
-    for (const [modelAlias, modelCfg] of Object.entries(petriConfig.models ?? {})) {
-      const provCfg = petriConfig.providers[modelCfg.provider];
-      if (provCfg) {
-        modelMappings[modelAlias] = {
-          piProvider: modelCfg.provider,
-          piModel: modelCfg.model,
-        };
-      }
-    }
-    provider = new PiProvider(modelMappings);
-  }
+  const provider: AgentProvider = createProviderFromConfig(projectDir);
 
   // 5. Create logger and engine
   const petriDir = path.join(projectDir, ".petri");
