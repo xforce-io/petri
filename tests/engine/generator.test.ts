@@ -34,4 +34,30 @@ describe("parseGeneratedFiles", () => {
   it("throws on invalid output", () => {
     expect(() => parseGeneratedFiles("not json at all")).toThrow();
   });
+
+  it("rejects absolute paths", () => {
+    const output = JSON.stringify({
+      "/etc/passwd": "root:x:0:0",
+    });
+    expect(() => parseGeneratedFiles(output)).toThrow("Invalid file path");
+  });
+
+  it("rejects path traversal with ..", () => {
+    const output = JSON.stringify({
+      "../outside/secret.txt": "contents",
+    });
+    expect(() => parseGeneratedFiles(output)).toThrow("Invalid file path");
+  });
+
+  it("rejects empty file maps", () => {
+    const output = JSON.stringify({});
+    expect(() => parseGeneratedFiles(output)).toThrow("empty file map");
+  });
+
+  it("rejects non-string content values", () => {
+    const output = JSON.stringify({
+      "pipeline.yaml": 42,
+    });
+    expect(() => parseGeneratedFiles(output)).toThrow('content must be a string');
+  });
 });

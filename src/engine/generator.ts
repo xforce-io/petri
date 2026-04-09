@@ -213,9 +213,16 @@ export async function generatePipeline(
     lastErrors = validation.errors;
   }
 
-  // Failed after all retries — return what we have with errors
+  // Failed after all retries — clean up temp files and return what we have with errors
+  // Remove copied petri.yaml from generated dir (it must not be left on disk)
+  const copiedPetri = path.join(generatedDir, "petri.yaml");
+  if (fs.existsSync(copiedPetri)) fs.unlinkSync(copiedPetri);
+  // Remove _llm_work directory if it exists
+  const llmWorkDirFinal = path.join(generatedDir, "_llm_work");
+  if (fs.existsSync(llmWorkDirFinal)) fs.rmSync(llmWorkDirFinal, { recursive: true });
+
   const finalFiles = listFilesRecursive(generatedDir)
-    .filter((f) => f !== "petri.yaml"); // exclude copied petri.yaml
+    .filter((f) => f !== "petri.yaml" && !f.startsWith("_llm_work/") && f !== "_llm_work");
   return {
     status: "validation_failed",
     files: finalFiles,
