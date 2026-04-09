@@ -27,7 +27,7 @@ export interface RepeatBlock {
     name: string;
     max_iterations: number;
     until: string;  // gate id to check
-    stages: StageConfig[];
+    stages: StageEntry[];
   };
 }
 
@@ -47,15 +47,22 @@ export interface RoleConfig {
 
 // --- Gate ---
 
+export interface GateCheck {
+  field: string;
+  equals?: unknown;
+  gte?: number;
+  lte?: number;
+  gt?: number;
+  lt?: number;
+  in?: unknown[];
+}
+
 export interface GateConfig {
   id: string;          // canonical gate id, e.g. "tests-pass"
   description?: string;
   evidence: {
     path: string;
-    check?: {
-      field: string;
-      equals?: unknown;
-    };
+    check?: GateCheck;
   };
 }
 
@@ -109,6 +116,7 @@ export interface AgentConfig {
   context: string;
   artifactDir: string;
   model: string;
+  timeout?: number;  // ms — passed from stage timeout, provider should respect this
 }
 
 export interface AgentResult {

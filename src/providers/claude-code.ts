@@ -19,33 +19,51 @@ export class ClaudeCodeProvider implements AgentProvider {
 
     // Write prompt to temp file to avoid shell escaping issues
     mkdirSync(config.artifactDir, { recursive: true });
-    const promptFile = join(config.artifactDir, ".petri-prompt.md");
+    const promptFile = join(config.artifactDir, "_prompt.md");
     writeFileSync(promptFile, fullPrompt, "utf-8");
 
     const model = config.model === "sonnet" ? "sonnet" : config.model;
 
     // Find the real claude binary (execSync doesn't expand shell aliases)
     const claudeBin = findClaude();
-    const cmd = `cat "${promptFile}" | "${claudeBin}" -p - --model ${model} --output-format json --dangerously-skip-permissions`;
+    const cmd = `cat "${promptFile}" | "${claudeBin}" -p --model ${model} --output-format json --dangerously-skip-permissions`;
 
-    console.log(`  [claude-code] Running ${model} in ${config.artifactDir}...`);
+    // Default: 4 hours. Stage timeout is passed through if set.
+    const agentTimeout = config.timeout ?? 4 * 3600_000;
+    const timeoutMin = Math.round(agentTimeout / 60_000);
+    console.log(`  [claude-code] Running ${model} in ${config.artifactDir} (timeout: ${timeoutMin}m)...`);
 
     let output: string;
     try {
       output = execSync(cmd, {
         cwd: config.artifactDir,
         encoding: "utf-8",
-        timeout: 900_000,  // 15 min
+        timeout: agentTimeout,
         maxBuffer: 10 * 1024 * 1024,
         shell: "/bin/bash",
         env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
       });
     } catch (e: any) {
-      console.error(`  [claude-code] Error: ${e.message?.slice(0, 500)}`);
+      const isTimeout = e.killed || e.signal === "SIGTERM";
+      if (isTimeout) {
+        const msg = `[claude-code] TIMEOUT: Agent killed after ${timeoutMin} minutes. If this task needs more time, increase the stage timeout in pipeline.yaml.`;
+        console.error(`  ${msg}`);
+        writeFileSync(join(config.artifactDir, "_error.txt"), msg, "utf-8");
+      } else {
+        const errMsg = e.message?.slice(0, 500) ?? "Unknown error";
+        console.error(`  [claude-code] FAILED: ${errMsg}`);
+        writeFileSync(join(config.artifactDir, "_error.txt"), `[claude-code] FAILED: ${errMsg}`, "utf-8");
+      }
       // stdout may still have useful output even on non-zero exit
       output = e.stdout ?? "";
-    } finally {
-      try { unlinkSync(promptFile); } catch {}
+    }
+
+    // Detect rate limit / quota errors — abort immediately instead of wasting iterations
+    if (output.includes("hit your limit") || output.includes("rate limit") || output.includes("quota exceeded")) {
+      const msg = `[claude-code] RATE LIMITED: API quota exhausted. Pipeline cannot continue. Output: ${output.slice(0, 300)}`;
+      console.error(`  ${msg}`);
+      writeFileSync(join(config.artifactDir, "_error.txt"), msg, "utf-8");
+      throw new Error(msg);
     }
 
     // Parse JSON output — Claude Code returns { type, result, total_cost_usd, usage: {...} }
@@ -61,9 +79,19 @@ export class ClaudeCodeProvider implements AgentProvider {
         costUsd: totalCost,
       };
       if (parsed.result) {
+        // Also check result text for rate limit messages
+        if (parsed.result.includes("hit your limit") || parsed.result.includes("rate limit")) {
+          const msg = `[claude-code] RATE LIMITED: ${parsed.result.slice(0, 300)}`;
+          console.error(`  ${msg}`);
+          writeFileSync(join(config.artifactDir, "_error.txt"), msg, "utf-8");
+          throw new Error(msg);
+        }
         console.log(`  [claude-code] Result: ${parsed.result.slice(0, 150)}...`);
+        writeFileSync(join(config.artifactDir, "_result.md"), parsed.result, "utf-8");
       }
-    } catch {
+    } catch (e) {
+      // Re-throw rate limit errors
+      if (e instanceof Error && e.message.includes("RATE LIMITED")) throw e;
       // non-JSON output is fine, agent still may have written files
     }
 

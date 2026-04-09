@@ -60,15 +60,42 @@ export async function checkGates(
 
     if (gate.evidence.check) {
       const content = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
-      const { field, equals } = gate.evidence.check;
-      const actual = content[field];
+      const check = gate.evidence.check;
+      const actual = content[check.field];
+      let failed = false;
+      let failReason = "";
 
-      if (equals !== undefined && actual !== equals) {
+      if (check.equals !== undefined && actual !== check.equals) {
+        failed = true;
+        failReason = `Field "${check.field}" is ${JSON.stringify(actual)}, expected ${JSON.stringify(check.equals)}`;
+      }
+      if (!failed && check.gte !== undefined && !(actual >= check.gte)) {
+        failed = true;
+        failReason = `Field "${check.field}" is ${actual}, expected >= ${check.gte}`;
+      }
+      if (!failed && check.lte !== undefined && !(actual <= check.lte)) {
+        failed = true;
+        failReason = `Field "${check.field}" is ${actual}, expected <= ${check.lte}`;
+      }
+      if (!failed && check.gt !== undefined && !(actual > check.gt)) {
+        failed = true;
+        failReason = `Field "${check.field}" is ${actual}, expected > ${check.gt}`;
+      }
+      if (!failed && check.lt !== undefined && !(actual < check.lt)) {
+        failed = true;
+        failReason = `Field "${check.field}" is ${actual}, expected < ${check.lt}`;
+      }
+      if (!failed && check.in !== undefined && !check.in.includes(actual)) {
+        failed = true;
+        failReason = `Field "${check.field}" is ${JSON.stringify(actual)}, expected one of ${JSON.stringify(check.in)}`;
+      }
+
+      if (failed) {
         details.push({
           gateId: gate.id,
           roleName,
           passed: false,
-          reason: `Field "${field}" is ${JSON.stringify(actual)}, expected ${JSON.stringify(equals)}`,
+          reason: failReason,
         });
         continue;
       }

@@ -3,3 +3,4 @@ dist/
 .petri/
 .superpowers/
 *.tgz
+.worktrees/

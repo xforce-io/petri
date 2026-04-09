@@ -8,6 +8,7 @@ import {
 } from "../config/loader.js";
 import { Engine } from "../engine/engine.js";
 import { RunLogger } from "../engine/logger.js";
+import { acquireLock, releaseLock, killProcessTree } from "../engine/lock.js";
 import { PiProvider } from "../providers/pi.js";
 import { ClaudeCodeProvider } from "../providers/claude-code.js";
 import { isRepeatBlock } from "../types.js";
@@ -17,6 +18,7 @@ interface RunOptions {
   pipeline: string;
   input?: string;
   from?: string;
+  skipTo?: string;
 }
 
 export async function runCommand(opts: RunOptions): Promise<void> {
@@ -46,21 +48,20 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     process.exit(1);
   }
 
-  // 3. Collect all role names from pipeline stages
+  // 3. Collect all role names from pipeline stages (recursing into nested repeats)
   const roleNames = new Set<string>();
-  for (const entry of pipelineConfig.stages) {
-    if (isRepeatBlock(entry)) {
-      for (const stage of entry.repeat.stages) {
-        for (const role of stage.roles) {
+  function collectRoles(stages: import("../types.js").StageEntry[]): void {
+    for (const entry of stages) {
+      if (isRepeatBlock(entry)) {
+        collectRoles(entry.repeat.stages);
+      } else {
+        for (const role of entry.roles) {
           roleNames.add(role);
         }
       }
-    } else {
-      for (const role of entry.roles) {
-        roleNames.add(role);
-      }
     }
   }
+  collectRoles(pipelineConfig.stages);
 
   // 4. Load all roles
   const defaultModel = petriConfig.defaults.model;
@@ -97,23 +98,48 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     defaultGateStrategy: petriConfig.defaults.gate_strategy,
     defaultMaxRetries: petriConfig.defaults.max_retries,
     logger,
+    skipTo: opts.skipTo,
   });
 
-  // 7. Run and print result
-  console.log(chalk.blue(`Running pipeline: ${pipelineConfig.name} (run-${logger.runId})`));
-  const result = await engine.run(pipelineConfig, input);
+  // 7. Acquire lock to prevent concurrent runs
+  const lockFile = path.join(petriDir, "run.lock");
+  acquireLock(lockFile, logger.runId);
 
-  if (result.status === "done") {
-    logger.finish("done");
-    console.log(chalk.green("Pipeline completed successfully."));
-    console.log(chalk.gray(`Run: ${logger.runDir}`));
-  } else {
-    logger.finish("blocked", result.stage, result.reason);
-    console.log(chalk.red(`Pipeline blocked at stage: ${result.stage}`));
-    if (result.reason) {
-      console.log(chalk.red(`Reason: ${result.reason}`));
-    }
-    console.log(chalk.gray(`Run: ${logger.runDir}`));
+  // Ensure cleanup on signals — kill entire process tree so child processes (e.g. python training) are also terminated
+  const cleanup = (signal: string) => {
+    console.log(chalk.yellow(`\nReceived ${signal}, shutting down...`));
+    logger.finish("blocked", undefined, `Interrupted by ${signal}`);
+    killProcessTree(process.pid);
+    releaseLock(lockFile);
     process.exit(1);
+  };
+  process.on("SIGINT", () => cleanup("SIGINT"));
+  process.on("SIGTERM", () => cleanup("SIGTERM"));
+
+  // 8. Run and print result
+  console.log(chalk.blue(`Running pipeline: ${pipelineConfig.name} (run-${logger.runId})`));
+  try {
+    const result = await engine.run(pipelineConfig, input);
+
+    if (result.status === "done") {
+      logger.finish("done");
+      console.log(chalk.green("Pipeline completed successfully."));
+      console.log(chalk.gray(`Run: ${logger.runDir}`));
+    } else {
+      logger.finish("blocked", result.stage, result.reason);
+      console.log(chalk.red(`Pipeline blocked at stage: ${result.stage}`));
+      if (result.reason) {
+        console.log(chalk.red(`Reason: ${result.reason}`));
+      }
+      console.log(chalk.gray(`Run: ${logger.runDir}`));
+      process.exit(1);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.finish("blocked", undefined, `Unexpected error: ${msg}`);
+    console.error(chalk.red(`Pipeline failed: ${msg}`));
+    process.exit(1);
+  } finally {
+    releaseLock(lockFile);
   }
 }

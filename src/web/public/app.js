@@ -9,6 +9,13 @@ let currentStageIndex = -1;
 let eventSource = null;
 let currentConfigPath = null;
 
+// Create tab state
+let generateDescription = null;
+let generatedFiles = [];
+let generatedStatus = null;
+let generatedErrors = [];
+let selectedGeneratedFile = null;
+
 // ── API Helper ──
 function apiUrl(urlPath) {
   if (!currentProject) return urlPath;
@@ -83,6 +90,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (target === "dashboard") loadDashboard();
       if (target === "runs") loadRunsTab();
       if (target === "config") loadConfigTab();
+      if (target === "create") loadCreateTab();
     });
   });
 
@@ -105,6 +113,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Back to runs list
   $("#back-to-runs").addEventListener("click", showRunsList);
+
+  // Create tab buttons
+  $("#create-generate-btn").addEventListener("click", startGenerate);
+  $("#gen-editor-save-btn").addEventListener("click", saveGeneratedFile);
+  $("#create-validate-btn").addEventListener("click", validateGenerated);
+  $("#create-confirm-btn").addEventListener("click", confirmAndRun);
+  $("#create-regen-btn").addEventListener("click", showCreateInput);
+
+  // Prompt toggle (collapse/expand)
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("#io-prompt-toggle")) {
+      const el = $("#io-prompt");
+      el.classList.toggle("collapsed");
+      const toggle = e.target.closest("#io-prompt-toggle").querySelector(".io-toggle");
+      if (toggle) toggle.textContent = el.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
+    }
+  });
 
   // Load projects then dashboard
   loadProjects();
@@ -347,12 +372,15 @@ function renderStageList() {
 
   list.innerHTML = stages.map((s, i) => {
     const dotClass = s.gatePassed === true ? "passed" : s.gatePassed === false ? "failed" : "pending";
+    const usage = s.usage || {};
+    const costStr = usage.costUsd ? ` · ${formatCost(usage.costUsd)}` : "";
+    const modelStr = s.model ? ` · ${s.model}` : "";
     return `
       <div class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}</div>
-          <div class="stage-meta">${escHtml(s.role || "")} &middot; ${formatDuration(s.durationMs)}</div>
+          <div class="stage-meta">${escHtml(s.role || "")}${modelStr} · ${formatDuration(s.durationMs)}${costStr}</div>
         </div>
       </div>
     `;
@@ -380,9 +408,42 @@ function renderRunSummary() {
 function selectStage(index) {
   currentStageIndex = index;
   $$(".stage-item").forEach((el, i) => el.classList.toggle("active", i === index));
+  loadStageIO();
   loadRunLog();
   loadStageArtifacts();
   renderGateDetail();
+}
+
+async function loadStageIO() {
+  const promptEl = $("#io-prompt");
+  const resultEl = $("#io-result");
+
+  const stage = currentRunData.stages?.[currentStageIndex];
+  if (!stage) {
+    promptEl.textContent = "Select a stage to view agent I/O.";
+    resultEl.textContent = "";
+    return;
+  }
+
+  const prefix = stage.stage + "/" + (stage.role || "");
+
+  // Load prompt (_prompt.md)
+  const promptRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_prompt.md");
+  if (promptRes.status === 200 && promptRes.data) {
+    promptEl.textContent = promptRes.data;
+    promptEl.classList.add("collapsed");
+  } else {
+    promptEl.textContent = "(No prompt saved for this stage — available in future runs)";
+    promptEl.classList.remove("collapsed");
+  }
+
+  // Load result (_result.md)
+  const resultRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_result.md");
+  if (resultRes.status === 200 && resultRes.data) {
+    resultEl.textContent = resultRes.data;
+  } else {
+    resultEl.textContent = "(No result saved for this stage — available in future runs)";
+  }
 }
 
 async function loadRunLog() {
@@ -466,11 +527,18 @@ function renderGateDetail() {
   const statusClass = passed === true ? "passed" : passed === false ? "failed" : "pending";
   const statusText = passed === true ? "Passed" : passed === false ? "Failed" : "Pending";
 
+  const usage = stage.usage || {};
+  const tokenTotal = (usage.inputTokens || 0) + (usage.outputTokens || 0);
+
   gate.innerHTML = `
     <div class="gate-card">
       <div class="gate-status ${statusClass}">${statusText}</div>
       <div><strong>Stage:</strong> ${escHtml(stage.stage)}</div>
       <div><strong>Role:</strong> ${escHtml(stage.role || "-")}</div>
+      <div><strong>Model:</strong> ${escHtml(stage.model || "-")}</div>
+      <div><strong>Duration:</strong> ${formatDuration(stage.durationMs)}</div>
+      <div><strong>Tokens:</strong> ${usage.inputTokens || 0} in + ${usage.outputTokens || 0} out = ${tokenTotal}</div>
+      <div><strong>Cost:</strong> ${formatCost(usage.costUsd)}</div>
       ${stage.gateReason ? `<div class="gate-reason">${escHtml(stage.gateReason)}</div>` : ""}
     </div>
   `;
@@ -608,6 +676,229 @@ async function saveConfigFile() {
   } else {
     statusEl.textContent = (res.data && res.data.error) || "Save failed.";
     statusEl.className = "editor-status error";
+  }
+}
+
+// ══════════════════════════════════════
+// ── Create Tab
+// ══════════════════════════════════════
+
+function loadCreateTab() {
+  if (generatedFiles.length > 0) {
+    showCreateReview();
+  } else {
+    showCreateInput();
+  }
+}
+
+function showCreateInput() {
+  $("#create-input-view").style.display = "";
+  $("#create-review-view").style.display = "none";
+  if (generateDescription) {
+    $("#create-description").value = generateDescription;
+  }
+}
+
+function showCreateReview() {
+  $("#create-input-view").style.display = "none";
+  $("#create-review-view").style.display = "";
+  renderGeneratedFileTree();
+  renderStatusBanner();
+}
+
+async function startGenerate() {
+  const btn = $("#create-generate-btn");
+  const errorEl = $("#create-error");
+  const loadingEl = $("#create-loading");
+  const description = $("#create-description").value.trim();
+
+  errorEl.textContent = "";
+  if (!description) {
+    errorEl.textContent = "Please enter a description.";
+    return;
+  }
+
+  generateDescription = description;
+  btn.disabled = true;
+  loadingEl.style.display = "flex";
+
+  const res = await api("/api/generate", {
+    method: "POST",
+    body: JSON.stringify({ description }),
+  });
+
+  btn.disabled = false;
+  loadingEl.style.display = "none";
+
+  if (res.status === 200 && res.data.files) {
+    generatedFiles = res.data.files;
+    generatedStatus = res.data.status;
+    generatedErrors = res.data.errors || [];
+    selectedGeneratedFile = null;
+    showCreateReview();
+  } else {
+    errorEl.textContent = (res.data && res.data.error) || "Generation failed.";
+  }
+}
+
+function renderStatusBanner() {
+  const banner = $("#create-status-banner");
+  if (generatedStatus === "ok") {
+    banner.className = "create-status-banner success";
+    banner.textContent = "Pipeline generated successfully. Review the files below, then confirm to run.";
+  } else if (generatedStatus === "validation_failed") {
+    banner.className = "create-status-banner warning";
+    banner.textContent = "Generated with validation errors: " + generatedErrors.join("; ");
+  }
+}
+
+function renderGeneratedFileTree() {
+  const tree = $("#gen-file-tree");
+  const files = generatedFiles;
+
+  const groups = {};
+  files.forEach((f) => {
+    const parts = f.split("/");
+    const dir = parts.length > 1 ? parts.slice(0, -1).join("/") : ".";
+    if (!groups[dir]) groups[dir] = [];
+    groups[dir].push(f);
+  });
+
+  const sortedDirs = Object.keys(groups).sort((a, b) => {
+    if (a === ".") return -1;
+    if (b === ".") return 1;
+    return a.localeCompare(b);
+  });
+
+  let html = "";
+  for (const dir of sortedDirs) {
+    const label = dir === "." ? "Project Root" : dir;
+    html += `<div class="file-group-label">${escHtml(label)}</div>`;
+    groups[dir].sort().forEach((f) => {
+      const name = f.split("/").pop();
+      const activeClass = f === selectedGeneratedFile ? " active" : "";
+      html += `<div class="file-item${activeClass}" data-path="${escAttr(f)}">${escHtml(name)}</div>`;
+    });
+  }
+
+  tree.innerHTML = html;
+  tree.querySelectorAll(".file-item").forEach((el) => {
+    el.addEventListener("click", () => {
+      loadGeneratedFile(el.dataset.path);
+      tree.querySelectorAll(".file-item").forEach((e) => e.classList.remove("active"));
+      el.classList.add("active");
+    });
+  });
+
+  // Auto-select first file
+  if (files.length > 0 && !selectedGeneratedFile) {
+    loadGeneratedFile(files[0]);
+    tree.querySelector(".file-item")?.classList.add("active");
+  }
+}
+
+async function loadGeneratedFile(filePath) {
+  selectedGeneratedFile = filePath;
+  const editor = $("#gen-editor-content");
+  const filenameEl = $("#gen-editor-filename");
+  const saveBtn = $("#gen-editor-save-btn");
+  const statusEl = $("#gen-editor-status");
+
+  filenameEl.textContent = filePath;
+  statusEl.textContent = "";
+  statusEl.className = "editor-status";
+  editor.disabled = true;
+  saveBtn.disabled = true;
+
+  const res = await api("/api/generate/file?path=" + encodeURIComponent(filePath));
+  if (res.status === 200) {
+    editor.value = typeof res.data === "string" ? res.data : res.data.content || "";
+    editor.disabled = false;
+    saveBtn.disabled = false;
+  } else {
+    editor.value = "Failed to load file.";
+  }
+}
+
+async function saveGeneratedFile() {
+  if (!selectedGeneratedFile) return;
+  const saveBtn = $("#gen-editor-save-btn");
+  const statusEl = $("#gen-editor-status");
+  const content = $("#gen-editor-content").value;
+
+  saveBtn.disabled = true;
+  statusEl.textContent = "Saving...";
+  statusEl.className = "editor-status";
+
+  const res = await api("/api/generate/file?path=" + encodeURIComponent(selectedGeneratedFile), {
+    method: "PUT",
+    body: JSON.stringify({ content }),
+  });
+
+  saveBtn.disabled = false;
+  if (res.status === 200) {
+    statusEl.textContent = "Saved";
+    statusEl.className = "editor-status success";
+  } else {
+    statusEl.textContent = (res.data && res.data.error) || "Save failed.";
+    statusEl.className = "editor-status error";
+  }
+}
+
+async function validateGenerated() {
+  const btn = $("#create-validate-btn");
+  btn.disabled = true;
+  btn.textContent = "Validating...";
+
+  const res = await api("/api/generate/validate", { method: "POST" });
+
+  btn.disabled = false;
+  btn.textContent = "Validate";
+
+  if (res.status === 200) {
+    if (res.data.valid) {
+      generatedStatus = "ok";
+      generatedErrors = [];
+    } else {
+      generatedStatus = "validation_failed";
+      generatedErrors = res.data.errors || [];
+    }
+    renderStatusBanner();
+  }
+}
+
+async function confirmAndRun() {
+  const btn = $("#create-confirm-btn");
+  btn.disabled = true;
+  btn.textContent = "Promoting...";
+
+  // 1. Promote files
+  const promoteRes = await api("/api/generate/promote", { method: "POST" });
+  if (promoteRes.status !== 200) {
+    btn.disabled = false;
+    btn.textContent = "Confirm & Run";
+    return;
+  }
+
+  // 2. Start a run with the generated pipeline
+  btn.textContent = "Starting run...";
+  const input = generateDescription || "";
+  const runRes = await api("/api/runs", {
+    method: "POST",
+    body: JSON.stringify({ input }),
+  });
+
+  btn.disabled = false;
+  btn.textContent = "Confirm & Run";
+
+  if (runRes.status === 200 && runRes.data.runId) {
+    // Reset create state
+    generatedFiles = [];
+    generatedStatus = null;
+    generatedErrors = [];
+    selectedGeneratedFile = null;
+    // Navigate to run detail
+    openRunDetail(runRes.data.runId);
   }
 }
 

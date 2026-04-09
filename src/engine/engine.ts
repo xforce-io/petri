@@ -26,6 +26,7 @@ export interface EngineOptions {
   defaultMaxRetries?: number;
   defaultTimeout?: number;  // agent execution timeout in ms (default: 600000 = 10 min)
   logger?: RunLogger;
+  skipTo?: string;  // stage name to resume from — skips all stages before it
 }
 
 export class Engine {
@@ -36,6 +37,7 @@ export class Engine {
   private readonly defaultMaxRetries: number;
   private readonly defaultTimeout: number;
   private readonly logger?: RunLogger;
+  private readonly skipTo?: string;
 
   // Gate registry: maps gate id → latest result
   private gateResults: Map<string, GateDetail> = new Map();
@@ -50,15 +52,37 @@ export class Engine {
     this.defaultMaxRetries = opts.defaultMaxRetries ?? 3;
     this.defaultTimeout = opts.defaultTimeout ?? 600_000;
     this.logger = opts.logger;
+    this.skipTo = opts.skipTo;
   }
 
   async run(pipeline: PipelineConfig, input: string): Promise<RunResult> {
     this.goal = pipeline.goal;
     this.requirements = pipeline.requirements;
     this.gateResults.clear();
-    const manifest = new ArtifactManifest(this.artifactBaseDir);
+
+    // Resume: load existing manifest if skipping stages, otherwise start fresh
+    const manifest = this.skipTo
+      ? ArtifactManifest.load(this.artifactBaseDir)
+      : new ArtifactManifest(this.artifactBaseDir);
+
+    let skipping = !!this.skipTo;
 
     for (const entry of pipeline.stages) {
+      // Skip stages until we reach the target
+      if (skipping) {
+        const name = isRepeatBlock(entry) ? entry.repeat.name : entry.name;
+        if (name === this.skipTo) {
+          skipping = false;
+          console.log(`  Resuming from "${name}"...`);
+        } else if (isRepeatBlock(entry) && this.containsStage(entry.repeat.stages, this.skipTo!)) {
+          // Target is inside this repeat block — enter it, let runRepeatBlock handle skipping
+          skipping = false;
+          console.log(`  Entering "${name}" to find "${this.skipTo}"...`);
+        } else {
+          console.log(`  Skipping "${name}" (resume mode)`);
+          continue;
+        }
+      }
       if (isRepeatBlock(entry)) {
         const result = await this.runRepeatBlock(entry.repeat, input, manifest);
         if (result.status === "blocked") {
@@ -83,6 +107,15 @@ export class Engine {
     }
 
     return { status: "done" };
+  }
+
+  private containsStage(stages: import("../types.js").StageEntry[], target: string): boolean {
+    for (const entry of stages) {
+      const name = isRepeatBlock(entry) ? entry.repeat.name : entry.name;
+      if (name === target) return true;
+      if (isRepeatBlock(entry) && this.containsStage(entry.repeat.stages, target)) return true;
+    }
+    return false;
   }
 
   private checkRequirements(): Array<{ id: string; met: boolean; reason: string }> {
@@ -157,6 +190,7 @@ export class Engine {
               context,
               artifactDir,
               model,
+              timeout: stage.timeout ?? this.defaultTimeout,
             });
 
             const agentTimeout = stage.timeout ?? this.defaultTimeout;
@@ -299,36 +333,57 @@ export class Engine {
   }
 
   private async runRepeatBlock(
-    block: { name: string; max_iterations: number; until: string; stages: StageConfig[] },
+    block: { name: string; max_iterations: number; until: string; stages: import("../types.js").StageEntry[] },
     input: string,
     manifest: ArtifactManifest,
   ): Promise<RunResult> {
+    // Only skip on the first iteration — after that run normally
+    let skippingInner = !!this.skipTo && this.containsStage(block.stages, this.skipTo);
+
     for (let iteration = 0; iteration < block.max_iterations; iteration++) {
       console.log(`  Repeat "${block.name}" iteration ${iteration + 1}/${block.max_iterations}...`);
 
       let untilGateNotMet = false;
 
-      // Run inner stages sequentially
-      for (const stage of block.stages) {
-        const result = await this.runStage(stage, input, manifest);
+      for (const entry of block.stages) {
+        // Skip-to support inside repeat blocks
+        if (this.skipTo && skippingInner) {
+          const name = isRepeatBlock(entry) ? entry.repeat.name : entry.name;
+          if (name === this.skipTo) {
+            skippingInner = false;
+            console.log(`  Resuming from "${name}"...`);
+          } else if (isRepeatBlock(entry) && this.containsStage(entry.repeat.stages, this.skipTo)) {
+            skippingInner = false;
+            console.log(`  Entering "${name}" to find "${this.skipTo}"...`);
+          } else {
+            console.log(`  Skipping "${name}" (resume mode)`);
+            continue;
+          }
+        }
+
+        let result: RunResult;
+        if (isRepeatBlock(entry)) {
+          result = await this.runRepeatBlock(entry.repeat, input, manifest);
+        } else {
+          result = await this.runStage(entry, input, manifest);
+        }
         if (result.status === "blocked") {
-          // If the until gate was evaluated and failed, this means "goal not yet met"
-          // — break out of inner stages and continue to the next iteration
           const untilGate = this.gateResults.get(block.until);
           if (untilGate && !untilGate.passed) {
             untilGateNotMet = true;
             break;
           }
-          // Otherwise it's an unrelated stage failure — truly blocked
           return result;
         }
       }
+
+      // After first iteration, stop skipping
+      skippingInner = false;
 
       if (untilGateNotMet) {
         continue;
       }
 
-      // Check until condition: look up gate id from registry
       const gateDetail = this.gateResults.get(block.until);
       if (gateDetail?.passed) {
         return { status: "done" };

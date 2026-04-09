@@ -26,22 +26,21 @@ export async function validateCommand(): Promise<void> {
   const roleNames = new Set<string>();
   try {
     const pipelineConfig = loadPipelineConfig(cwd);
-    let stageCount = 0;
-    for (const entry of pipelineConfig.stages) {
-      if (isRepeatBlock(entry)) {
-        stageCount += entry.repeat.stages.length;
-        for (const stage of entry.repeat.stages) {
-          for (const role of stage.roles) {
+    function collectRoles(stages: import("../types.js").StageEntry[]): number {
+      let count = 0;
+      for (const entry of stages) {
+        if (isRepeatBlock(entry)) {
+          count += collectRoles(entry.repeat.stages);
+        } else {
+          count++;
+          for (const role of entry.roles) {
             roleNames.add(role);
           }
         }
-      } else {
-        stageCount++;
-        for (const role of entry.roles) {
-          roleNames.add(role);
-        }
       }
+      return count;
     }
+    const stageCount = collectRoles(pipelineConfig.stages);
     console.log(
       chalk.green(
         `✔ pipeline.yaml loaded — ${stageCount} stage(s), ${roleNames.size} role(s)`,

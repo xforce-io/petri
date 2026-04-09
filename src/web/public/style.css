@@ -703,3 +703,195 @@ main {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
 }
+
+/* ── I/O Tab ── */
+.io-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+.io-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.io-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+
+.io-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+
+.io-toggle {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.io-content {
+  padding: 12px;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-y: auto;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.io-content.collapsed {
+  max-height: 60px;
+  overflow: hidden;
+  position: relative;
+}
+
+.io-content.collapsed::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 30px;
+  background: linear-gradient(transparent, var(--bg));
+}
+
+.io-result-content {
+  min-height: 100px;
+  max-height: 500px;
+}
+
+/* ── Create Tab ── */
+
+.create-input-view {
+  padding: 1.5rem;
+  overflow-y: auto;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.create-form {
+  max-width: 700px;
+  width: 100%;
+}
+
+.create-form h3 {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.create-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+.create-form textarea {
+  width: 100%;
+  background: var(--bg-secondary);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  font-size: 0.875rem;
+  font-family: inherit;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.create-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+}
+
+.create-actions {
+  margin-top: 0.75rem;
+}
+
+.create-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.create-status-banner {
+  padding: 0.6rem 1rem;
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.create-status-banner.success {
+  background: rgba(45, 106, 79, 0.15);
+  color: var(--success-bright);
+}
+
+.create-status-banner.warning {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--warning);
+}
+
+.create-review-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 1.25rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.btn-secondary:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+#create-review-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+#create-review-view .config-layout {
+  flex: 1;
+  overflow: hidden;
+}
