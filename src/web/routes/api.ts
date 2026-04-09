@@ -169,8 +169,10 @@ export async function handleApiRequest(
         return;
       }
       const provider = createProviderFromConfig(projectDir);
+      const { loadPetriConfig } = await import("../../config/loader.js");
+      const petriConfig = loadPetriConfig(projectDir);
       const result = await generatePipeline(
-        { description: parsed.description, projectDir },
+        { description: parsed.description, projectDir, model: petriConfig.defaults.model },
         provider,
       );
       sendJson(res, 200, result);
