@@ -744,7 +744,7 @@ function renderTemplateGrid() {
     html += '<div class="template-card' + sel + '" data-template-id="' + escAttr(t.id) + '">' +
       '<div class="template-name">' + escHtml(t.name) + '</div>' +
       '<div class="template-desc">' + escHtml(t.description) + '</div>' +
-      '<div class="template-meta">' + t.stages.length + ' stages · ' + t.roles.join(", ") + '</div>' +
+      '<div class="template-meta">' + t.stages.length + ' stages · ' + escHtml(t.roles.join(", ")) + '</div>' +
       '</div>';
   }
   grid.innerHTML = html;
@@ -758,6 +758,8 @@ function selectTemplate(templateId) {
   wizard.templateId = templateId || null;
   if (tmpl) {
     $("#create-description").value = tmpl.description;
+  } else {
+    $("#create-description").value = "";
   }
   onDescriptionInput();
   renderTemplateGrid();
@@ -812,7 +814,7 @@ async function startGenerate() {
     };
     wizard.validationPassed = res.data.status === "ok";
     wizard.selectedFile = null;
-    wizardGoTo(3);
+    if (wizard.step === 2) wizardGoTo(3);
   } else {
     if (spinnerEl) spinnerEl.style.display = "none";
     if (msgEl) msgEl.style.display = "none";
