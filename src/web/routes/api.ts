@@ -474,10 +474,34 @@ function handleConfigFiles(res: http.ServerResponse, projectDir: string): void {
   }
 
   // roles/**/*.yaml, roles/*/soul.md, roles/*/skills/*.md
+  // Order roles by pipeline stage order, then alphabetically for any not in pipeline
   const rolesDir = path.join(projectDir, "roles");
   if (fs.existsSync(rolesDir)) {
-    for (const roleEntry of fs.readdirSync(rolesDir, { withFileTypes: true })) {
-      if (!roleEntry.isDirectory()) continue;
+    const roleOrder: string[] = [];
+    try {
+      const pipelinePath = path.join(projectDir, "pipeline.yaml");
+      if (fs.existsSync(pipelinePath)) {
+        const pipeline = parseYaml(fs.readFileSync(pipelinePath, "utf-8")) as any;
+        for (const stage of pipeline.stages || []) {
+          for (const role of stage.roles || []) {
+            if (!roleOrder.includes(role)) roleOrder.push(role);
+          }
+        }
+      }
+    } catch { /* fall back to alphabetical */ }
+
+    const roleDirs = fs.readdirSync(rolesDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .sort((a, b) => {
+        const ai = roleOrder.indexOf(a.name);
+        const bi = roleOrder.indexOf(b.name);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+    for (const roleEntry of roleDirs) {
       const roleDir = path.join(rolesDir, roleEntry.name);
       const roleRel = `roles/${roleEntry.name}`;
 
