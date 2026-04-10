@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Petri Dashboard</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
 </head>
 <body>
   <header>
@@ -108,13 +110,13 @@
                     <span class="io-label">Prompt (Input)</span>
                     <span class="io-toggle">&#9660;</span>
                   </div>
-                  <pre id="io-prompt" class="io-content">Select a stage to view agent I/O.</pre>
+                  <div id="io-prompt" class="io-content io-markdown">Select a stage to view agent I/O.</div>
                 </div>
                 <div class="io-block">
                   <div class="io-header">
                     <span class="io-label">Result (Output)</span>
                   </div>
-                  <pre id="io-result" class="io-content io-result-content"></pre>
+                  <div id="io-result" class="io-content io-result-content io-markdown"></div>
                 </div>
               </div>
             </div>

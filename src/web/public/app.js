@@ -430,7 +430,7 @@ async function loadStageIO() {
   // Load prompt (_prompt.md)
   const promptRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_prompt.md");
   if (promptRes.status === 200 && promptRes.data) {
-    promptEl.textContent = promptRes.data;
+    promptEl.innerHTML = DOMPurify.sanitize(marked.parse(promptRes.data));
     promptEl.classList.add("collapsed");
   } else {
     promptEl.textContent = "(No prompt saved for this stage — available in future runs)";
@@ -440,7 +440,7 @@ async function loadStageIO() {
   // Load result (_result.md)
   const resultRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_result.md");
   if (resultRes.status === 200 && resultRes.data) {
-    resultEl.textContent = resultRes.data;
+    resultEl.innerHTML = DOMPurify.sanitize(marked.parse(resultRes.data));
   } else {
     resultEl.textContent = "(No result saved for this stage — available in future runs)";
   }
