@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export interface GenerateRequest {
   description: string;
   projectDir: string;
+  model?: string;
 }
 
 export interface GenerateResult {
@@ -165,7 +166,7 @@ export async function generatePipeline(
       skills: [],
       context: prompt,
       artifactDir: llmWorkDir,
-      model: "default",
+      model: req.model ?? "default",
     });
 
     await agent.run();

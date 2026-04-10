@@ -8,13 +8,63 @@ import { listRuns, loadRunLog, type RunLogger } from "../../engine/logger.js";
 import { generatePipeline } from "../../engine/generator.js";
 import { promoteGenerated } from "../../engine/promote.js";
 import { validateProject } from "../../engine/validate.js";
-import { ClaudeCodeProvider } from "../../providers/claude-code.js";
-import { PiProvider } from "../../providers/pi.js";
-import { loadPetriConfig } from "../../config/loader.js";
-import type { AgentProvider } from "../../types.js";
+import { createProviderFromConfig } from "../../util/provider.js";
 import { sendJson, readBody } from "../server.js";
 import { startRun } from "../runner.js";
-import { listFilesRecursive } from "../../util/fs.js";
+import { listFilesRecursive, filterGeneratedFiles } from "../../util/fs.js";
+
+interface TemplateInfo {
+  id: string;
+  name: string;
+  description: string;
+  stages: string[];
+  roles: string[];
+}
+
+function handleListTemplates(res: http.ServerResponse): void {
+  const templatesDir = path.resolve(import.meta.dirname, "../../templates");
+  if (!fs.existsSync(templatesDir)) {
+    sendJson(res, 200, []);
+    return;
+  }
+
+  const templates: TemplateInfo[] = [];
+  for (const entry of fs.readdirSync(templatesDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const pipelinePath = path.join(templatesDir, entry.name, "pipeline.yaml");
+    if (!fs.existsSync(pipelinePath)) continue;
+
+    try {
+      const content = fs.readFileSync(pipelinePath, "utf-8");
+      const parsed = parseYaml(content) as {
+        name?: string;
+        description?: string;
+        stages?: Array<{ name: string; roles?: string[] }>;
+      };
+
+      const stageNames: string[] = [];
+      const rolesSet = new Set<string>();
+      if (Array.isArray(parsed.stages)) {
+        for (const stage of parsed.stages) {
+          if (stage.name) stageNames.push(stage.name);
+          if (Array.isArray(stage.roles)) {
+            for (const role of stage.roles) rolesSet.add(role);
+          }
+        }
+      }
+
+      templates.push({
+        id: entry.name,
+        name: parsed.name ?? entry.name,
+        description: parsed.description ?? "",
+        stages: stageNames,
+        roles: Array.from(rolesSet),
+      });
+    } catch { /* skip malformed templates */ }
+  }
+
+  sendJson(res, 200, templates);
+}
 
 export async function handleApiRequest(
   req: http.IncomingMessage,
@@ -118,9 +168,11 @@ export async function handleApiRequest(
         sendJson(res, 400, { error: "Missing required field: description" });
         return;
       }
-      const provider = createProvider(projectDir);
+      const provider = createProviderFromConfig(projectDir);
+      const { loadPetriConfig } = await import("../../config/loader.js");
+      const petriConfig = loadPetriConfig(projectDir);
       const result = await generatePipeline(
-        { description: parsed.description, projectDir },
+        { description: parsed.description, projectDir, model: petriConfig.defaults.model },
         provider,
       );
       sendJson(res, 200, result);
@@ -150,7 +202,7 @@ export async function handleApiRequest(
       sendJson(res, 200, []);
       return;
     }
-    const files = listFilesRecursive(genDir);
+    const files = filterGeneratedFiles(listFilesRecursive(genDir));
     sendJson(res, 200, files);
     return;
   }
@@ -224,6 +276,11 @@ export async function handleApiRequest(
       }
     }
     return;
+  }
+
+  // GET /api/templates
+  if (pathname === "/api/templates" && method === "GET") {
+    return handleListTemplates(res);
   }
 
   sendJson(res, 404, { error: "Not found" });
@@ -417,10 +474,34 @@ function handleConfigFiles(res: http.ServerResponse, projectDir: string): void {
   }
 
   // roles/**/*.yaml, roles/*/soul.md, roles/*/skills/*.md
+  // Order roles by pipeline stage order, then alphabetically for any not in pipeline
   const rolesDir = path.join(projectDir, "roles");
   if (fs.existsSync(rolesDir)) {
-    for (const roleEntry of fs.readdirSync(rolesDir, { withFileTypes: true })) {
-      if (!roleEntry.isDirectory()) continue;
+    const roleOrder: string[] = [];
+    try {
+      const pipelinePath = path.join(projectDir, "pipeline.yaml");
+      if (fs.existsSync(pipelinePath)) {
+        const pipeline = parseYaml(fs.readFileSync(pipelinePath, "utf-8")) as any;
+        for (const stage of pipeline.stages || []) {
+          for (const role of stage.roles || []) {
+            if (!roleOrder.includes(role)) roleOrder.push(role);
+          }
+        }
+      }
+    } catch { /* fall back to alphabetical */ }
+
+    const roleDirs = fs.readdirSync(rolesDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .sort((a, b) => {
+        const ai = roleOrder.indexOf(a.name);
+        const bi = roleOrder.indexOf(b.name);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+    for (const roleEntry of roleDirs) {
       const roleDir = path.join(rolesDir, roleEntry.name);
       const roleRel = `roles/${roleEntry.name}`;
 
@@ -529,23 +610,4 @@ async function handleConfigFileWrite(
   sendJson(res, 200, { path: relPath, saved: true });
 }
 
-function createProvider(projectDir: string): AgentProvider {
-  const petriConfig = loadPetriConfig(projectDir);
-  const providerEntries = Object.entries(petriConfig.providers);
-  const hasClaudeCode = providerEntries.some(([, v]) => v.type === "claude_code");
-  const defaultModel = petriConfig.defaults.model;
-
-  if (hasClaudeCode) {
-    return new ClaudeCodeProvider(defaultModel);
-  }
-
-  const modelMappings: Record<string, { piProvider: string; piModel: string }> = {};
-  for (const [modelAlias, modelCfg] of Object.entries(petriConfig.models ?? {})) {
-    const provCfg = petriConfig.providers[modelCfg.provider];
-    if (provCfg) {
-      modelMappings[modelAlias] = { piProvider: modelCfg.provider, piModel: modelCfg.model };
-    }
-  }
-  return new PiProvider(modelMappings);
-}
 

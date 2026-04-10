@@ -159,44 +159,113 @@
 
     <!-- Create Tab -->
     <section id="tab-create" class="tab-content">
-      <!-- Input view -->
-      <div id="create-input-view" class="create-input-view">
-        <div class="create-form">
-          <h3>Create Pipeline from Description</h3>
-          <p class="create-hint">Describe what your pipeline should do. The system will generate pipeline.yaml and all role definitions.</p>
-          <textarea id="create-description" rows="8" placeholder="Example: Build a code review pipeline with three stages — a designer creates the architecture, a developer implements it, then a reviewer checks code quality and test coverage..."></textarea>
-          <div class="create-actions">
-            <button id="create-generate-btn" class="btn-primary">Generate</button>
+      <!-- Step Indicator Bar -->
+      <div class="step-bar">
+        <div class="step-item active" data-step="1">
+          <div class="step-number">1</div>
+          <div class="step-label">Choose</div>
+        </div>
+        <div class="step-line"></div>
+        <div class="step-item" data-step="2">
+          <div class="step-number">2</div>
+          <div class="step-label">Generate</div>
+        </div>
+        <div class="step-line"></div>
+        <div class="step-item" data-step="3">
+          <div class="step-number">3</div>
+          <div class="step-label">Review</div>
+        </div>
+        <div class="step-line"></div>
+        <div class="step-item" data-step="4">
+          <div class="step-number">4</div>
+          <div class="step-label">Run</div>
+        </div>
+      </div>
+
+      <!-- Step 1: Choose -->
+      <div id="wizard-step-1" class="wizard-step active">
+        <div class="choose-layout">
+          <div class="choose-left">
+            <h3>What do you want to build?</h3>
+            <p class="create-hint">Describe your pipeline or start with a template.</p>
+            <textarea id="create-description" rows="8" placeholder="Example: Build a code review pipeline with three stages — a designer creates the architecture, a developer implements it, then a reviewer checks code quality and test coverage..."></textarea>
+            <div class="create-actions">
+              <button id="wizard-next-1" class="btn-primary" disabled>Next</button>
+            </div>
           </div>
-          <div id="create-error" class="error-msg"></div>
-          <div id="create-loading" class="create-loading" style="display:none;">
-            <div class="spinner"></div>
-            <span>Generating pipeline... This may take 10-30 seconds.</span>
+          <div class="choose-right">
+            <h3>Browse templates</h3>
+            <div id="template-grid" class="template-grid">
+              <div class="template-card blank-card" data-template-id="">
+                <div class="template-name">Blank</div>
+                <div class="template-desc">Start from scratch with a custom description.</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Review view (hidden by default) -->
-      <div id="create-review-view" style="display:none;">
-        <div id="create-status-banner" class="create-status-banner"></div>
-        <div class="config-layout">
-          <aside class="file-tree-panel">
-            <h3>Generated Files</h3>
-            <div id="gen-file-tree" class="file-tree"></div>
-          </aside>
-          <div class="editor-panel">
-            <div class="editor-header">
-              <span id="gen-editor-filename" class="editor-filename">No file selected</span>
-              <button id="gen-editor-save-btn" class="btn-primary" disabled>Save</button>
+      <!-- Step 2: Generate -->
+      <div id="wizard-step-2" class="wizard-step">
+        <div class="generate-view">
+          <div class="spinner"></div>
+          <span class="generate-msg">Generating pipeline... This may take 10-30 seconds.</span>
+          <div id="generate-error" class="generate-error" style="display:none;">
+            <span id="generate-error-msg"></span>
+            <div class="generate-error-actions">
+              <button id="wizard-retry" class="btn-primary">Retry</button>
+              <button id="wizard-back-2" class="btn-secondary">Back</button>
             </div>
-            <div id="gen-editor-status" class="editor-status"></div>
-            <textarea id="gen-editor-content" class="editor-textarea" disabled placeholder="Select a file to view..."></textarea>
           </div>
         </div>
-        <div class="create-review-actions">
+      </div>
+
+      <!-- Step 3: Review -->
+      <div id="wizard-step-3" class="wizard-step">
+        <div id="create-status-banner" class="create-status-banner"></div>
+        <div class="review-tabs">
+          <button class="review-tab active" data-review-tab="config">Config</button>
+          <button class="review-tab" data-review-tab="preview">Preview</button>
+        </div>
+        <div id="review-config" class="review-tab-content active">
+          <div class="config-layout">
+            <aside class="file-tree-panel">
+              <h3>Generated Files</h3>
+              <div id="gen-file-tree" class="file-tree"></div>
+            </aside>
+            <div class="editor-panel">
+              <div class="editor-header">
+                <span id="gen-editor-filename" class="editor-filename">No file selected</span>
+                <button id="gen-editor-save-btn" class="btn-primary" disabled>Save</button>
+              </div>
+              <div id="gen-editor-status" class="editor-status"></div>
+              <textarea id="gen-editor-content" class="editor-textarea" disabled placeholder="Select a file to view..."></textarea>
+            </div>
+          </div>
+        </div>
+        <div id="review-preview" class="review-tab-content">
+          <div id="pipeline-preview" class="pipeline-preview">
+            <p class="empty-state">No pipeline to preview.</p>
+          </div>
+        </div>
+        <div class="wizard-bottom-bar">
+          <button id="wizard-back-3" class="btn-secondary">Back</button>
           <button id="create-validate-btn" class="btn-secondary">Validate</button>
-          <button id="create-confirm-btn" class="btn-primary">Confirm & Run</button>
-          <button id="create-regen-btn" class="btn-secondary">Regenerate</button>
+          <button id="wizard-next-3" class="btn-primary">Next</button>
+        </div>
+      </div>
+
+      <!-- Step 4: Run -->
+      <div id="wizard-step-4" class="wizard-step">
+        <div class="run-confirm-view">
+          <h3>Ready to run</h3>
+          <div id="run-summary-info" class="run-summary-info"></div>
+          <p class="run-confirm-hint">This will copy generated files to your project root and start a pipeline run.</p>
+          <div id="run-confirm-error" class="error-msg"></div>
+          <div class="wizard-bottom-bar">
+            <button id="wizard-back-4" class="btn-secondary">Back</button>
+            <button id="create-confirm-btn" class="btn-primary">Confirm & Run</button>
+          </div>
         </div>
       </div>
     </section>

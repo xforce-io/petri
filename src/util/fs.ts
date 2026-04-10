@@ -17,3 +17,19 @@ export function listFilesRecursive(dir: string, prefix = ""): string[] {
   }
   return results;
 }
+
+/** Internal files that should not be exposed or promoted from .petri/generated/ */
+const GENERATED_INTERNAL_PATTERNS = ["_llm_work", "petri.yaml"];
+
+/**
+ * Filter out internal/staging files from a generated file list.
+ * Removes files under _llm_work/ and the copied petri.yaml.
+ */
+export function filterGeneratedFiles(files: string[]): string[] {
+  return files.filter((f) => {
+    for (const pattern of GENERATED_INTERNAL_PATTERNS) {
+      if (f === pattern || f.startsWith(pattern + "/")) return false;
+    }
+    return true;
+  });
+}
