@@ -15,6 +15,7 @@
       <button class="tab active" data-tab="dashboard">Dashboard</button>
       <button class="tab" data-tab="runs">Runs</button>
       <button class="tab" data-tab="config">Config</button>
+      <button class="tab" data-tab="create">Create</button>
     </nav>
     <div id="project-selector" class="project-selector" style="display:none;">
       <select id="project-select"></select>
@@ -152,6 +153,50 @@
           </div>
           <div id="editor-status" class="editor-status"></div>
           <textarea id="editor-content" class="editor-textarea" disabled placeholder="Select a file to edit..."></textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- Create Tab -->
+    <section id="tab-create" class="tab-content">
+      <!-- Input view -->
+      <div id="create-input-view" class="create-input-view">
+        <div class="create-form">
+          <h3>Create Pipeline from Description</h3>
+          <p class="create-hint">Describe what your pipeline should do. The system will generate pipeline.yaml and all role definitions.</p>
+          <textarea id="create-description" rows="8" placeholder="Example: Build a code review pipeline with three stages — a designer creates the architecture, a developer implements it, then a reviewer checks code quality and test coverage..."></textarea>
+          <div class="create-actions">
+            <button id="create-generate-btn" class="btn-primary">Generate</button>
+          </div>
+          <div id="create-error" class="error-msg"></div>
+          <div id="create-loading" class="create-loading" style="display:none;">
+            <div class="spinner"></div>
+            <span>Generating pipeline... This may take 10-30 seconds.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Review view (hidden by default) -->
+      <div id="create-review-view" style="display:none;">
+        <div id="create-status-banner" class="create-status-banner"></div>
+        <div class="config-layout">
+          <aside class="file-tree-panel">
+            <h3>Generated Files</h3>
+            <div id="gen-file-tree" class="file-tree"></div>
+          </aside>
+          <div class="editor-panel">
+            <div class="editor-header">
+              <span id="gen-editor-filename" class="editor-filename">No file selected</span>
+              <button id="gen-editor-save-btn" class="btn-primary" disabled>Save</button>
+            </div>
+            <div id="gen-editor-status" class="editor-status"></div>
+            <textarea id="gen-editor-content" class="editor-textarea" disabled placeholder="Select a file to view..."></textarea>
+          </div>
+        </div>
+        <div class="create-review-actions">
+          <button id="create-validate-btn" class="btn-secondary">Validate</button>
+          <button id="create-confirm-btn" class="btn-primary">Confirm & Run</button>
+          <button id="create-regen-btn" class="btn-secondary">Regenerate</button>
         </div>
       </div>
     </section>

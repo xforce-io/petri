@@ -1,0 +1,6 @@
+name: test
+description: Test
+goal: Test
+stages:
+  - name: work
+    roles: [ghost_role]
