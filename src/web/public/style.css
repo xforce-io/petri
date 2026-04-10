@@ -1,17 +1,17 @@
-/* Petri Dashboard — Dark Theme */
+/* Petri Dashboard — Light Theme */
 
 :root {
-  --bg: #0d1117;
-  --bg-secondary: #161b22;
-  --text: #c9d1d9;
-  --text-muted: #8b949e;
-  --border: #30363d;
-  --accent: #58a6ff;
-  --accent-hover: #79b8ff;
-  --success: #2d6a4f;
-  --success-bright: #3fb950;
-  --danger: #da3633;
-  --warning: #d29922;
+  --bg: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --text: #1f2328;
+  --text-muted: #656d76;
+  --border: #d0d7de;
+  --accent: #0969da;
+  --accent-hover: #0550ae;
+  --success: #1a7f37;
+  --success-bright: #1a7f37;
+  --danger: #cf222e;
+  --warning: #9a6700;
   --mono: 'SF Mono', Menlo, monospace;
 }
 
@@ -772,4 +772,80 @@ main {
 .io-result-content {
   min-height: 100px;
   max-height: 500px;
+}
+
+/* Markdown rendering in I/O panels */
+.io-markdown {
+  white-space: normal;
+  font-family: var(--sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.io-markdown h1, .io-markdown h2, .io-markdown h3,
+.io-markdown h4, .io-markdown h5, .io-markdown h6 {
+  margin: 0.8em 0 0.4em;
+  line-height: 1.3;
+}
+
+.io-markdown h1 { font-size: 1.3em; }
+.io-markdown h2 { font-size: 1.15em; }
+.io-markdown h3 { font-size: 1.05em; }
+
+.io-markdown p {
+  margin: 0.5em 0;
+}
+
+.io-markdown pre {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  padding: 8px 12px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
+
+.io-markdown code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: rgba(0, 0, 0, 0.15);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.io-markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+.io-markdown ul, .io-markdown ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.io-markdown blockquote {
+  border-left: 3px solid var(--border, #555);
+  margin: 0.5em 0;
+  padding: 0.25em 0.75em;
+  opacity: 0.85;
+}
+
+.io-markdown table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  width: 100%;
+}
+
+.io-markdown th, .io-markdown td {
+  border: 1px solid var(--border, #555);
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.io-markdown > *:first-child {
+  margin-top: 0;
+}
+
+.io-markdown > *:last-child {
+  margin-bottom: 0;
 }
