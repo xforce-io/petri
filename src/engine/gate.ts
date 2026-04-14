@@ -23,6 +23,20 @@ export interface GateResult {
 }
 
 /**
+ * Resolves a dot-notation field path on an object.
+ * e.g. resolveField({summary: {total: 5}}, "summary.total") → 5
+ */
+function resolveField(obj: any, field: string): any {
+  const parts = field.split(".");
+  let current = obj;
+  for (const part of parts) {
+    if (current == null || typeof current !== "object") return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
+/**
  * Replaces {stage} and {role} placeholders in a template string.
  */
 export function resolveGatePath(template: string, stage: string, role: string): string {
@@ -61,7 +75,7 @@ export async function checkGates(
     if (gate.evidence.check) {
       const content = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
       const check = gate.evidence.check;
-      const actual = content[check.field];
+      const actual = resolveField(content, check.field);
       let failed = false;
       let failReason = "";
 
