@@ -51,10 +51,7 @@ stages:
   - repeat:
       name: train_loop
       max_iterations: 10
-      until:
-        artifact: "evaluate/evaluator/metrics.json"
-        field: target_met
-        equals: true
+      until: target-met              # Gate ID — references evaluator's gate
       stages:
         - name: train
           roles: [trainer]

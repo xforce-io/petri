@@ -71,6 +71,8 @@ roles/
 
 No engine code changes. No orchestration rewiring. The pipeline doesn't know or care what the agents do — it only checks whether the gates pass.
 
+Shared skills can live in a project-level `skills/` directory alongside `roles/`, available to any role that references them.
+
 **Built-in examples spanning wildly different domains:**
 
 | Scenario | Roles | What it does |
@@ -130,6 +132,9 @@ stages:
     roles: [developer]
     max_retries: 5
     timeout: 300000          # 5 min per attempt
+    overrides:               # Per-role model override
+      developer:
+        model: opus
 
   - name: review
     roles: [code_reviewer]
@@ -196,6 +201,7 @@ petri web [--port <number>]        # Web dashboard
 
 ## Engine Internals
 
+- **Unrestricted file access** — agents can read/write any path on the host (not sandboxed to the project directory), useful for cross-repo workflows
 - **Parallel roles** — multiple roles within a stage run concurrently
 - **Failure context injection** — attempt history is formatted and injected into agent context
 - **Stagnation detection** — SHA-256 hash of failure reason; consecutive identical hashes → early block
