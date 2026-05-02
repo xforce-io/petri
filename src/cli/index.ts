@@ -6,6 +6,7 @@ import { statusCommand } from "./status.js";
 import { logCommand } from "./log.js";
 import { listTemplatesCommand, listSkillsCommand } from "./list.js";
 import { webCommand } from "./web.js";
+import { createCommand } from "./create.js";
 
 const program = new Command();
 program.name("petri").description("Multi-agent stage runner").version("0.1.0");
@@ -60,5 +61,11 @@ list
   .command("skills")
   .description("List built-in skills")
   .action(listSkillsCommand);
+
+program
+  .command("create")
+  .description("Generate a pipeline from a natural-language description")
+  .argument("[description]", "What you want to build")
+  .action(createCommand);
 
 program.parse();
