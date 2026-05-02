@@ -66,6 +66,7 @@ program
   .command("create")
   .description("Generate a pipeline from a natural-language description")
   .argument("[description]", "What you want to build")
+  .option("--from <file>", "Read description from a file instead of the argument")
   .action(createCommand);
 
 program.parse();

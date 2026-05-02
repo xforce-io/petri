@@ -8,6 +8,7 @@ import type { AgentProvider } from "../types.js";
 
 export interface CreateOptions {
   description?: string;
+  from?: string;
 }
 
 /**
@@ -19,9 +20,23 @@ export async function runCreate(
   provider: AgentProvider,
   cwd: string,
 ): Promise<void> {
-  const description = opts.description?.trim();
+  if (opts.description && opts.from) {
+    throw new Error("Cannot use both a positional description and --from. Pick one.");
+  }
+
+  let description: string | undefined;
+  if (opts.from) {
+    const fromPath = path.isAbsolute(opts.from) ? opts.from : path.resolve(cwd, opts.from);
+    if (!fs.existsSync(fromPath)) {
+      throw new Error(`Description file not found: ${fromPath}`);
+    }
+    description = fs.readFileSync(fromPath, "utf-8").trim();
+  } else {
+    description = opts.description?.trim();
+  }
+
   if (!description) {
-    throw new Error("Missing description. Pass it as a positional argument.");
+    throw new Error("Missing description. Pass it as a positional argument or with --from <file>.");
   }
 
   const petriYamlPath = path.join(cwd, "petri.yaml");
@@ -78,12 +93,12 @@ export async function runCreate(
  */
 export async function createCommand(
   description: string | undefined,
-  _opts: Record<string, unknown>,
+  opts: { from?: string },
 ): Promise<void> {
   const cwd = process.cwd();
   try {
     const provider: AgentProvider = createProviderFromConfig(cwd);
-    await runCreate({ description }, provider, cwd);
+    await runCreate({ description, from: opts.from }, provider, cwd);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(chalk.red(`Error: ${msg}`));

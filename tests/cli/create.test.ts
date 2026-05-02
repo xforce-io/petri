@@ -163,4 +163,43 @@ describe("petri create", () => {
     const output = lines.join("\n");
     expect(output).toContain("validation_failed");
   });
+
+  it("reads description from a file when --from is passed", async () => {
+    const descPath = path.join(tmpDir, "my-desc.md");
+    fs.writeFileSync(descPath, "Build a worker pipeline\nwith two stages\n", "utf-8");
+
+    const { runCreate } = await import("../../src/cli/create.js");
+    const provider = makeStubProvider(VALID_PIPELINE_JSON);
+
+    await runCreate({ from: descPath }, provider, tmpDir);
+
+    const output = lines.join("\n");
+    expect(output).toContain("ok");
+    expect(fs.existsSync(path.join(tmpDir, ".petri/generated/pipeline.yaml"))).toBe(true);
+  });
+
+  it("errors when --from points at a non-existent file", async () => {
+    const { runCreate } = await import("../../src/cli/create.js");
+    const provider = makeStubProvider(VALID_PIPELINE_JSON);
+
+    await expect(
+      runCreate({ from: path.join(tmpDir, "nope.md") }, provider, tmpDir),
+    ).rejects.toThrow(/not found/i);
+  });
+
+  it("errors when both description and --from are provided", async () => {
+    const descPath = path.join(tmpDir, "my-desc.md");
+    fs.writeFileSync(descPath, "From file", "utf-8");
+
+    const { runCreate } = await import("../../src/cli/create.js");
+    const provider = makeStubProvider(VALID_PIPELINE_JSON);
+
+    await expect(
+      runCreate(
+        { description: "Inline", from: descPath },
+        provider,
+        tmpDir,
+      ),
+    ).rejects.toThrow(/cannot use both/i);
+  });
 });
