@@ -120,7 +120,7 @@ describe("petri create", () => {
     );
 
     const output = lines.join("\n");
-    expect(output).toContain("ok");
+    expect(output).toContain("generated");
     expect(output).toContain("Pipeline: test-pipeline");
     expect(output).toContain("Flow:");
     expect(output).toContain("worker");
@@ -176,7 +176,7 @@ describe("petri create", () => {
     await runCreate({ from: descPath }, provider, tmpDir);
 
     const output = lines.join("\n");
-    expect(output).toContain("ok");
+    expect(output).toContain("generated");
     expect(fs.existsSync(path.join(tmpDir, ".petri/generated/pipeline.yaml"))).toBe(true);
   });
 
@@ -203,5 +203,43 @@ describe("petri create", () => {
         tmpDir,
       ),
     ).rejects.toThrow(/cannot use both/i);
+  });
+
+  it("prints a Concerns block when lint flags issues", async () => {
+    // Build JSON where soul.md is a placeholder — will trigger persona concern
+    const PLACEHOLDER_JSON = JSON.stringify({
+      "pipeline.yaml": [
+        "name: t",
+        "stages:",
+        "  - name: work",
+        "    roles: [worker]",
+        "    requires: [work-done]",
+        "",
+      ].join("\n"),
+      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/soul.md": "Helper.\n",
+      "roles/worker/gate.yaml": [
+        "id: work-done",
+        "evidence:",
+        "  type: artifact",
+        "  path: '{stage}/{role}/done.json'",
+        "  check:",
+        "    field: completed",
+        "    equals: true",
+        "",
+      ].join("\n"),
+    });
+    const { runCreate } = await import("../../src/cli/create.js");
+    const provider = makeStubProvider(PLACEHOLDER_JSON);
+
+    await runCreate(
+      { description: "Build a worker that does important things" },
+      provider,
+      tmpDir,
+    );
+
+    const output = lines.join("\n");
+    expect(output).toContain("Concerns");
+    expect(output).toContain("[persona]");
   });
 });

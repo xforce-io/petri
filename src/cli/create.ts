@@ -3,6 +3,7 @@ import * as path from "node:path";
 import chalk from "chalk";
 import { generatePipeline } from "../engine/generator.js";
 import { buildPipelineSummary } from "../engine/summary.js";
+import { lintPipeline, type Concern } from "../engine/lint.js";
 import { loadPetriConfig } from "../config/loader.js";
 import { createProviderFromConfig } from "../util/provider.js";
 import type { AgentProvider } from "../types.js";
@@ -62,12 +63,21 @@ export async function runCreate(
 
   const generatedDir = path.join(cwd, ".petri", "generated");
 
+  // Run lint before printing so the top-line status can include concern count
+  const concerns: Concern[] = lintPipeline({
+    generatedDir,
+    description,
+  });
+
   console.log();
-  if (result.status === "ok") {
-    console.log(chalk.green(`✔ status: ok`) + chalk.gray(`  (retries: ${result.retries})`));
-  } else {
-    console.log(chalk.yellow(`⚠ status: validation_failed`) + chalk.gray(`  (retries: ${result.retries})`));
-  }
+  const tagPart = result.status === "ok"
+    ? chalk.green("✔ generated")
+    : chalk.yellow("⚠ validation_failed");
+  const concernPart = concerns.length > 0
+    ? chalk.yellow(`  ⚠ ${concerns.length} concern${concerns.length === 1 ? "" : "s"}`)
+    : "";
+  console.log(tagPart + concernPart);
+  console.log(chalk.gray(`   retries: ${result.retries}   files: ${result.files.length}`));
 
   if (result.errors && result.errors.length > 0) {
     console.log();
@@ -106,6 +116,16 @@ export async function runCreate(
         const persona = r.personaFirstLine || chalk.gray("(no soul.md)");
         console.log(`  ${r.name.padEnd(nameWidth)} — ${persona}`);
       }
+    }
+  }
+
+  // Concerns block
+  if (concerns.length > 0) {
+    console.log();
+    console.log(chalk.yellow.bold(`⚠ Concerns (${concerns.length})`));
+    for (const c of concerns) {
+      const tag = chalk.yellow(`[${c.tag}]`);
+      console.log(`  • ${tag} ${c.message}`);
     }
   }
 
