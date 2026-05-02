@@ -121,8 +121,10 @@ describe("petri create", () => {
 
     const output = lines.join("\n");
     expect(output).toContain("ok");
-    expect(output).toContain("pipeline.yaml");
-    expect(output).toContain("roles/worker/role.yaml");
+    expect(output).toContain("Pipeline: test-pipeline");
+    expect(output).toContain("Flow:");
+    expect(output).toContain("worker");
+    expect(output).toContain("You are a worker.");
     expect(output).toContain(".petri/generated");
 
     // Files actually on disk

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import chalk from "chalk";
 import { generatePipeline } from "../engine/generator.js";
+import { buildPipelineSummary } from "../engine/summary.js";
 import { loadPetriConfig } from "../config/loader.js";
 import { createProviderFromConfig } from "../util/provider.js";
 import type { AgentProvider } from "../types.js";
@@ -76,16 +77,43 @@ export async function runCreate(
     }
   }
 
-  if (result.files.length > 0) {
+  // Summary block — only if pipeline.yaml exists and parses
+  const summary = buildPipelineSummary(generatedDir);
+  if (summary) {
     console.log();
-    console.log(chalk.bold(`Files (${result.files.length}):`));
-    for (const f of result.files) {
-      console.log(`  ${f}`);
+    console.log(`${chalk.bold("Pipeline:")} ${summary.name}`);
+    if (summary.goal) console.log(`${chalk.bold("Goal:    ")} ${summary.goal}`);
+    if (!summary.goal && summary.description) {
+      console.log(`${chalk.bold("Desc:    ")} ${summary.description}`);
+    }
+
+    if (summary.stages.length > 0) {
+      console.log();
+      console.log(chalk.bold("Flow:"));
+      const circles = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨"];
+      summary.stages.forEach((s, i) => {
+        const tag = circles[i] ?? `(${i + 1})`;
+        const roles = s.roles.join(", ");
+        console.log(`  ${tag} ${s.name.padEnd(10)} →  ${roles}`);
+      });
+    }
+
+    if (summary.roles.length > 0) {
+      console.log();
+      console.log(chalk.bold("Roles:"));
+      const nameWidth = Math.max(...summary.roles.map((r) => r.name.length));
+      for (const r of summary.roles) {
+        const persona = r.personaFirstLine || chalk.gray("(no soul.md)");
+        console.log(`  ${r.name.padEnd(nameWidth)} — ${persona}`);
+      }
     }
   }
 
   console.log();
-  console.log(chalk.gray(`Output: ${path.relative(cwd, generatedDir) || generatedDir}`));
+  const relGen = path.relative(cwd, generatedDir) || generatedDir;
+  console.log(chalk.gray(`→ Inspect:  cat ${relGen}/pipeline.yaml`));
+  console.log(chalk.gray(`→ Inspect:  cat ${relGen}/roles/<name>/soul.md`));
+  console.log(chalk.gray(`Output: ${relGen}`));
 }
 
 /**
