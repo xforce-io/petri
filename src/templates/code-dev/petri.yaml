@@ -1,11 +1,11 @@
 providers:
   default:
-    type: pi
+    type: claude_code
 
 models:
   sonnet:
     provider: default
-    model: claude-sonnet-4-6
+    model: sonnet
 
 defaults:
   model: sonnet
