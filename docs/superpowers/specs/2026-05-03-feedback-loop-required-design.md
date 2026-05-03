@@ -22,7 +22,7 @@ A `repeat:` block (already a first-class type in `src/types.ts:25-32`):
     stages: [<StageEntry>...]
 ```
 
-The block re-runs its inner stages until the `until` gate passes (success exit) or `max_iterations` is hit (failure exit). The `until` gate must be a strong gate — i.e. `evidence.check` with a real comparator (`gt`/`lt`/`equals` against a meaningful field), not `completed: true`. A loop with `completed: true` as the exit condition has no signal: the moment the role writes a file, the gate passes — the loop never iterates. **Validation enforces this**: the `until` gate's check field must not be the literal string `completed`, and a comparator other than `equals: true` is preferred (advisory: see `lint.ts`).
+The block re-runs its inner stages until the `until` gate passes (success exit) or `max_iterations` is hit (failure exit). The `until` gate must be a strong gate — i.e. `evidence.check` with a real comparator (`gt`/`lt`/`equals` against a meaningful field), not `completed: true`. A loop with `completed: true` as the exit condition has no signal: the moment the role writes a file, the gate passes — the loop never iterates. **Validation enforces this as a hard error**: the `until` gate's check field must not be the literal string `completed`. A loop that exits on a self-report boolean isn't a loop.
 
 A pipeline can mix non-loop stages with `repeat:` blocks freely. Common shape:
 
@@ -44,7 +44,13 @@ pipeline.yaml: pipeline must contain at least one repeat: block (no feedback loo
 
 into `errors`. Same severity as missing-role and yaml-parse errors.
 
-A second, weaker check (advisory, raised in lint, not validation): the `until` gate of each `repeat:` block must reference a gate whose `evidence.check.field` is not literally `completed`. Otherwise the loop has no real exit signal — the gate fires the moment the artifact is written. Tag: `loop-trivial`.
+A second hard check, same severity as the first: each `repeat:` block's `until` gate must resolve to a gate whose `evidence.check.field` is not literally `completed`. Otherwise the loop has no real exit signal — the gate fires the moment the artifact is written. Error message:
+
+```
+pipeline.yaml: repeat block <name> exits on completed=true (gate <gate-id>) — loop has no real signal, exits after first iteration
+```
+
+Both checks live in `validateProject` and surface as `errors`, not `concerns`. The corresponding lint concern (`loop-trivial`) is therefore not added — `lint.ts` is unchanged.
 
 ### 2. `src/templates/code-dev/pipeline.yaml` — rewrite with loop
 
@@ -140,11 +146,9 @@ Flow:
 
 Loop blocks render with `↻` and indented inner stages. Outside-loop stages keep the `①②③` numbering across the whole tree.
 
-### 5. `src/engine/lint.ts` — concern updates
+### 5. `src/engine/lint.ts` — no changes
 
-- **Remove**: `coverage` skip-for-CN logic stays; the `gate` advisory ("path-only, no check") stays. No change to existing concerns.
-- **Add**: `loop-trivial` concern when any `repeat.until` gate's check field is literally `completed`. Message: `repeat block <name> exits on completed=true — loop has no real signal, will exit after first iteration`.
-- **Remove the implicit "no-loop" concern**: there isn't one today, and we don't add one — the no-loop case is now a validation hard-error, not a soft concern.
+Both "no loop" and "loop-trivial" are validation hard-errors (in `validate.ts`), not lint concerns. Existing concerns (`coverage` skip-for-CN, `gate` path-only advisory) stay as-is.
 
 ### 6. Test fixture migration
 
@@ -171,13 +175,13 @@ Test cases that specifically need the migration:
 5. `validateProject` runs: gate-schema check (existing) + loop-required check (new).
 6. If no loop → `errors` includes "pipeline must contain at least one repeat: block" → retry triggered.
 7. After ≤3 retries, success or final failure with the error in output.
-8. Lint runs: existing concerns + `loop-trivial` if any `repeat.until` is `completed`-based.
+8. Lint runs: existing concerns only (no new concerns added by this spec).
 9. `create.ts` prints topology view: stages + loop blocks + per-gate strength tags.
 
 ## Failure modes
 
 - **LLM emits a `repeat:` block whose `until` gate doesn't exist**: existing pipeline-level requirements check catches it (each `requirements:` entry must match a gate id). No new logic needed; the validation error message is already informative.
-- **LLM emits a `repeat:` block whose `until` gate is `completed: true`**: passes validation but lint flags `loop-trivial`. User sees the warning, decides whether to revise. If we want to harden: promote `loop-trivial` to validation error in a follow-up, but this spec keeps it advisory because there are edge cases (pure smoke loops in tests) where it's intentional.
+- **LLM emits a `repeat:` block whose `until` gate is `completed: true`**: hard fails validation with the `loop-trivial` error, retry triggered. Test fixtures that previously relied on `completed`-based exit gates must be rewritten to use a real signal (e.g. `approved: true`, numeric comparator, or a non-`completed` boolean).
 - **All-stage `max_retries` is 0 inside a repeat block**: each iteration's stages can only succeed first try. Not a new failure mode; existing engine behavior preserves correctness.
 - **Migration: existing user pipelines without `repeat:`**: hard fail with a clear error message pointing to this spec / docs. The framework is 0.x and on a feature branch — this is acceptable. Document in CHANGELOG when version is cut.
 
@@ -185,7 +189,6 @@ Test cases that specifically need the migration:
 
 - `petri revise` (incremental refinement). Will be its own spec; depends on this one to define what "valid pipeline" means but doesn't block it.
 - Generator inferring loop boundaries from description semantics ("which stages should be inside the loop"). Spec only requires that *some* loop exists; the LLM uses few-shot to pick a sensible boundary.
-- Promoting `loop-trivial` lint to validation error. Deferred — needs more dogfooding to know if intentional `completed`-based loops occur in the wild.
 - Retroactive enforcement on already-running engine sessions (manifest replay). The engine doesn't validate at runtime; only `petri validate` and `petri create`'s post-generation step run validation.
 
 ## Migration impact summary
