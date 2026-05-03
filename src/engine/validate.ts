@@ -73,7 +73,8 @@ export function validateProject(projectDir: string): ValidationResult {
   }
 
   // 4. Loop-trivial check: each repeat.until must reference a gate whose
-  // evidence.check.field is not literally "completed".
+  // check is not a self-report boolean. Keep regex in sync with summary.ts.
+  const WEAK_BOOLEAN_FIELD = /(^|_)(completed?|done|finished|ready|written)$/i;
   const gateById = new Map<string, LoadedRole>();
   for (const role of loadedRoles) {
     if (role.gate) gateById.set(role.gate.id, role);
@@ -81,10 +82,10 @@ export function validateProject(projectDir: string): ValidationResult {
   for (const block of repeatBlocks) {
     const role = gateById.get(block.until);
     if (!role || !role.gate) continue; // missing-gate is a separate concern; don't double-report
-    const field = role.gate.evidence.check?.field;
-    if (field === "completed") {
+    const check = role.gate.evidence.check;
+    if (check && check.equals === true && WEAK_BOOLEAN_FIELD.test(check.field)) {
       errors.push(
-        `pipeline.yaml: repeat block "${block.name}" exits on completed=true (gate "${block.until}") — loop has no real signal, exits after first iteration`,
+        `pipeline.yaml: repeat block "${block.name}" exits on self-report boolean (gate "${block.until}", field "${check.field}=true") — loop has no real signal, exits after first iteration`,
       );
     }
   }

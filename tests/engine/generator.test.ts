@@ -22,10 +22,15 @@ describe("buildGenerationPrompt", () => {
     expect(prompt).toMatch(/same primary language/i);
   });
 
-  it("includes the mandatory repeat-block rule and forbids completed=true exit gates", () => {
+  it("includes the mandatory repeat-block rule and forbids self-report boolean exit gates", () => {
     const prompt = buildGenerationPrompt("Build something");
     expect(prompt).toMatch(/at least one `repeat:` block/i);
-    expect(prompt).toMatch(/must NOT.*completed.*true/i);
+    expect(prompt).toMatch(/must NOT be a self-report boolean/i);
+    // Names the forbidden field patterns explicitly
+    expect(prompt).toMatch(/`\*_ready`/);
+    expect(prompt).toMatch(/`\*_complete`/);
+    // Names a positive replacement
+    expect(prompt).toMatch(/numeric comparator/i);
   });
 
   it("includes repeat-block required fields and requirements/until disambiguation", () => {

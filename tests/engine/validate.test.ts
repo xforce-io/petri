@@ -135,6 +135,38 @@ describe("validateProject", () => {
     expect(result.errors.some((e) => /max_iterations/.test(e) && /bad/.test(e))).toBe(true);
   });
 
+  it("rejects a repeat block whose until gate exits on *_ready=true (self-report boolean)", () => {
+    const dir = writeFixture({
+      "petri.yaml": MIN_PETRI,
+      "pipeline.yaml": [
+        "name: weak-bool-loop",
+        "stages:",
+        "  - repeat:",
+        "      name: dodgy",
+        "      max_iterations: 3",
+        "      until: hypo-ready",
+        "      stages:",
+        "        - name: work",
+        "          roles: [worker]",
+        "",
+      ].join("\n"),
+      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/soul.md": "You are a worker.\n",
+      "roles/worker/gate.yaml": [
+        "id: hypo-ready",
+        "evidence:",
+        "  path: '{stage}/{role}/output.json'",
+        "  check:",
+        "    field: hypothesis_ready",
+        "    equals: true",
+        "",
+      ].join("\n"),
+    });
+    const result = validateProject(dir);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /dodgy/.test(e) && /self-report boolean/.test(e))).toBe(true);
+  });
+
   it("rejects a repeat block whose until gate exits on completed=true", () => {
     const dir = writeFixture({
       "petri.yaml": MIN_PETRI,

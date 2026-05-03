@@ -132,4 +132,31 @@ describe("buildPipelineSummary", () => {
     expect(loop.innerStages![0].gateStrength).toBe("strong"); // tests_passed
     expect(loop.innerStages![1].gateStrength).toBe("strong"); // approved
   });
+
+  it("classifies *_ready / *_complete / *_done equals=true as weak", () => {
+    writeTree(tmp, {
+      "pipeline.yaml":
+        "name: weak\n" +
+        "stages:\n" +
+        "  - name: a\n    roles: [a]\n" +
+        "  - name: b\n    roles: [b]\n" +
+        "  - name: c\n    roles: [c]\n",
+      "roles/a/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/a/soul.md": "A.\n",
+      "roles/a/gate.yaml":
+        "id: a\nevidence:\n  path: 'x'\n  check:\n    field: hypothesis_ready\n    equals: true\n",
+      "roles/b/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/b/soul.md": "B.\n",
+      "roles/b/gate.yaml":
+        "id: b\nevidence:\n  path: 'x'\n  check:\n    field: backtest_complete\n    equals: true\n",
+      "roles/c/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/c/soul.md": "C.\n",
+      "roles/c/gate.yaml":
+        "id: c\nevidence:\n  path: 'x'\n  check:\n    field: write_done\n    equals: true\n",
+    });
+    const summary = buildPipelineSummary(tmp)!;
+    expect(summary.stages[0].gateStrength).toBe("weak");
+    expect(summary.stages[1].gateStrength).toBe("weak");
+    expect(summary.stages[2].gateStrength).toBe("weak");
+  });
 });

@@ -67,13 +67,14 @@ function loadRoleGateInfo(generatedDir: string, roleName: string): RoleGateInfo 
     return { strength: "weak", check: "file-existence only" };
   }
   const field = typeof check.field === "string" ? check.field : "?";
-  // Strength heuristic per spec: only `field == "completed"` with `equals: true` is weak.
-  // Any other comparator/field is strong.
+  // Strength heuristic: any self-report boolean (`completed`, `done`, `*_ready`,
+  // `*_complete`, etc.) with `equals: true` is weak. Keep regex in sync with validate.ts.
+  const WEAK_BOOLEAN_FIELD = /(^|_)(completed?|done|finished|ready|written)$/i;
   let strength: GateStrength = "strong";
   let renderedCheck: string;
   if ("equals" in check) {
     renderedCheck = `${field} = ${JSON.stringify(check.equals)}`;
-    if (field === "completed" && check.equals === true) strength = "weak";
+    if (check.equals === true && WEAK_BOOLEAN_FIELD.test(field)) strength = "weak";
   } else if ("gt" in check) {
     renderedCheck = `${field} > ${check.gt}`;
   } else if ("lt" in check) {
