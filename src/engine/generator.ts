@@ -177,7 +177,15 @@ export async function generatePipeline(
     if (fs.existsSync(resultPath)) {
       outputText = fs.readFileSync(resultPath, "utf-8");
     } else {
-      throw new Error("LLM did not produce output");
+      // Surface what the provider actually saw so failures are debuggable.
+      const errFile = path.join(llmWorkDir, "_error.txt");
+      const parseErrFile = path.join(llmWorkDir, "_parse_error.txt");
+      const hint = fs.existsSync(errFile)
+        ? fs.readFileSync(errFile, "utf-8").trim()
+        : fs.existsSync(parseErrFile)
+        ? fs.readFileSync(parseErrFile, "utf-8").trim()
+        : "no provider error file written; check provider logs";
+      throw new Error(`LLM did not produce output. Provider hint:\n${hint}`);
     }
 
     // Parse files

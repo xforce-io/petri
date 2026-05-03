@@ -95,7 +95,21 @@ export class ClaudeCodeProvider implements AgentProvider {
     } catch (e) {
       // Re-throw rate limit errors
       if (e instanceof Error && e.message.includes("RATE LIMITED")) throw e;
-      // non-JSON output is fine, agent still may have written files
+      // JSON.parse failed — record sample so the upstream "no _result.md" error
+      // is debuggable. Don't throw here: the agent may legitimately have written
+      // artifact files and skipped JSON output.
+      const head = output.slice(0, 300).replace(/\n/g, "\\n");
+      const tail = output.length > 300 ? output.slice(-300).replace(/\n/g, "\\n") : "";
+      const note = [
+        `[claude-code] JSON parse failed (output length=${output.length}).`,
+        `head=${JSON.stringify(head)}`,
+        tail ? `tail=${JSON.stringify(tail)}` : "",
+        `parse_error=${e instanceof Error ? e.message : String(e)}`,
+      ].filter(Boolean).join("\n");
+      try {
+        writeFileSync(join(config.artifactDir, "_parse_error.txt"), note, "utf-8");
+      } catch {}
+      console.error(`  [claude-code] JSON parse failed (length=${output.length}). See _parse_error.txt`);
     }
 
     const artifacts = scanArtifacts(config.artifactDir);
