@@ -10,6 +10,46 @@ describe("buildGenerationPrompt", () => {
     expect(prompt).toContain("soul.md");
     expect(prompt).toContain("gate.yaml");
   });
+
+  it("instructs the LLM to nest evidence.path and evidence.check (gate schema guard)", () => {
+    const prompt = buildGenerationPrompt("any task");
+    expect(prompt).toContain("evidence:");
+    expect(prompt).toMatch(/nested under the .?evidence.? key/i);
+  });
+
+  it("instructs the LLM to match the user description's primary language", () => {
+    const prompt = buildGenerationPrompt("any task");
+    expect(prompt).toMatch(/same primary language/i);
+  });
+
+  it("includes the mandatory repeat-block rule and forbids self-report boolean exit gates", () => {
+    const prompt = buildGenerationPrompt("Build something");
+    expect(prompt).toMatch(/at least one `repeat:` block/i);
+    expect(prompt).toMatch(/must NOT be a self-report boolean/i);
+    // Names the forbidden field patterns explicitly
+    expect(prompt).toMatch(/`\*_ready`/);
+    expect(prompt).toMatch(/`\*_complete`/);
+    // Names a positive replacement
+    expect(prompt).toMatch(/numeric comparator/i);
+  });
+
+  it("includes the explicit pipeline-skeleton showing repeat: inside stages:", () => {
+    const prompt = buildGenerationPrompt("Build something");
+    expect(prompt).toMatch(/CORRECT shape/i);
+    expect(prompt).toMatch(/WRONG.*DO NOT/i);
+    expect(prompt).toMatch(/repeat: at top level/i);
+    expect(prompt).toMatch(/plural "roles".*not "role:/i);
+  });
+
+  it("includes repeat-block required fields and requirements/until disambiguation", () => {
+    const prompt = buildGenerationPrompt("Build something");
+    // Rule 12: name + max_iterations explicitly required
+    expect(prompt).toMatch(/`name`.*`max_iterations`/);
+    expect(prompt).toMatch(/Do NOT omit `name` or `max_iterations`/);
+    // Rule 13: requirements vs repeat.until disambiguation
+    expect(prompt).toMatch(/`requirements:`.*`repeat\.until:?`.*NOT synonyms/i);
+    expect(prompt).toMatch(/Do NOT duplicate.*exit gate.*`requirements:`/i);
+  });
 });
 
 describe("parseGeneratedFiles", () => {

@@ -1,0 +1,7 @@
+id: work-approved
+description: Worker output must be approved
+evidence:
+  path: "{stage}/{role}/output.json"
+  check:
+    field: approved
+    equals: true

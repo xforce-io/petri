@@ -36,19 +36,34 @@ function handleListTemplates(res: http.ServerResponse): void {
 
     try {
       const content = fs.readFileSync(pipelinePath, "utf-8");
+      type RawStage = { name?: string; roles?: string[] };
+      type RawEntry = RawStage & { repeat?: { stages?: RawStage[] } };
       const parsed = parseYaml(content) as {
         name?: string;
         description?: string;
-        stages?: Array<{ name: string; roles?: string[] }>;
+        stages?: RawEntry[];
       };
 
       const stageNames: string[] = [];
       const rolesSet = new Set<string>();
       if (Array.isArray(parsed.stages)) {
         for (const stage of parsed.stages) {
-          if (stage.name) stageNames.push(stage.name);
-          if (Array.isArray(stage.roles)) {
-            for (const role of stage.roles) rolesSet.add(role);
+          // Handle repeat blocks: extract nested stages
+          if (stage.repeat && Array.isArray(stage.repeat.stages)) {
+            for (const nestedStage of stage.repeat.stages) {
+              if (nestedStage.name) stageNames.push(nestedStage.name);
+              if (Array.isArray(nestedStage.roles)) {
+                for (const role of nestedStage.roles) rolesSet.add(role);
+              }
+            }
+          }
+
+          // Handle regular stages
+          if (!stage.repeat && stage.name) {
+            stageNames.push(stage.name);
+            if (Array.isArray(stage.roles)) {
+              for (const role of stage.roles) rolesSet.add(role);
+            }
           }
         }
       }

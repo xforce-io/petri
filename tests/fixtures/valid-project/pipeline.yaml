@@ -2,5 +2,10 @@ name: test
 description: Test pipeline
 goal: Test
 stages:
-  - name: work
-    roles: [worker]
+  - repeat:
+      name: work-loop
+      max_iterations: 3
+      until: work-approved
+      stages:
+        - name: work
+          roles: [worker]

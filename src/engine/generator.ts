@@ -55,6 +55,32 @@ Output ONLY the JSON object, no other text.
 ## File Formats
 
 ### pipeline.yaml
+
+A pipeline has a top-level \`stages:\` list. A \`repeat:\` block IS a stage — it lives inside the \`stages:\` list, never at the top level.
+
+\`\`\`yaml
+# CORRECT shape:
+name: <pipeline-name>
+description: <short description>
+stages:
+  - repeat:                       # repeat: is one entry in stages:
+      name: <loop-name>
+      max_iterations: <int>
+      until: <gate-id>
+      stages:                     # nested stages inside the loop
+        - name: <stage-name>
+          roles: [<role-name>]    # plural "roles", a list — not "role: <single>"
+        - ...
+\`\`\`
+
+\`\`\`yaml
+# WRONG — DO NOT do this:
+repeat:                           # ❌ repeat: at top level — must be inside stages:
+  ...
+\`\`\`
+
+Full example:
+
 \`\`\`yaml
 ${examplePipeline}
 \`\`\`
@@ -83,13 +109,26 @@ ${exampleSkill}
 
 1. Every role referenced in pipeline stages MUST have a corresponding roles/{name}/ directory with role.yaml and soul.md
 2. Every role SHOULD have a gate.yaml with a unique gate id
-3. Gate evidence paths use {stage}/{role}/filename.json format
+3. Gate evidence path AND check MUST be nested under the \`evidence\` key — not as siblings. Required structure:
+   \`\`\`yaml
+   id: <gate-id>
+   evidence:
+     path: "{stage}/{role}/<file>.json"
+     check:
+       field: <field-name>
+       equals: <value>
+   \`\`\`
+   A flat layout (\`evidence: <string>\` with top-level \`check:\`) is invalid and will fail validation.
 4. Gate checks verify a JSON field value (e.g. field: completed, equals: true)
 5. Skills referenced in role.yaml must have a matching file in skills/
 6. Use "petri:file_operations" and "petri:shell_tools" as built-in skills when the role needs file or shell access
 7. pipeline.yaml requirements must reference gate ids that exist in the roles
 8. Keep personas concise and focused on the role's expertise
 9. Keep skills actionable — tell the agent exactly what to produce and what gate artifact to write
+10. Write personas, skills, descriptions, and any free-text in the SAME primary language as the user description below. If the description is mainly Chinese, keep generated prose Chinese; if English, English. Identifiers, YAML keys, and gate ids stay English.
+11. The pipeline MUST contain at least one \`repeat:\` block. Petri is a feedback-loop-driven framework — a pipeline without iteration is not accepted. The \`repeat:\` block's \`until:\` field must reference a strong gate. The gate's \`evidence.check.field\` must NOT be a self-report boolean — that means NOT \`completed\`, \`done\`, \`finished\`, \`ready\`, \`written\`, or any \`*_completed\`/\`*_complete\`/\`*_done\`/\`*_finished\`/\`*_ready\`/\`*_written\` variant — because those gates fire the moment the role writes its artifact and the loop never iterates. Prefer numeric comparators (\`gt\`/\`lt\`/\`gte\`/\`lte\` against a result field, e.g. \`results.annual_return\` with \`gt: 0.09\`) or verifying booleans whose semantic clearly requires judgment (e.g. \`approved\` from a reviewer role, \`tests_passed\` from a test runner). Wrap whichever stages constitute the iterative work (typically implementation + validation) in the block.
+12. Every \`repeat:\` block MUST include all of: \`name\` (string), \`max_iterations\` (positive integer ≥ 1), \`until\` (gate id string), and \`stages\` (non-empty list). Do NOT omit \`name\` or \`max_iterations\` — they are required, not optional.
+13. \`requirements:\` (top-level) and \`repeat.until:\` are NOT synonyms. \`repeat.until\` is the loop's exit condition. \`requirements:\` lists additional gates verified at the end of the whole pipeline run. Do NOT duplicate the loop's exit gate id in \`requirements:\` — that is redundant. \`requirements:\` is typically empty when a \`repeat:\` block carries the success signal.
 
 ## User Description
 
@@ -177,7 +216,15 @@ export async function generatePipeline(
     if (fs.existsSync(resultPath)) {
       outputText = fs.readFileSync(resultPath, "utf-8");
     } else {
-      throw new Error("LLM did not produce output");
+      // Surface what the provider actually saw so failures are debuggable.
+      const errFile = path.join(llmWorkDir, "_error.txt");
+      const parseErrFile = path.join(llmWorkDir, "_parse_error.txt");
+      const hint = fs.existsSync(errFile)
+        ? fs.readFileSync(errFile, "utf-8").trim()
+        : fs.existsSync(parseErrFile)
+        ? fs.readFileSync(parseErrFile, "utf-8").trim()
+        : "no provider error file written; check provider logs";
+      throw new Error(`LLM did not produce output. Provider hint:\n${hint}`);
     }
 
     // Parse files

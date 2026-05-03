@@ -92,6 +92,25 @@ export function loadRole(
         ? raw.requires
         : Object.keys(raw.requires)[0];
     }
+    if (!gateId || typeof gateId !== "string") {
+      throw new Error("gate.yaml: missing required 'id' field");
+    }
+    if (!raw.evidence || typeof raw.evidence !== "object" || Array.isArray(raw.evidence)) {
+      throw new Error("gate.yaml: 'evidence' must be an object with a 'path' field");
+    }
+    if (!raw.evidence.path || typeof raw.evidence.path !== "string") {
+      throw new Error("gate.yaml: 'evidence.path' is required (string). Note: 'check' must be nested under 'evidence', not a top-level field.");
+    }
+    if (raw.evidence.check !== undefined) {
+      const c = raw.evidence.check;
+      if (!c || typeof c !== "object" || typeof c.field !== "string") {
+        throw new Error("gate.yaml: 'evidence.check.field' must be a string when 'evidence.check' is set");
+      }
+      const hasComparator = ["equals", "gt", "lt", "in"].some((k) => k in c);
+      if (!hasComparator) {
+        throw new Error("gate.yaml: 'evidence.check' must include at least one of equals/gt/lt/in");
+      }
+    }
     gate = {
       id: gateId,
       description: raw.description,
