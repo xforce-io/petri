@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, readdirSync, statSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AgentProvider, PetriAgent, AgentConfig, AgentResult } from "./interface.js";
@@ -26,7 +26,10 @@ export class ClaudeCodeProvider implements AgentProvider {
 
     // Find the real claude binary (execSync doesn't expand shell aliases)
     const claudeBin = findClaude();
-    const cmd = `cat "${promptFile}" | "${claudeBin}" -p --model ${model} --output-format json --dangerously-skip-permissions`;
+    // Redirect stdout to disk to avoid node child_process pipe-buffer/utf-8 decode
+    // truncation that drops long responses at ~16KB.
+    const stdoutFile = join(config.artifactDir, "_claude_stdout.json");
+    const cmd = `cat "${promptFile}" | "${claudeBin}" -p --model ${model} --output-format json --dangerously-skip-permissions > "${stdoutFile}"`;
 
     // Default: 4 hours. Stage timeout is passed through if set.
     const agentTimeout = config.timeout ?? 4 * 3600_000;
@@ -35,15 +38,17 @@ export class ClaudeCodeProvider implements AgentProvider {
 
     let output: string;
     try {
-      output = execSync(cmd, {
+      execSync(cmd, {
         cwd: config.artifactDir,
-        encoding: "utf-8",
         timeout: agentTimeout,
-        maxBuffer: 10 * 1024 * 1024,
         shell: "/bin/bash",
         env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
+        stdio: ["ignore", "ignore", "inherit"],
       });
+      output = existsSync(stdoutFile) ? readFileSync(stdoutFile, "utf-8") : "";
     } catch (e: any) {
+      // Even on error, the redirect file may have partial content
+      output = existsSync(stdoutFile) ? readFileSync(stdoutFile, "utf-8") : "";
       const isTimeout = e.killed || e.signal === "SIGTERM";
       if (isTimeout) {
         const msg = `[claude-code] TIMEOUT: Agent killed after ${timeoutMin} minutes. If this task needs more time, increase the stage timeout in pipeline.yaml.`;
@@ -54,8 +59,6 @@ export class ClaudeCodeProvider implements AgentProvider {
         console.error(`  [claude-code] FAILED: ${errMsg}`);
         writeFileSync(join(config.artifactDir, "_error.txt"), `[claude-code] FAILED: ${errMsg}`, "utf-8");
       }
-      // stdout may still have useful output even on non-zero exit
-      output = e.stdout ?? "";
     }
 
     // Detect rate limit / quota errors — abort immediately instead of wasting iterations
