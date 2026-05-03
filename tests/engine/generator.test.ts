@@ -33,6 +33,14 @@ describe("buildGenerationPrompt", () => {
     expect(prompt).toMatch(/numeric comparator/i);
   });
 
+  it("includes the external ground-truth gate guidance (rule 14)", () => {
+    const prompt = buildGenerationPrompt("Build something");
+    expect(prompt).toMatch(/External ground-truth gates/i);
+    expect(prompt).toMatch(/evidence\.path.*EXTERNAL/);
+    expect(prompt).toMatch(/test runner|build|backtest CLI|training loss|CI/i);
+    expect(prompt).toMatch(/Self-graded gates.*last resort/i);
+  });
+
   it("includes the explicit pipeline-skeleton showing repeat: inside stages:", () => {
     const prompt = buildGenerationPrompt("Build something");
     expect(prompt).toMatch(/CORRECT shape/i);
