@@ -77,8 +77,12 @@ function loadRoleGateInfo(generatedDir: string, roleName: string): RoleGateInfo 
     if (check.equals === true && WEAK_BOOLEAN_FIELD.test(field)) strength = "weak";
   } else if ("gt" in check) {
     renderedCheck = `${field} > ${check.gt}`;
+  } else if ("gte" in check) {
+    renderedCheck = `${field} >= ${check.gte}`;
   } else if ("lt" in check) {
     renderedCheck = `${field} < ${check.lt}`;
+  } else if ("lte" in check) {
+    renderedCheck = `${field} <= ${check.lte}`;
   } else if ("in" in check) {
     renderedCheck = `${field} in ${JSON.stringify(check.in)}`;
   } else {

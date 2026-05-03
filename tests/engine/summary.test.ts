@@ -133,6 +133,26 @@ describe("buildPipelineSummary", () => {
     expect(loop.innerStages![1].gateStrength).toBe("strong"); // approved
   });
 
+  it("classifies gte/lte numeric comparators as strong", () => {
+    writeTree(tmp, {
+      "pipeline.yaml":
+        "name: t\nstages:\n  - name: a\n    roles: [a]\n  - name: b\n    roles: [b]\n",
+      "roles/a/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/a/soul.md": "A.\n",
+      "roles/a/gate.yaml":
+        "id: a\nevidence:\n  path: 'x'\n  check:\n    field: oos_annual_return\n    gte: 0.09\n",
+      "roles/b/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/b/soul.md": "B.\n",
+      "roles/b/gate.yaml":
+        "id: b\nevidence:\n  path: 'x'\n  check:\n    field: max_drawdown\n    lte: -0.1\n",
+    });
+    const summary = buildPipelineSummary(tmp)!;
+    expect(summary.stages[0].gateStrength).toBe("strong");
+    expect(summary.stages[0].gateCheck).toBe("oos_annual_return >= 0.09");
+    expect(summary.stages[1].gateStrength).toBe("strong");
+    expect(summary.stages[1].gateCheck).toBe("max_drawdown <= -0.1");
+  });
+
   it("classifies *_ready / *_complete / *_done equals=true as weak", () => {
     writeTree(tmp, {
       "pipeline.yaml":
