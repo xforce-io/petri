@@ -36,10 +36,12 @@ function handleListTemplates(res: http.ServerResponse): void {
 
     try {
       const content = fs.readFileSync(pipelinePath, "utf-8");
+      type RawStage = { name?: string; roles?: string[] };
+      type RawEntry = RawStage & { repeat?: { stages?: RawStage[] } };
       const parsed = parseYaml(content) as {
         name?: string;
         description?: string;
-        stages?: Array<{ name: string; roles?: string[] }>;
+        stages?: RawEntry[];
       };
 
       const stageNames: string[] = [];
