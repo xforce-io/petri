@@ -55,6 +55,32 @@ Output ONLY the JSON object, no other text.
 ## File Formats
 
 ### pipeline.yaml
+
+A pipeline has a top-level \`stages:\` list. A \`repeat:\` block IS a stage — it lives inside the \`stages:\` list, never at the top level.
+
+\`\`\`yaml
+# CORRECT shape:
+name: <pipeline-name>
+description: <short description>
+stages:
+  - repeat:                       # repeat: is one entry in stages:
+      name: <loop-name>
+      max_iterations: <int>
+      until: <gate-id>
+      stages:                     # nested stages inside the loop
+        - name: <stage-name>
+          roles: [<role-name>]    # plural "roles", a list — not "role: <single>"
+        - ...
+\`\`\`
+
+\`\`\`yaml
+# WRONG — DO NOT do this:
+repeat:                           # ❌ repeat: at top level — must be inside stages:
+  ...
+\`\`\`
+
+Full example:
+
 \`\`\`yaml
 ${examplePipeline}
 \`\`\`

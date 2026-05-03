@@ -33,6 +33,14 @@ describe("buildGenerationPrompt", () => {
     expect(prompt).toMatch(/numeric comparator/i);
   });
 
+  it("includes the explicit pipeline-skeleton showing repeat: inside stages:", () => {
+    const prompt = buildGenerationPrompt("Build something");
+    expect(prompt).toMatch(/CORRECT shape/i);
+    expect(prompt).toMatch(/WRONG.*DO NOT/i);
+    expect(prompt).toMatch(/repeat: at top level/i);
+    expect(prompt).toMatch(/plural "roles".*not "role:/i);
+  });
+
   it("includes repeat-block required fields and requirements/until disambiguation", () => {
     const prompt = buildGenerationPrompt("Build something");
     // Rule 12: name + max_iterations explicitly required
