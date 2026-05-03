@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, onTestFinished } from "vitest";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -8,6 +8,7 @@ const FIXTURES = path.join(import.meta.dirname, "..", "fixtures");
 
 function writeFixture(files: Record<string, string>): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "petri-validate-"));
+  onTestFinished(() => fs.rmSync(dir, { recursive: true, force: true }));
   for (const [rel, content] of Object.entries(files)) {
     const abs = path.join(dir, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -69,6 +70,5 @@ describe("validateProject", () => {
     const result = validateProject(dir);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => /at least one repeat/i.test(e))).toBe(true);
-    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
