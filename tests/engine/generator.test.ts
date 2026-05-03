@@ -33,12 +33,14 @@ describe("buildGenerationPrompt", () => {
     expect(prompt).toMatch(/numeric comparator/i);
   });
 
-  it("includes the external ground-truth gate guidance (rule 14)", () => {
+  it("includes real-ground-truth content discipline (rule 14)", () => {
     const prompt = buildGenerationPrompt("Build something");
-    expect(prompt).toMatch(/External ground-truth gates/i);
-    expect(prompt).toMatch(/evidence\.path.*EXTERNAL/);
-    expect(prompt).toMatch(/test runner|build|backtest CLI|training loss|CI/i);
-    expect(prompt).toMatch(/Self-graded gates.*last resort/i);
+    expect(prompt).toMatch(/Real ground-truth content/i);
+    expect(prompt).toMatch(/MUST invoke an external tool/);
+    expect(prompt).toMatch(/test runner|build|backtest CLI|training script|CI/i);
+    // Path convention is preserved (rule 3 still owns paths)
+    expect(prompt).toMatch(/Path stays per rule 3.*\{stage\}\/\{role\}/);
+    expect(prompt).toMatch(/anti-pattern/i);
   });
 
   it("includes the explicit pipeline-skeleton showing repeat: inside stages:", () => {
