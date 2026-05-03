@@ -62,11 +62,17 @@ export function validateProject(projectDir: string): ValidationResult {
         }
       }
     }
-    walk(pipelineConfig.stages);
-    if (repeatBlocks.length === 0) {
+    if (!Array.isArray(pipelineConfig.stages) || pipelineConfig.stages.length === 0) {
       errors.push(
-        "pipeline.yaml: pipeline must contain at least one repeat: block (no feedback loop = workflow, not training pipeline)",
+        `pipeline.yaml: top-level "stages" must be a non-empty list of stages and/or repeat blocks. If you placed "repeat:" at the top level, wrap it: stages: [- repeat: {...}]`,
       );
+    } else {
+      walk(pipelineConfig.stages);
+      if (repeatBlocks.length === 0) {
+        errors.push(
+          "pipeline.yaml: pipeline must contain at least one repeat: block (no feedback loop = workflow, not training pipeline)",
+        );
+      }
     }
   } catch (err: unknown) {
     errors.push(`pipeline.yaml: ${err instanceof Error ? err.message : String(err)}`);

@@ -72,6 +72,39 @@ describe("validateProject", () => {
     expect(result.errors.some((e) => /at least one repeat/i.test(e))).toBe(true);
   });
 
+  it("rejects a pipeline with top-level repeat: instead of stages:", () => {
+    const dir = writeFixture({
+      "petri.yaml": MIN_PETRI,
+      "pipeline.yaml": [
+        "name: top-level-repeat",
+        "repeat:", // wrong — should be inside stages:
+        "  name: oops",
+        "  max_iterations: 3",
+        "  until: work-approved",
+        "  stages:",
+        "    - name: work",
+        "      roles: [worker]",
+        "",
+      ].join("\n"),
+      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/soul.md": "You are a worker.\n",
+      "roles/worker/gate.yaml": [
+        "id: work-approved",
+        "evidence:",
+        "  path: '{stage}/{role}/output.json'",
+        "  check:",
+        "    field: approved",
+        "    equals: true",
+        "",
+      ].join("\n"),
+    });
+    const result = validateProject(dir);
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some((e) => /top-level "stages"/.test(e) && /must be a non-empty list/.test(e)),
+    ).toBe(true);
+  });
+
   it("rejects a stage that uses singular role: instead of plural roles:", () => {
     const dir = writeFixture({
       "petri.yaml": MIN_PETRI,
