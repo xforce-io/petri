@@ -20,12 +20,14 @@ export function validateProject(projectDir: string): ValidationResult {
 
   // 2. Load pipeline.yaml
   const roleNames = new Set<string>();
+  let repeatBlockCount = 0;
   try {
     const pipelineConfig = loadPipelineConfig(projectDir);
-    function collectRoles(stages: StageEntry[]): void {
+    function walk(stages: StageEntry[]): void {
       for (const entry of stages) {
         if (isRepeatBlock(entry)) {
-          collectRoles(entry.repeat.stages);
+          repeatBlockCount += 1;
+          walk(entry.repeat.stages);
         } else {
           for (const role of entry.roles) {
             roleNames.add(role);
@@ -33,7 +35,12 @@ export function validateProject(projectDir: string): ValidationResult {
         }
       }
     }
-    collectRoles(pipelineConfig.stages);
+    walk(pipelineConfig.stages);
+    if (repeatBlockCount === 0) {
+      errors.push(
+        "pipeline.yaml: pipeline must contain at least one repeat: block (no feedback loop = workflow, not training pipeline)",
+      );
+    }
   } catch (err: unknown) {
     errors.push(`pipeline.yaml: ${err instanceof Error ? err.message : String(err)}`);
   }
