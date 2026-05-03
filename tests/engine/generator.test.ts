@@ -10,6 +10,17 @@ describe("buildGenerationPrompt", () => {
     expect(prompt).toContain("soul.md");
     expect(prompt).toContain("gate.yaml");
   });
+
+  it("instructs the LLM to nest evidence.path and evidence.check (gate schema guard)", () => {
+    const prompt = buildGenerationPrompt("any task");
+    expect(prompt).toContain("evidence:");
+    expect(prompt).toMatch(/nested under the .?evidence.? key/i);
+  });
+
+  it("instructs the LLM to match the user description's primary language", () => {
+    const prompt = buildGenerationPrompt("any task");
+    expect(prompt).toMatch(/same primary language/i);
+  });
 });
 
 describe("parseGeneratedFiles", () => {

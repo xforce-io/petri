@@ -83,13 +83,23 @@ ${exampleSkill}
 
 1. Every role referenced in pipeline stages MUST have a corresponding roles/{name}/ directory with role.yaml and soul.md
 2. Every role SHOULD have a gate.yaml with a unique gate id
-3. Gate evidence paths use {stage}/{role}/filename.json format
+3. Gate evidence path AND check MUST be nested under the \`evidence\` key — not as siblings. Required structure:
+   \`\`\`yaml
+   id: <gate-id>
+   evidence:
+     path: "{stage}/{role}/<file>.json"
+     check:
+       field: <field-name>
+       equals: <value>
+   \`\`\`
+   A flat layout (\`evidence: <string>\` with top-level \`check:\`) is invalid and will fail validation.
 4. Gate checks verify a JSON field value (e.g. field: completed, equals: true)
 5. Skills referenced in role.yaml must have a matching file in skills/
 6. Use "petri:file_operations" and "petri:shell_tools" as built-in skills when the role needs file or shell access
 7. pipeline.yaml requirements must reference gate ids that exist in the roles
 8. Keep personas concise and focused on the role's expertise
 9. Keep skills actionable — tell the agent exactly what to produce and what gate artifact to write
+10. Write personas, skills, descriptions, and any free-text in the SAME primary language as the user description below. If the description is mainly Chinese, keep generated prose Chinese; if English, English. Identifiers, YAML keys, and gate ids stay English.
 
 ## User Description
 

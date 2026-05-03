@@ -111,4 +111,16 @@ describe("lintPipeline", () => {
   it("returns empty when generatedDir is missing pipeline.yaml", () => {
     expect(lintPipeline({ generatedDir: tmp, description: "x" })).toEqual([]);
   });
+
+  it("does not run coverage check for predominantly Chinese descriptions", () => {
+    // tokenize() can't handle CJK, so coverage on a CN description is meaningless.
+    // Use HEALTHY_PIPELINE (English content) — expect NO coverage concern even though
+    // CN tokens won't appear in the generated content.
+    writeTree(tmp, HEALTHY_PIPELINE);
+    const concerns = lintPipeline({
+      generatedDir: tmp,
+      description: "构建一个多因子轮动策略，包括动量因子、估值因子、波动因子，并做walk-forward验证",
+    });
+    expect(concerns.some((c) => c.tag === "coverage")).toBe(false);
+  });
 });
