@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -36,29 +36,59 @@ export class ClaudeCodeProvider implements AgentProvider {
     const timeoutMin = Math.round(agentTimeout / 60_000);
     console.log(`  [claude-code] Running ${model} in ${config.artifactDir} (timeout: ${timeoutMin}m)...`);
 
-    let output: string;
+    // Spawn in a new process group (detached) so we can SIGKILL the entire
+    // group on timeout. execSync's default SIGTERM goes to the immediate child
+    // (bash), which doesn't propagate to grand-children (claude subprocess) —
+    // observed in dogfood as orphan claude processes surviving 19+ minutes
+    // past their stage's nominal timeout.
+    let output: string = "";
+    let timedOut = false;
+    let exitCode: number | null = null;
+    let exitErr: Error | null = null;
     try {
-      execSync(cmd, {
-        cwd: config.artifactDir,
-        timeout: agentTimeout,
-        shell: "/bin/bash",
-        env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
-        stdio: ["ignore", "ignore", "inherit"],
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn("/bin/bash", ["-c", cmd], {
+          cwd: config.artifactDir,
+          env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
+          stdio: ["ignore", "ignore", "inherit"],
+          detached: true, // new process group
+        });
+        const timer = setTimeout(() => {
+          timedOut = true;
+          // Kill the entire process group (negative PID). SIGKILL because
+          // SIGTERM is what we tried before and claude subprocesses ignored.
+          if (child.pid !== undefined) {
+            try { process.kill(-child.pid, "SIGKILL"); } catch { /* group gone */ }
+          }
+          try { child.kill("SIGKILL"); } catch { /* already dead */ }
+        }, agentTimeout);
+        child.once("exit", (code) => {
+          clearTimeout(timer);
+          exitCode = code;
+          resolve();
+        });
+        child.once("error", (err) => {
+          clearTimeout(timer);
+          exitErr = err;
+          reject(err);
+        });
       });
       output = existsSync(stdoutFile) ? readFileSync(stdoutFile, "utf-8") : "";
-    } catch (e: any) {
-      // Even on error, the redirect file may have partial content
+    } catch {
       output = existsSync(stdoutFile) ? readFileSync(stdoutFile, "utf-8") : "";
-      const isTimeout = e.killed || e.signal === "SIGTERM";
-      if (isTimeout) {
-        const msg = `[claude-code] TIMEOUT: Agent killed after ${timeoutMin} minutes. If this task needs more time, increase the stage timeout in pipeline.yaml.`;
-        console.error(`  ${msg}`);
-        writeFileSync(join(config.artifactDir, "_error.txt"), msg, "utf-8");
-      } else {
-        const errMsg = e.message?.slice(0, 500) ?? "Unknown error";
-        console.error(`  [claude-code] FAILED: ${errMsg}`);
-        writeFileSync(join(config.artifactDir, "_error.txt"), `[claude-code] FAILED: ${errMsg}`, "utf-8");
-      }
+    }
+    if (timedOut) {
+      const msg = `[claude-code] TIMEOUT: Agent killed after ${timeoutMin} minutes. If this task needs more time, increase the stage timeout in pipeline.yaml.`;
+      console.error(`  ${msg}`);
+      writeFileSync(join(config.artifactDir, "_error.txt"), msg, "utf-8");
+    } else if (exitErr) {
+      const errMsg = (exitErr as Error).message?.slice(0, 500) ?? "Unknown error";
+      console.error(`  [claude-code] FAILED: ${errMsg}`);
+      writeFileSync(join(config.artifactDir, "_error.txt"), `[claude-code] FAILED: ${errMsg}`, "utf-8");
+    } else if (exitCode !== null && exitCode !== 0) {
+      const msg = `[claude-code] FAILED: exit code ${exitCode}`;
+      console.error(`  ${msg}`);
+      writeFileSync(join(config.artifactDir, "_error.txt"), msg, "utf-8");
     }
 
     // Detect rate limit / quota errors — abort immediately instead of wasting iterations
