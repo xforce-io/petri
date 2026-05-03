@@ -46,6 +46,16 @@ export function validateProject(projectDir: string): ValidationResult {
           repeatBlocks.push({ name: labeledName, until: typeof r.until === "string" ? r.until : "" });
           walk(Array.isArray(r.stages) ? r.stages : []);
         } else {
+          const stageName = typeof entry.name === "string" && entry.name.length > 0 ? entry.name : "(unnamed)";
+          if (typeof entry.name !== "string" || entry.name.length === 0) {
+            errors.push(`pipeline.yaml: stage missing required "name" field (string)`);
+          }
+          if (!Array.isArray(entry.roles) || entry.roles.length === 0) {
+            errors.push(
+              `pipeline.yaml: stage "${stageName}" missing required "roles" field (non-empty list of role names, e.g. roles: [<name>] — note plural "roles", not "role")`,
+            );
+            continue;
+          }
           for (const role of entry.roles) {
             roleNames.add(role);
           }
