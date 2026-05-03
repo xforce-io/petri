@@ -21,6 +21,12 @@ describe("buildGenerationPrompt", () => {
     const prompt = buildGenerationPrompt("any task");
     expect(prompt).toMatch(/same primary language/i);
   });
+
+  it("includes the mandatory repeat-block rule and forbids completed=true exit gates", () => {
+    const prompt = buildGenerationPrompt("Build something");
+    expect(prompt).toMatch(/at least one `repeat:` block/i);
+    expect(prompt).toMatch(/must NOT.*completed.*true/i);
+  });
 });
 
 describe("parseGeneratedFiles", () => {

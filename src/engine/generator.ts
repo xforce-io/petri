@@ -100,6 +100,7 @@ ${exampleSkill}
 8. Keep personas concise and focused on the role's expertise
 9. Keep skills actionable — tell the agent exactly what to produce and what gate artifact to write
 10. Write personas, skills, descriptions, and any free-text in the SAME primary language as the user description below. If the description is mainly Chinese, keep generated prose Chinese; if English, English. Identifiers, YAML keys, and gate ids stay English.
+11. The pipeline MUST contain at least one \`repeat:\` block. Petri is a feedback-loop-driven framework — a pipeline without iteration is not accepted. The \`repeat:\` block's \`until:\` field must reference a strong gate: the gate's \`evidence.check.field\` must NOT be the literal \`completed\` (with \`equals: true\`), because that gate fires the moment the artifact is written and the loop never iterates. Use a meaningful field like \`approved\`, \`tests_passed\`, or a numeric comparator. Wrap whichever stages constitute the iterative work (typically implementation + validation) in the block.
 
 ## User Description
 
