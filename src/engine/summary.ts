@@ -8,16 +8,27 @@ export interface PipelineSummaryRole {
   skills: string[];
 }
 
-export interface PipelineSummaryStage {
-  name: string;
-  roles: string[];
+export type GateStrength = "strong" | "weak" | "none";
+
+export interface StageSummary {
+  kind: "stage" | "repeat";
+  // For "stage":
+  name?: string;
+  roles?: string[];
+  gateStrength?: GateStrength;
+  gateCheck?: string;
+  // For "repeat":
+  repeatName?: string;
+  maxIterations?: number;
+  until?: string;
+  innerStages?: StageSummary[];
 }
 
 export interface PipelineSummary {
   name: string;
   goal?: string;
   description?: string;
-  stages: PipelineSummaryStage[];
+  stages: StageSummary[];
   roles: PipelineSummaryRole[];
 }
 
@@ -35,6 +46,91 @@ function firstNonEmptyLine(text: string): string {
   return "";
 }
 
+interface RoleGateInfo {
+  strength: GateStrength;
+  check: string; // human-readable: "approved = true (strong)" or "no gate"
+}
+
+function loadRoleGateInfo(generatedDir: string, roleName: string): RoleGateInfo {
+  const gatePath = path.join(generatedDir, "roles", roleName, "gate.yaml");
+  if (!fs.existsSync(gatePath)) return { strength: "none", check: "no gate" };
+  let parsed: any;
+  try {
+    parsed = parseYaml(fs.readFileSync(gatePath, "utf-8"));
+  } catch {
+    return { strength: "none", check: "gate.yaml unparseable" };
+  }
+  const ev = parsed?.evidence;
+  if (!ev || typeof ev !== "object") return { strength: "none", check: "no evidence" };
+  const check = ev.check;
+  if (!check || typeof check !== "object") {
+    return { strength: "weak", check: "file-existence only" };
+  }
+  const field = typeof check.field === "string" ? check.field : "?";
+  // Strength heuristic per spec: only `field == "completed"` with `equals: true` is weak.
+  // Any other comparator/field is strong.
+  let strength: GateStrength = "strong";
+  let renderedCheck: string;
+  if ("equals" in check) {
+    renderedCheck = `${field} = ${JSON.stringify(check.equals)}`;
+    if (field === "completed" && check.equals === true) strength = "weak";
+  } else if ("gt" in check) {
+    renderedCheck = `${field} > ${check.gt}`;
+  } else if ("lt" in check) {
+    renderedCheck = `${field} < ${check.lt}`;
+  } else if ("in" in check) {
+    renderedCheck = `${field} in ${JSON.stringify(check.in)}`;
+  } else {
+    renderedCheck = `${field} (no comparator)`;
+    strength = "weak";
+  }
+  return { strength, check: renderedCheck };
+}
+
+function summarizeStages(generatedDir: string, raw: any[]): { stages: StageSummary[]; roleNames: Set<string> } {
+  const out: StageSummary[] = [];
+  const roleNames = new Set<string>();
+  for (const entry of raw ?? []) {
+    if (!entry || typeof entry !== "object") continue;
+    if (entry.repeat && typeof entry.repeat === "object") {
+      const r = entry.repeat;
+      const inner = summarizeStages(generatedDir, Array.isArray(r.stages) ? r.stages : []);
+      for (const n of inner.roleNames) roleNames.add(n);
+      out.push({
+        kind: "repeat",
+        repeatName: typeof r.name === "string" ? r.name : undefined,
+        maxIterations: typeof r.max_iterations === "number" ? r.max_iterations : undefined,
+        until: typeof r.until === "string" ? r.until : undefined,
+        innerStages: inner.stages,
+      });
+      continue;
+    }
+    if (typeof entry.name !== "string") continue;
+    const roles = Array.isArray(entry.roles)
+      ? entry.roles.filter((x: unknown) => typeof x === "string")
+      : [];
+    for (const r of roles) roleNames.add(r);
+    // Gate strength = strongest among the stage's roles.
+    let strength: GateStrength = "none";
+    let renderedCheck: string | undefined;
+    for (const r of roles) {
+      const info = loadRoleGateInfo(generatedDir, r);
+      if (info.strength === "strong" || (info.strength === "weak" && strength === "none")) {
+        strength = info.strength;
+        renderedCheck = info.check;
+      }
+    }
+    out.push({
+      kind: "stage",
+      name: entry.name,
+      roles,
+      gateStrength: strength,
+      gateCheck: renderedCheck,
+    });
+  }
+  return { stages: out, roleNames };
+}
+
 export function buildPipelineSummary(generatedDir: string): PipelineSummary | null {
   const pipelinePath = path.join(generatedDir, "pipeline.yaml");
   if (!fs.existsSync(pipelinePath)) return null;
@@ -47,34 +143,7 @@ export function buildPipelineSummary(generatedDir: string): PipelineSummary | nu
   }
   if (!pipeline || typeof pipeline !== "object") return null;
 
-  const stages: PipelineSummaryStage[] = [];
-  const roleNames = new Set<string>();
-
-  // Extract stages from pipeline.stages (handles both linear stages and repeat blocks)
-  function extractStages(stagesArray: any[]) {
-    for (const stage of stagesArray ?? []) {
-      if (!stage || typeof stage !== "object") continue;
-
-      // Handle repeat blocks: extract nested stages
-      if (stage.repeat && Array.isArray(stage.repeat.stages)) {
-        for (const nestedStage of stage.repeat.stages) {
-          if (!nestedStage || typeof nestedStage !== "object" || !nestedStage.name) continue;
-          const roles = Array.isArray(nestedStage.roles) ? nestedStage.roles.filter((r: unknown) => typeof r === "string") : [];
-          stages.push({ name: nestedStage.name, roles });
-          for (const r of roles) roleNames.add(r);
-        }
-      }
-
-      // Handle regular stages
-      if (!stage.repeat && stage.name) {
-        const roles = Array.isArray(stage.roles) ? stage.roles.filter((r: unknown) => typeof r === "string") : [];
-        stages.push({ name: stage.name, roles });
-        for (const r of roles) roleNames.add(r);
-      }
-    }
-  }
-
-  extractStages(pipeline.stages ?? []);
+  const { stages, roleNames } = summarizeStages(generatedDir, pipeline.stages ?? []);
 
   const roles: PipelineSummaryRole[] = [];
   for (const name of roleNames) {
@@ -89,7 +158,7 @@ export function buildPipelineSummary(generatedDir: string): PipelineSummary | nu
       if (typeof roleYaml?.persona === "string") {
         personaPath = path.join(roleDir, roleYaml.persona);
       }
-    } catch { /* role.yaml missing or malformed: leave defaults */ }
+    } catch { /* role.yaml missing or malformed */ }
 
     let personaFirstLine = "";
     try {
