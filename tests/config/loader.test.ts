@@ -226,6 +226,94 @@ skills:
     expect(role.skills).toHaveLength(1);
     expect(role.skills[0]).toContain("Use this local tool.");
   });
+
+  it("rejects gate.yaml with flat evidence + top-level check (LLM common mistake)", () => {
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nskills: []\n");
+    writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
+    writeFile(
+      tmpDir,
+      "roles/r/gate.yaml",
+      `
+id: done
+evidence: stage/r/done.json
+check:
+  field: completed
+  equals: true
+`,
+    );
+
+    expect(() => loadRole(tmpDir, "r", "m")).toThrow(/evidence/);
+  });
+
+  it("rejects gate.yaml missing evidence.path", () => {
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nskills: []\n");
+    writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
+    writeFile(
+      tmpDir,
+      "roles/r/gate.yaml",
+      `
+id: done
+evidence:
+  check:
+    field: completed
+    equals: true
+`,
+    );
+
+    expect(() => loadRole(tmpDir, "r", "m")).toThrow(/evidence\.path/);
+  });
+
+  it("rejects gate.yaml with malformed evidence.check (no comparator)", () => {
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nskills: []\n");
+    writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
+    writeFile(
+      tmpDir,
+      "roles/r/gate.yaml",
+      `
+id: done
+evidence:
+  path: "stage/r/done.json"
+  check:
+    field: completed
+`,
+    );
+
+    expect(() => loadRole(tmpDir, "r", "m")).toThrow(/equals|gt|lt|in/);
+  });
+
+  it("rejects gate.yaml missing id and requires", () => {
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nskills: []\n");
+    writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
+    writeFile(
+      tmpDir,
+      "roles/r/gate.yaml",
+      `
+evidence:
+  path: "stage/r/done.json"
+`,
+    );
+
+    expect(() => loadRole(tmpDir, "r", "m")).toThrow(/id/);
+  });
+
+  it("accepts gate.yaml without evidence.check (path-only)", () => {
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nskills: []\n");
+    writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
+    writeFile(
+      tmpDir,
+      "roles/r/gate.yaml",
+      `
+id: done
+evidence:
+  path: "stage/r/done.json"
+`,
+    );
+
+    const role = loadRole(tmpDir, "r", "m");
+    expect(role.gate).not.toBeNull();
+    expect(role.gate!.id).toBe("done");
+    expect(role.gate!.evidence.path).toBe("stage/r/done.json");
+  });
 });
 
 describe("loadBuiltinSkill", () => {

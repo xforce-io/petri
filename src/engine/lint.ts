@@ -100,6 +100,10 @@ function lintPersonas(generatedDir: string, roles: string[]): Concern[] {
 }
 
 function lintCoverage(generatedDir: string, description: string): Concern[] {
+  // tokenize() splits on ASCII punctuation/whitespace and keeps tokens of length >= 3,
+  // so CJK descriptions yield almost no tokens and produce a meaningless ratio.
+  // Skip the check when the description is predominantly Chinese.
+  if (chineseRatio(description) > 0.4) return [];
   const tokens = Array.from(new Set(tokenize(description)));
   if (tokens.length === 0) return [];
   const corpus = gatherTextContent(generatedDir).toLowerCase();
@@ -122,6 +126,10 @@ function lintCoverage(generatedDir: string, description: string): Concern[] {
 }
 
 function lintGates(generatedDir: string, roles: string[]): Concern[] {
+  // Structural problems (missing evidence.path, malformed check) are now validation
+  // errors enforced by loadRole, so generation retries to fix them. This lint only
+  // flags the soft case: gate present but no value check — passes whenever the
+  // artifact file exists, which is rarely what the user wanted.
   const out: Concern[] = [];
   for (const role of roles) {
     const gatePath = path.join(generatedDir, "roles", role, "gate.yaml");
@@ -129,7 +137,7 @@ function lintGates(generatedDir: string, roles: string[]): Concern[] {
     if (raw === null) continue;
     let parsed: any;
     try { parsed = parseYaml(raw); } catch { continue; }
-    if (!parsed?.evidence?.check) {
+    if (parsed?.evidence?.path && !parsed.evidence.check) {
       out.push({
         tag: "gate",
         message: `${role}/gate.yaml has no evidence.check (passes whenever the file exists)`,
