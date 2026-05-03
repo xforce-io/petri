@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import chalk from "chalk";
 import { generatePipeline } from "../engine/generator.js";
-import { buildPipelineSummary } from "../engine/summary.js";
+import { buildPipelineSummary, type StageSummary } from "../engine/summary.js";
 import { lintPipeline, type Concern } from "../engine/lint.js";
 import { loadPetriConfig } from "../config/loader.js";
 import { createProviderFromConfig } from "../util/provider.js";
@@ -101,11 +101,32 @@ export async function runCreate(
       console.log();
       console.log(chalk.bold("Flow:"));
       const circles = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨"];
-      summary.stages.forEach((s, i) => {
-        const tag = circles[i] ?? `(${i + 1})`;
-        const roles = s.roles.join(", ");
-        console.log(`  ${tag} ${s.name.padEnd(10)} →  ${roles}`);
-      });
+      let counter = 0;
+      const strengthTag = (s: StageSummary): string => {
+        if (s.gateStrength === "strong") return chalk.green(`🟢 ${s.gateCheck ?? ""} (strong)`);
+        if (s.gateStrength === "weak")   return chalk.yellow(`⚪ ${s.gateCheck ?? ""} (weak)`);
+        return chalk.gray("(no gate)");
+      };
+      const renderStage = (s: StageSummary, indent: string): void => {
+        if (s.kind === "repeat") {
+          const name = s.repeatName ?? "(loop)";
+          const max = s.maxIterations ?? "?";
+          const until = s.until ?? "?";
+          console.log(`${indent}${chalk.cyan("↻")} ${name} (max ${max}, until ${until}):`);
+          for (const inner of s.innerStages ?? []) {
+            renderStage(inner, indent + "  ");
+          }
+          return;
+        }
+        counter += 1;
+        const tag = circles[counter - 1] ?? `(${counter})`;
+        const stageName = (s.name ?? "?").padEnd(20);
+        const roles = (s.roles ?? []).join(", ");
+        console.log(`${indent}${tag} ${stageName} →  ${roles.padEnd(16)} ${strengthTag(s)}`);
+      };
+      for (const s of summary.stages) {
+        renderStage(s, "  ");
+      }
     }
 
     if (summary.roles.length > 0) {

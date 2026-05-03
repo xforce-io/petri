@@ -250,4 +250,24 @@ describe("petri create", () => {
     expect(output).toContain("Concerns");
     expect(output).toContain("[persona]");
   });
+
+  it("renders repeat blocks with ↻ and gate strength tags", async () => {
+    const { runCreate } = await import("../../src/cli/create.js");
+    const provider = makeStubProvider(VALID_PIPELINE_JSON);
+
+    await runCreate(
+      { description: "Build a worker pipeline" },
+      provider,
+      tmpDir,
+    );
+
+    const output = lines.join("\n");
+    // VALID_PIPELINE_JSON wraps the worker stage in a repeat block named "work-loop"
+    // exiting on "work-approved" with field "approved" (strong).
+    expect(output).toContain("↻");
+    expect(output).toContain("work-loop");
+    expect(output).toContain("until work-approved");
+    // Strong gate tag should render somewhere on the inner stage line.
+    expect(output).toMatch(/approved.*=.*true/);
+  });
 });
