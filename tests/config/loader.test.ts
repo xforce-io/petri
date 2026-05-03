@@ -263,6 +263,27 @@ evidence:
     expect(() => loadRole(tmpDir, "r", "m")).toThrow(/evidence\.path/);
   });
 
+  it("accepts evidence.check with gte/lte comparators", () => {
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nskills: []\n");
+    writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
+    writeFile(
+      tmpDir,
+      "roles/r/gate.yaml",
+      `
+id: done
+evidence:
+  path: "stage/r/done.json"
+  check:
+    field: results.annual_return
+    gte: 0.09
+`,
+    );
+
+    const role = loadRole(tmpDir, "r", "m");
+    expect(role.gate).not.toBeNull();
+    expect(role.gate!.evidence.check).toEqual({ field: "results.annual_return", gte: 0.09 });
+  });
+
   it("rejects gate.yaml with malformed evidence.check (no comparator)", () => {
     writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nskills: []\n");
     writeFile(tmpDir, "roles/r/soul.md", "Persona text.");

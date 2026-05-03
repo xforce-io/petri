@@ -106,9 +106,9 @@ export function loadRole(
       if (!c || typeof c !== "object" || typeof c.field !== "string") {
         throw new Error("gate.yaml: 'evidence.check.field' must be a string when 'evidence.check' is set");
       }
-      const hasComparator = ["equals", "gt", "lt", "in"].some((k) => k in c);
+      const hasComparator = ["equals", "gt", "gte", "lt", "lte", "in"].some((k) => k in c);
       if (!hasComparator) {
-        throw new Error("gate.yaml: 'evidence.check' must include at least one of equals/gt/lt/in");
+        throw new Error("gate.yaml: 'evidence.check' must include at least one of equals/gt/gte/lt/lte/in");
       }
     }
     gate = {
