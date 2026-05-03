@@ -71,4 +71,38 @@ describe("validateProject", () => {
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => /at least one repeat/i.test(e))).toBe(true);
   });
+
+  it("rejects a repeat block whose until gate exits on completed=true", () => {
+    const dir = writeFixture({
+      "petri.yaml": MIN_PETRI,
+      "pipeline.yaml": [
+        "name: trivial-loop",
+        "stages:",
+        "  - repeat:",
+        "      name: bad-loop",
+        "      max_iterations: 3",
+        "      until: work-done",
+        "      stages:",
+        "        - name: work",
+        "          roles: [worker]",
+        "",
+      ].join("\n"),
+      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/soul.md": "You are a worker.\n",
+      "roles/worker/gate.yaml": [
+        "id: work-done",
+        "evidence:",
+        "  path: '{stage}/{role}/output.json'",
+        "  check:",
+        "    field: completed",
+        "    equals: true",
+        "",
+      ].join("\n"),
+    });
+    const result = validateProject(dir);
+    expect(result.valid).toBe(false);
+    expect(
+      result.errors.some((e) => /bad-loop/.test(e) && /completed/.test(e)),
+    ).toBe(true);
+  });
 });
