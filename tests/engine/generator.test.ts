@@ -27,6 +27,16 @@ describe("buildGenerationPrompt", () => {
     expect(prompt).toMatch(/at least one `repeat:` block/i);
     expect(prompt).toMatch(/must NOT.*completed.*true/i);
   });
+
+  it("includes repeat-block required fields and requirements/until disambiguation", () => {
+    const prompt = buildGenerationPrompt("Build something");
+    // Rule 12: name + max_iterations explicitly required
+    expect(prompt).toMatch(/`name`.*`max_iterations`/);
+    expect(prompt).toMatch(/Do NOT omit `name` or `max_iterations`/);
+    // Rule 13: requirements vs repeat.until disambiguation
+    expect(prompt).toMatch(/`requirements:`.*`repeat\.until:?`.*NOT synonyms/i);
+    expect(prompt).toMatch(/Do NOT duplicate.*exit gate.*`requirements:`/i);
+  });
 });
 
 describe("parseGeneratedFiles", () => {

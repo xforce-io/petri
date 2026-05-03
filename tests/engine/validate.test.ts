@@ -72,6 +72,69 @@ describe("validateProject", () => {
     expect(result.errors.some((e) => /at least one repeat/i.test(e))).toBe(true);
   });
 
+  it("rejects a repeat block missing name and max_iterations", () => {
+    const dir = writeFixture({
+      "petri.yaml": MIN_PETRI,
+      "pipeline.yaml": [
+        "name: incomplete-loop",
+        "stages:",
+        "  - repeat:",
+        "      until: work-approved",
+        "      stages:",
+        "        - name: work",
+        "          roles: [worker]",
+        "",
+      ].join("\n"),
+      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/soul.md": "You are a worker.\n",
+      "roles/worker/gate.yaml": [
+        "id: work-approved",
+        "evidence:",
+        "  path: '{stage}/{role}/output.json'",
+        "  check:",
+        "    field: approved",
+        "    equals: true",
+        "",
+      ].join("\n"),
+    });
+    const result = validateProject(dir);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /missing required "name"/.test(e))).toBe(true);
+    expect(result.errors.some((e) => /missing or invalid "max_iterations"/.test(e))).toBe(true);
+  });
+
+  it("rejects a repeat block with non-positive max_iterations", () => {
+    const dir = writeFixture({
+      "petri.yaml": MIN_PETRI,
+      "pipeline.yaml": [
+        "name: zero-iter",
+        "stages:",
+        "  - repeat:",
+        "      name: bad",
+        "      max_iterations: 0",
+        "      until: work-approved",
+        "      stages:",
+        "        - name: work",
+        "          roles: [worker]",
+        "",
+      ].join("\n"),
+      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/soul.md": "You are a worker.\n",
+      "roles/worker/gate.yaml": [
+        "id: work-approved",
+        "evidence:",
+        "  path: '{stage}/{role}/output.json'",
+        "  check:",
+        "    field: approved",
+        "    equals: true",
+        "",
+      ].join("\n"),
+    });
+    const result = validateProject(dir);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /max_iterations/.test(e) && /bad/.test(e))).toBe(true);
+  });
+
   it("rejects a repeat block whose until gate exits on completed=true", () => {
     const dir = writeFixture({
       "petri.yaml": MIN_PETRI,

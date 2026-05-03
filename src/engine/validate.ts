@@ -26,8 +26,25 @@ export function validateProject(projectDir: string): ValidationResult {
     function walk(stages: StageEntry[]): void {
       for (const entry of stages) {
         if (isRepeatBlock(entry)) {
-          repeatBlocks.push({ name: entry.repeat.name, until: entry.repeat.until });
-          walk(entry.repeat.stages);
+          const r = entry.repeat as Partial<typeof entry.repeat>;
+          const labeledName = typeof r.name === "string" && r.name.length > 0 ? r.name : "(unnamed)";
+          if (typeof r.name !== "string" || r.name.length === 0) {
+            errors.push(`pipeline.yaml: repeat block missing required "name" field (string)`);
+          }
+          if (
+            typeof r.max_iterations !== "number"
+            || !Number.isInteger(r.max_iterations)
+            || r.max_iterations < 1
+          ) {
+            errors.push(
+              `pipeline.yaml: repeat block "${labeledName}" missing or invalid "max_iterations" (must be positive integer ≥ 1)`,
+            );
+          }
+          if (typeof r.until !== "string" || r.until.length === 0) {
+            errors.push(`pipeline.yaml: repeat block "${labeledName}" missing required "until" field (gate id string)`);
+          }
+          repeatBlocks.push({ name: labeledName, until: typeof r.until === "string" ? r.until : "" });
+          walk(Array.isArray(r.stages) ? r.stages : []);
         } else {
           for (const role of entry.roles) {
             roleNames.add(role);

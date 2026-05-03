@@ -101,6 +101,8 @@ ${exampleSkill}
 9. Keep skills actionable — tell the agent exactly what to produce and what gate artifact to write
 10. Write personas, skills, descriptions, and any free-text in the SAME primary language as the user description below. If the description is mainly Chinese, keep generated prose Chinese; if English, English. Identifiers, YAML keys, and gate ids stay English.
 11. The pipeline MUST contain at least one \`repeat:\` block. Petri is a feedback-loop-driven framework — a pipeline without iteration is not accepted. The \`repeat:\` block's \`until:\` field must reference a strong gate: the gate's \`evidence.check.field\` must NOT be the literal \`completed\` (with \`equals: true\`), because that gate fires the moment the artifact is written and the loop never iterates. Use a meaningful field like \`approved\`, \`tests_passed\`, or a numeric comparator. Wrap whichever stages constitute the iterative work (typically implementation + validation) in the block.
+12. Every \`repeat:\` block MUST include all of: \`name\` (string), \`max_iterations\` (positive integer ≥ 1), \`until\` (gate id string), and \`stages\` (non-empty list). Do NOT omit \`name\` or \`max_iterations\` — they are required, not optional.
+13. \`requirements:\` (top-level) and \`repeat.until:\` are NOT synonyms. \`repeat.until\` is the loop's exit condition. \`requirements:\` lists additional gates verified at the end of the whole pipeline run. Do NOT duplicate the loop's exit gate id in \`requirements:\` — that is redundant. \`requirements:\` is typically empty when a \`repeat:\` block carries the success signal.
 
 ## User Description
 
