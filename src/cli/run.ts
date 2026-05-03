@@ -24,9 +24,18 @@ interface RunOptions {
 export async function runCommand(opts: RunOptions): Promise<void> {
   const cwd = process.cwd();
 
-  // 1. Load configs
+  // 1. Load configs.
+  // petri.yaml stays at cwd. pipeline.yaml may be in a subdir (e.g. .petri/generated/);
+  // when so, roles are loaded from that subdir's roles/ if it exists, else cwd's roles/.
+  // This bridges `petri create` output (.petri/generated/{pipeline.yaml,roles/}) to
+  // `petri run` without requiring a manual promote step.
   const petriConfig = loadPetriConfig(cwd);
   const pipelineConfig = loadPipelineConfig(cwd, opts.pipeline);
+  const pipelineAbs = path.resolve(cwd, opts.pipeline);
+  const pipelineDir = path.dirname(pipelineAbs);
+  const rolesBase = fs.existsSync(path.join(pipelineDir, "roles"))
+    ? pipelineDir
+    : cwd;
 
   // 2. Resolve input: --input > --from > pipeline goal
   let input: string | undefined;
@@ -63,11 +72,11 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   }
   collectRoles(pipelineConfig.stages);
 
-  // 4. Load all roles
+  // 4. Load all roles (from pipeline.yaml's directory if it has a roles/ sibling, else cwd)
   const defaultModel = petriConfig.defaults.model;
   const roles: Record<string, LoadedRole> = {};
   for (const name of roleNames) {
-    roles[name] = loadRole(cwd, name, defaultModel);
+    roles[name] = loadRole(rolesBase, name, defaultModel);
   }
 
   // 5. Create provider based on config
