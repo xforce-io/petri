@@ -49,12 +49,32 @@ export function buildPipelineSummary(generatedDir: string): PipelineSummary | nu
 
   const stages: PipelineSummaryStage[] = [];
   const roleNames = new Set<string>();
-  for (const stage of pipeline.stages ?? []) {
-    if (!stage || typeof stage !== "object" || !stage.name) continue;
-    const roles = Array.isArray(stage.roles) ? stage.roles.filter((r: unknown) => typeof r === "string") : [];
-    stages.push({ name: stage.name, roles });
-    for (const r of roles) roleNames.add(r);
+
+  // Extract stages from pipeline.stages (handles both linear stages and repeat blocks)
+  function extractStages(stagesArray: any[]) {
+    for (const stage of stagesArray ?? []) {
+      if (!stage || typeof stage !== "object") continue;
+
+      // Handle repeat blocks: extract nested stages
+      if (stage.repeat && Array.isArray(stage.repeat.stages)) {
+        for (const nestedStage of stage.repeat.stages) {
+          if (!nestedStage || typeof nestedStage !== "object" || !nestedStage.name) continue;
+          const roles = Array.isArray(nestedStage.roles) ? nestedStage.roles.filter((r: unknown) => typeof r === "string") : [];
+          stages.push({ name: nestedStage.name, roles });
+          for (const r of roles) roleNames.add(r);
+        }
+      }
+
+      // Handle regular stages
+      if (!stage.repeat && stage.name) {
+        const roles = Array.isArray(stage.roles) ? stage.roles.filter((r: unknown) => typeof r === "string") : [];
+        stages.push({ name: stage.name, roles });
+        for (const r of roles) roleNames.add(r);
+      }
+    }
   }
+
+  extractStages(pipeline.stages ?? []);
 
   const roles: PipelineSummaryRole[] = [];
   for (const name of roleNames) {
