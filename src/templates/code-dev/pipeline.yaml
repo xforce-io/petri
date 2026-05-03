@@ -1,15 +1,19 @@
 name: code-dev
-description: Software development pipeline — design, develop, review
+description: Software development pipeline — design, then iterate develop+review until approved
 
 stages:
   - name: design
     roles: [designer]
     max_retries: 2
 
-  - name: develop
-    roles: [developer]
-    max_retries: 5
-
-  - name: review
-    roles: [code_reviewer]
-    max_retries: 2
+  - repeat:
+      name: develop-review-cycle
+      max_iterations: 3
+      until: review-approved
+      stages:
+        - name: develop
+          roles: [developer]
+          max_retries: 5
+        - name: review
+          roles: [code_reviewer]
+          max_retries: 2
