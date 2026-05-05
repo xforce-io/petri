@@ -32,9 +32,9 @@ export class PiProvider implements AgentProvider {
       );
     }
 
-    // Build system prompt from persona + skills
-    const skillsText = config.skills.map((s) => `- ${s}`).join("\n");
-    const systemPrompt = `${config.persona}\n\nSkills:\n${skillsText}`;
+    // Build system prompt from persona + role playbooks.
+    const playbooksText = config.playbooks.map((s) => `- ${s}`).join("\n");
+    const systemPrompt = `${config.persona}\n\nPlaybooks:\n${playbooksText}`;
 
     // Create agent with tools
     const agent = new Agent({

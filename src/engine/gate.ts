@@ -2,7 +2,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { GateConfig, GateStrategy } from "../types.js";
+import { GateCheck, GateCheckClause, GateConfig, GateStrategy } from "../types.js";
 
 export interface GateInput {
   gate: GateConfig;
@@ -43,6 +43,40 @@ export function resolveGatePath(template: string, stage: string, role: string): 
   return template.replaceAll("{stage}", stage).replaceAll("{role}", role);
 }
 
+function checkOne(content: unknown, check: GateCheckClause): string | null {
+  const actual = resolveField(content, check.field);
+
+  if (check.equals !== undefined && actual !== check.equals) {
+    return `Field "${check.field}" is ${JSON.stringify(actual)}, expected ${JSON.stringify(check.equals)}`;
+  }
+  if (check.gte !== undefined && !(actual >= check.gte)) {
+    return `Field "${check.field}" is ${actual}, expected >= ${check.gte}`;
+  }
+  if (check.lte !== undefined && !(actual <= check.lte)) {
+    return `Field "${check.field}" is ${actual}, expected <= ${check.lte}`;
+  }
+  if (check.gt !== undefined && !(actual > check.gt)) {
+    return `Field "${check.field}" is ${actual}, expected > ${check.gt}`;
+  }
+  if (check.lt !== undefined && !(actual < check.lt)) {
+    return `Field "${check.field}" is ${actual}, expected < ${check.lt}`;
+  }
+  if (check.in !== undefined && !check.in.includes(actual)) {
+    return `Field "${check.field}" is ${JSON.stringify(actual)}, expected one of ${JSON.stringify(check.in)}`;
+  }
+
+  return null;
+}
+
+function evaluateCheck(content: unknown, check: GateCheck): string | null {
+  const checks = Array.isArray(check) ? check : [check];
+  for (const c of checks) {
+    const failure = checkOne(content, c);
+    if (failure) return failure;
+  }
+  return null;
+}
+
 /**
  * Checks all gates and returns a GateResult based on the strategy.
  */
@@ -74,37 +108,9 @@ export async function checkGates(
 
     if (gate.evidence.check) {
       const content = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
-      const check = gate.evidence.check;
-      const actual = resolveField(content, check.field);
-      let failed = false;
-      let failReason = "";
+      const failReason = evaluateCheck(content, gate.evidence.check);
 
-      if (check.equals !== undefined && actual !== check.equals) {
-        failed = true;
-        failReason = `Field "${check.field}" is ${JSON.stringify(actual)}, expected ${JSON.stringify(check.equals)}`;
-      }
-      if (!failed && check.gte !== undefined && !(actual >= check.gte)) {
-        failed = true;
-        failReason = `Field "${check.field}" is ${actual}, expected >= ${check.gte}`;
-      }
-      if (!failed && check.lte !== undefined && !(actual <= check.lte)) {
-        failed = true;
-        failReason = `Field "${check.field}" is ${actual}, expected <= ${check.lte}`;
-      }
-      if (!failed && check.gt !== undefined && !(actual > check.gt)) {
-        failed = true;
-        failReason = `Field "${check.field}" is ${actual}, expected > ${check.gt}`;
-      }
-      if (!failed && check.lt !== undefined && !(actual < check.lt)) {
-        failed = true;
-        failReason = `Field "${check.field}" is ${actual}, expected < ${check.lt}`;
-      }
-      if (!failed && check.in !== undefined && !check.in.includes(actual)) {
-        failed = true;
-        failReason = `Field "${check.field}" is ${JSON.stringify(actual)}, expected one of ${JSON.stringify(check.in)}`;
-      }
-
-      if (failed) {
+      if (failReason) {
         details.push({
           gateId: gate.id,
           roleName,

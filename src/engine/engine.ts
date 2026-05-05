@@ -1,10 +1,10 @@
 // src/engine/engine.ts
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, renameSync, statSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, existsSync, writeFileSync } from "node:fs";
+import { basename, isAbsolute, join } from "node:path";
 import { ArtifactManifest } from "./manifest.js";
-import { checkGates, type GateInput, type GateDetail } from "./gate.js";
+import { checkGates, resolveGatePath, type GateInput, type GateDetail } from "./gate.js";
 import { buildContext } from "./context.js";
 import { isRepeatBlock } from "../types.js";
 import type { RunLogger } from "./logger.js";
@@ -43,6 +43,7 @@ export class Engine {
   private gateResults: Map<string, GateDetail> = new Map();
   private goal?: string;
   private requirements?: string[];
+  private artifactSnapshotSeq = 0;
 
   constructor(opts: EngineOptions) {
     this.provider = opts.provider;
@@ -184,12 +185,12 @@ export class Engine {
             const model = stage.overrides?.[roleName]?.model ?? role.model;
             const timer = this.logger?.logRoleStart(stage.name, roleName, model);
 
-            const agent = this.provider.createAgent({
-              persona: role.persona,
-              skills: role.skills,
-              context,
-              artifactDir,
-              model,
+              const agent = this.provider.createAgent({
+                persona: role.persona,
+                playbooks: role.playbooks,
+                context,
+                artifactDir,
+                model,
               timeout: stage.timeout ?? this.defaultTimeout,
             });
 
@@ -207,9 +208,21 @@ export class Engine {
             if (result.artifacts.length > 0) {
               manifest.collect(stage.name, roleName, result.artifacts);
             }
+            const artifactSnapshot = this.snapshotRoleArtifacts({
+              stage: stage.name,
+              role: roleName,
+              attempt: attempt + 1,
+              artifactDir,
+              artifacts: result.artifacts,
+            });
 
             if (timer) {
-              roleTimers.push({ roleName, timer, usage: result.usage, artifacts: result.artifacts });
+              roleTimers.push({
+                roleName,
+                timer,
+                usage: result.usage,
+                artifacts: artifactSnapshot.length > 0 ? artifactSnapshot : result.artifacts,
+              });
             }
           }),
         );
@@ -280,6 +293,7 @@ export class Engine {
         this.logger?.logRoleEnd(rt.timer, {
           gatePassed: roleGate?.passed ?? gateResult.passed,
           gateReason: roleGate?.reason ?? gateResult.reason,
+          attempt: attempt + 1,
           usage: rt.usage,
           artifacts: rt.artifacts,
         });
@@ -339,6 +353,7 @@ export class Engine {
   ): Promise<RunResult> {
     // Only skip on the first iteration — after that run normally
     let skippingInner = !!this.skipTo && this.containsStage(block.stages, this.skipTo);
+    let lastProgressSignature: RepeatProgressSignature | null = null;
 
     for (let iteration = 0; iteration < block.max_iterations; iteration++) {
       console.log(`  Repeat "${block.name}" iteration ${iteration + 1}/${block.max_iterations}...`);
@@ -370,6 +385,19 @@ export class Engine {
         if (result.status === "blocked") {
           const untilGate = this.gateResults.get(block.until);
           if (untilGate && !untilGate.passed) {
+            const stagnation = this.detectRepeatStagnation(
+              block,
+              iteration + 1,
+              lastProgressSignature,
+            );
+            if (stagnation.blocked) {
+              return {
+                status: "blocked",
+                stage: block.name,
+                reason: stagnation.reason,
+              };
+            }
+            lastProgressSignature = stagnation.signature;
             untilGateNotMet = true;
             break;
           }
@@ -388,6 +416,20 @@ export class Engine {
       if (gateDetail?.passed) {
         return { status: "done" };
       }
+
+      const stagnation = this.detectRepeatStagnation(
+        block,
+        iteration + 1,
+        lastProgressSignature,
+      );
+      if (stagnation.blocked) {
+        return {
+          status: "blocked",
+          stage: block.name,
+          reason: stagnation.reason,
+        };
+      }
+      lastProgressSignature = stagnation.signature;
     }
 
     return {
@@ -396,6 +438,173 @@ export class Engine {
       reason: `Max iterations (${block.max_iterations}) exhausted`,
     };
   }
+
+  private detectRepeatStagnation(
+    block: { name: string; until: string; stages: import("../types.js").StageEntry[] },
+    iteration: number,
+    previous: RepeatProgressSignature | null,
+  ): { blocked: boolean; reason?: string; signature: RepeatProgressSignature | null } {
+    const signature = this.buildRepeatProgressSignature(block);
+    if (!signature) {
+      return { blocked: false, signature: null };
+    }
+
+    if (previous?.hash === signature.hash) {
+      const files = signature.files.join(", ");
+      return {
+        blocked: true,
+        signature,
+        reason: `Repeat stagnation detected in "${block.name}" at iteration ${iteration}: non-until gate evidence is unchanged from the previous iteration (${files})`,
+      };
+    }
+
+    return { blocked: false, signature };
+  }
+
+  private buildRepeatProgressSignature(
+    block: { until: string; stages: import("../types.js").StageEntry[] },
+  ): RepeatProgressSignature | null {
+    const files = this.collectRepeatProgressEvidence(block.stages, block.until);
+    if (files.length === 0) return null;
+
+    const hash = createHash("sha256");
+    const existing: string[] = [];
+    for (const file of files.sort()) {
+      try {
+        const stat = statSync(file);
+        if (!stat.isFile()) continue;
+        hash.update(file);
+        hash.update("\0");
+        hash.update(readFileSync(file));
+        hash.update("\0");
+        existing.push(file);
+      } catch {
+        // Ignore missing/unreadable evidence files; gate checks report those separately.
+      }
+    }
+
+    if (existing.length === 0) return null;
+    return {
+      hash: hash.digest("hex"),
+      files: existing.map((file) => file.startsWith(this.artifactBaseDir)
+        ? file.slice(this.artifactBaseDir.length + 1)
+        : file),
+    };
+  }
+
+  private collectRepeatProgressEvidence(
+    entries: import("../types.js").StageEntry[],
+    untilGateId: string,
+  ): string[] {
+    const files: string[] = [];
+
+    for (const entry of entries) {
+      if (isRepeatBlock(entry)) {
+        files.push(...this.collectRepeatProgressEvidence(entry.repeat.stages, untilGateId));
+        continue;
+      }
+
+      for (const roleName of entry.roles) {
+        const gate = this.roles[roleName]?.gate;
+        if (!gate || gate.id === untilGateId) continue;
+        const resolvedPath = resolveGatePath(gate.evidence.path, entry.name, roleName);
+        files.push(join(this.artifactBaseDir, resolvedPath));
+      }
+    }
+
+    return files;
+  }
+
+  private snapshotRoleArtifacts(opts: {
+    stage: string;
+    role: string;
+    attempt: number;
+    artifactDir: string;
+    artifacts: string[];
+  }): string[] {
+    if (!this.logger) return [];
+
+    const files = resolveArtifactFiles(opts.artifactDir, opts.artifacts);
+    if (files.length === 0) return [];
+
+    const seq = String(++this.artifactSnapshotSeq).padStart(3, "0");
+    const snapshotDir = join(
+      this.logger.runDir,
+      "artifacts",
+      `${seq}-${safePathPart(opts.stage)}`,
+      safePathPart(opts.role),
+    );
+    mkdirSync(snapshotDir, { recursive: true });
+
+    const copied: string[] = [];
+    for (const file of files) {
+      const dest = uniqueDestination(snapshotDir, basename(file));
+      try {
+        copyFileSync(file, dest);
+        copied.push(dest);
+      } catch {
+        // Best-effort archival should not affect pipeline execution.
+      }
+    }
+
+    writeFileSync(join(snapshotDir, "_snapshot.json"), JSON.stringify({
+      sequence: Number(seq),
+      stage: opts.stage,
+      role: opts.role,
+      attempt: opts.attempt,
+      source_artifact_dir: opts.artifactDir,
+      source_files: files,
+      copied_files: copied,
+      created_at: new Date().toISOString(),
+    }, null, 2), "utf-8");
+
+    return copied;
+  }
+}
+
+interface RepeatProgressSignature {
+  hash: string;
+  files: string[];
+}
+
+function resolveArtifactFiles(artifactDir: string, artifacts: string[]): string[] {
+  const candidates = artifacts.length > 0
+    ? artifacts.map((p) => isAbsolute(p) ? p : join(artifactDir, p))
+    : readdirSync(artifactDir)
+      .filter((entry) => entry !== "attempts" && !entry.startsWith("."))
+      .map((entry) => join(artifactDir, entry));
+
+  const seen = new Set<string>();
+  const files: string[] = [];
+  for (const file of candidates) {
+    if (seen.has(file)) continue;
+    seen.add(file);
+    try {
+      if (statSync(file).isFile()) files.push(file);
+    } catch {
+      // skip missing/non-readable paths
+    }
+  }
+  return files;
+}
+
+function safePathPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "stage";
+}
+
+function uniqueDestination(dir: string, name: string): string {
+  let candidate = join(dir, name);
+  if (!existsSync(candidate)) return candidate;
+
+  const dot = name.lastIndexOf(".");
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  let i = 2;
+  while (existsSync(candidate)) {
+    candidate = join(dir, `${stem}-${i}${ext}`);
+    i++;
+  }
+  return candidate;
 }
 
 /**

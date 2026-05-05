@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { loadPetriConfig, loadPipelineConfig, loadRole, loadBuiltinSkill } from "../../src/config/loader.js";
+import { loadPetriConfig, loadPipelineConfig, loadRole, loadBuiltinPlaybook } from "../../src/config/loader.js";
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "petri-test-"));
@@ -157,14 +157,14 @@ describe("loadRole", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("loads role with persona, skills, and gate", () => {
+  it("loads role with persona, playbooks, and gate", () => {
     writeFile(
       tmpDir,
       "roles/coder/role.yaml",
       `
 persona: coder
 model: sonnet
-skills:
+playbooks:
   - petri:file_operations
 `
     );
@@ -188,7 +188,7 @@ evidence:
     expect(role.name).toBe("coder");
     expect(role.persona).toContain("You are a careful coder.");
     expect(role.model).toBe("sonnet");
-    expect(role.skills).toHaveLength(1);
+    expect(role.playbooks).toHaveLength(1);
     expect(role.gate).not.toBeNull();
     expect(role.gate!.id).toBe("tests_pass");
     expect(role.gate!.evidence.path).toBe("test-results.json");
@@ -200,7 +200,7 @@ evidence:
       "roles/writer/role.yaml",
       `
 persona: writer
-skills: []
+playbooks: []
 `
     );
     writeFile(tmpDir, "roles/writer/soul.md", "You write docs.");
@@ -209,7 +209,25 @@ skills: []
     expect(role.model).toBe("fallback-model");
   });
 
-  it("loads local skill files from skills/ directory", () => {
+  it("loads local playbook files from playbooks/ directory", () => {
+    writeFile(
+      tmpDir,
+      "roles/dev/role.yaml",
+      `
+persona: dev
+playbooks:
+  - local_tool
+`
+    );
+    writeFile(tmpDir, "roles/dev/soul.md", "A developer.");
+    writeFile(tmpDir, "roles/dev/playbooks/local_tool.md", "Use this local tool.");
+
+    const role = loadRole(tmpDir, "dev", "m");
+    expect(role.playbooks).toHaveLength(1);
+    expect(role.playbooks[0]).toContain("Use this local tool.");
+  });
+
+  it("rejects role configs without playbooks", () => {
     writeFile(
       tmpDir,
       "roles/dev/role.yaml",
@@ -220,15 +238,13 @@ skills:
 `
     );
     writeFile(tmpDir, "roles/dev/soul.md", "A developer.");
-    writeFile(tmpDir, "roles/dev/skills/local_tool.md", "Use this local tool.");
+    writeFile(tmpDir, "roles/dev/skills/local_tool.md", "Use this legacy local tool.");
 
-    const role = loadRole(tmpDir, "dev", "m");
-    expect(role.skills).toHaveLength(1);
-    expect(role.skills[0]).toContain("Use this local tool.");
+    expect(() => loadRole(tmpDir, "dev", "m")).toThrow(/playbooks/);
   });
 
   it("rejects gate.yaml with flat evidence + top-level check (LLM common mistake)", () => {
-    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nskills: []\n");
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nplaybooks: []\n");
     writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
     writeFile(
       tmpDir,
@@ -246,7 +262,7 @@ check:
   });
 
   it("rejects gate.yaml missing evidence.path", () => {
-    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nskills: []\n");
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nplaybooks: []\n");
     writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
     writeFile(
       tmpDir,
@@ -263,8 +279,75 @@ evidence:
     expect(() => loadRole(tmpDir, "r", "m")).toThrow(/evidence\.path/);
   });
 
+  it("accepts evidence.check with gte/lte comparators", () => {
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nplaybooks: []\n");
+    writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
+    writeFile(
+      tmpDir,
+      "roles/r/gate.yaml",
+      `
+id: done
+evidence:
+  path: "stage/r/done.json"
+  check:
+    field: results.annual_return
+    gte: 0.09
+`,
+    );
+
+    const role = loadRole(tmpDir, "r", "m");
+    expect(role.gate).not.toBeNull();
+    expect(role.gate!.evidence.check).toEqual({ field: "results.annual_return", gte: 0.09 });
+  });
+
+  it("accepts evidence.check as an AND array", () => {
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nplaybooks: []\n");
+    writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
+    writeFile(
+      tmpDir,
+      "roles/r/gate.yaml",
+      `
+id: target-met
+evidence:
+  path: "stage/r/metrics.json"
+  check:
+    - field: oos_annual_return
+      gte: 0.09
+    - field: oos_mdd
+      gte: -0.10
+`,
+    );
+
+    const role = loadRole(tmpDir, "r", "m");
+    expect(role.gate).not.toBeNull();
+    expect(role.gate!.evidence.check).toEqual([
+      { field: "oos_annual_return", gte: 0.09 },
+      { field: "oos_mdd", gte: -0.10 },
+    ]);
+  });
+
+  it("rejects evidence.check arrays with malformed entries", () => {
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nplaybooks: []\n");
+    writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
+    writeFile(
+      tmpDir,
+      "roles/r/gate.yaml",
+      `
+id: target-met
+evidence:
+  path: "stage/r/metrics.json"
+  check:
+    - field: oos_annual_return
+      gte: 0.09
+    - field: oos_mdd
+`,
+    );
+
+    expect(() => loadRole(tmpDir, "r", "m")).toThrow(/evidence\.check\[1\]/);
+  });
+
   it("rejects gate.yaml with malformed evidence.check (no comparator)", () => {
-    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nskills: []\n");
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nplaybooks: []\n");
     writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
     writeFile(
       tmpDir,
@@ -282,7 +365,7 @@ evidence:
   });
 
   it("rejects gate.yaml missing id and requires", () => {
-    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nskills: []\n");
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nplaybooks: []\n");
     writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
     writeFile(
       tmpDir,
@@ -297,7 +380,7 @@ evidence:
   });
 
   it("accepts gate.yaml without evidence.check (path-only)", () => {
-    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nskills: []\n");
+    writeFile(tmpDir, "roles/r/role.yaml", "persona: r\nplaybooks: []\n");
     writeFile(tmpDir, "roles/r/soul.md", "Persona text.");
     writeFile(
       tmpDir,
@@ -316,20 +399,20 @@ evidence:
   });
 });
 
-describe("loadBuiltinSkill", () => {
-  it("loads built-in skill by petri: prefix", () => {
-    const content = loadBuiltinSkill("file_operations");
+describe("loadBuiltinPlaybook", () => {
+  it("loads built-in playbook by petri: prefix", () => {
+    const content = loadBuiltinPlaybook("file_operations");
     expect(content).toBeTruthy();
     expect(typeof content).toBe("string");
     expect(content.length).toBeGreaterThan(0);
   });
 
-  it("loads shell_tools built-in skill", () => {
-    const content = loadBuiltinSkill("shell_tools");
+  it("loads shell_tools built-in playbook", () => {
+    const content = loadBuiltinPlaybook("shell_tools");
     expect(content).toBeTruthy();
   });
 
-  it("throws on unknown built-in skill", () => {
-    expect(() => loadBuiltinSkill("nonexistent_skill")).toThrow();
+  it("throws on unknown built-in playbook", () => {
+    expect(() => loadBuiltinPlaybook("nonexistent_playbook")).toThrow();
   });
 });

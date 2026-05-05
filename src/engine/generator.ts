@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateProject } from "./validate.js";
+import { buildGeneratedManifest, saveGeneratedManifest } from "./manifest.js";
 import { listFilesRecursive } from "../util/fs.js";
 import type { AgentProvider } from "../types.js";
 
@@ -30,7 +31,7 @@ export function buildGenerationPrompt(description: string): string {
   const exampleRole = safeRead(path.join(templateDir, "roles", "designer", "role.yaml"));
   const exampleSoul = safeRead(path.join(templateDir, "roles", "designer", "soul.md"));
   const exampleGate = safeRead(path.join(templateDir, "roles", "designer", "gate.yaml"));
-  const exampleSkill = safeRead(path.join(templateDir, "roles", "designer", "skills", "design.md"));
+  const examplePlaybook = safeRead(path.join(templateDir, "roles", "designer", "playbooks", "design.md"));
 
   return `You are a pipeline architect for the Petri multi-agent framework.
 
@@ -43,10 +44,10 @@ Respond with a JSON object mapping file paths to file contents. Example:
 \`\`\`json
 {
   "pipeline.yaml": "name: ...",
-  "roles/designer/role.yaml": "persona: soul.md\\nskills:\\n  - design",
+  "roles/designer/role.yaml": "persona: soul.md\\nplaybooks:\\n  - design",
   "roles/designer/soul.md": "You are a ...",
   "roles/designer/gate.yaml": "id: design-complete\\n...",
-  "roles/designer/skills/design.md": "# Design\\n..."
+  "roles/designer/playbooks/design.md": "# Design\\n..."
 }
 \`\`\`
 
@@ -100,9 +101,9 @@ ${exampleSoul}
 ${exampleGate}
 \`\`\`
 
-### roles/{role_name}/skills/{skill_name}.md
+### roles/{role_name}/playbooks/{playbook_name}.md
 \`\`\`markdown
-${exampleSkill}
+${examplePlaybook}
 \`\`\`
 
 ## Rules
@@ -118,17 +119,30 @@ ${exampleSkill}
        field: <field-name>
        equals: <value>
    \`\`\`
+   For multiple conditions on the same artifact, use a check array. Arrays are AND semantics — every entry must pass:
+   \`\`\`yaml
+   id: <gate-id>
+   evidence:
+     path: "{stage}/{role}/metrics.json"
+     check:
+       - field: results.annual_return
+         gte: 0.09
+       - field: results.max_drawdown
+         gte: -0.10
+   \`\`\`
    A flat layout (\`evidence: <string>\` with top-level \`check:\`) is invalid and will fail validation.
-4. Gate checks verify a JSON field value (e.g. field: completed, equals: true)
-5. Skills referenced in role.yaml must have a matching file in skills/
-6. Use "petri:file_operations" and "petri:shell_tools" as built-in skills when the role needs file or shell access
+4. Gate checks verify JSON field values. A single check object verifies one field; a check array verifies multiple fields with AND semantics.
+5. Playbooks referenced in role.yaml must have a matching file in playbooks/
+6. Use "petri:file_operations" and "petri:shell_tools" as built-in prompt fragments when the role needs file or shell access
 7. pipeline.yaml requirements must reference gate ids that exist in the roles
 8. Keep personas concise and focused on the role's expertise
-9. Keep skills actionable — tell the agent exactly what to produce and what gate artifact to write
-10. Write personas, skills, descriptions, and any free-text in the SAME primary language as the user description below. If the description is mainly Chinese, keep generated prose Chinese; if English, English. Identifiers, YAML keys, and gate ids stay English.
+9. Keep playbooks actionable — tell the agent exactly what to produce and what gate artifact to write
+10. Write personas, playbooks, descriptions, and any free-text in the SAME primary language as the user description below. If the description is mainly Chinese, keep generated prose Chinese; if English, English. Identifiers, YAML keys, and gate ids stay English.
 11. The pipeline MUST contain at least one \`repeat:\` block. Petri is a feedback-loop-driven framework — a pipeline without iteration is not accepted. The \`repeat:\` block's \`until:\` field must reference a strong gate. The gate's \`evidence.check.field\` must NOT be a self-report boolean — that means NOT \`completed\`, \`done\`, \`finished\`, \`ready\`, \`written\`, or any \`*_completed\`/\`*_complete\`/\`*_done\`/\`*_finished\`/\`*_ready\`/\`*_written\` variant — because those gates fire the moment the role writes its artifact and the loop never iterates. Prefer numeric comparators (\`gt\`/\`lt\`/\`gte\`/\`lte\` against a result field, e.g. \`results.annual_return\` with \`gt: 0.09\`) or verifying booleans whose semantic clearly requires judgment (e.g. \`approved\` from a reviewer role, \`tests_passed\` from a test runner). Wrap whichever stages constitute the iterative work (typically implementation + validation) in the block.
 12. Every \`repeat:\` block MUST include all of: \`name\` (string), \`max_iterations\` (positive integer ≥ 1), \`until\` (gate id string), and \`stages\` (non-empty list). Do NOT omit \`name\` or \`max_iterations\` — they are required, not optional.
 13. \`requirements:\` (top-level) and \`repeat.until:\` are NOT synonyms. \`repeat.until\` is the loop's exit condition. \`requirements:\` lists additional gates verified at the end of the whole pipeline run. Do NOT duplicate the loop's exit gate id in \`requirements:\` — that is redundant. \`requirements:\` is typically empty when a \`repeat:\` block carries the success signal.
+14. When the user's success target contains multiple numeric or measurable constraints (for example "annual return >= 9% AND max drawdown >= -10%", "tests pass AND coverage >= 80%"), the loop's final \`until\` gate MUST include every success constraint. Prefer one gate with an \`evidence.check\` array when all fields live in the same artifact. Do not silently gate only the easiest metric.
+15. **Real ground-truth content** — petri cannot tell whether the value in a gate artifact was computed by an external tool (test runner, backtest CLI, training script, build, CI) or fabricated by the agent in-prompt. So when the loop's \`until\` gate is on a real metric (numeric comparator, e.g. \`oos_annual_return > 0.09\`, \`tests_passed: true\`, \`loss < 0.1\`), the role producing that artifact MUST invoke an external tool and capture its real output into the artifact JSON. The role's playbook must also write a small command-evidence field or sibling artifact with the exact command, exit code, and source output path. Self-grading where the agent synthesizes the metric value from the hypothesis or mental model is the anti-pattern this rule blocks. Path stays per rule 3 (\`{stage}/{role}/<file>.json\`); the discipline is on HOW the file is populated, not where it lives. When the external tool produces a canonical file elsewhere in the project (e.g. \`data/backtest_results/<run_id>/metrics.json\`), the role's playbook should instruct the agent to run that tool, read its output, and write the verified values into the gate's \`{stage}/{role}/<file>.json\`.
 
 ## User Description
 
@@ -202,7 +216,7 @@ export async function generatePipeline(
     // Call LLM
     const agent = provider.createAgent({
       persona: "You are a pipeline architect for the Petri framework.",
-      skills: [],
+      playbooks: [],
       context: prompt,
       artifactDir: llmWorkDir,
       model: req.model ?? "default",
@@ -252,6 +266,10 @@ export async function generatePipeline(
       // Remove copied petri.yaml from generated (we don't want to promote it)
       const copiedPetri = path.join(generatedDir, "petri.yaml");
       if (fs.existsSync(copiedPetri)) fs.unlinkSync(copiedPetri);
+      saveGeneratedManifest(
+        generatedDir,
+        buildGeneratedManifest(generatedDir, req.description),
+      );
 
       return {
         status: "ok",

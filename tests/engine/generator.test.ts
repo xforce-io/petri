@@ -33,6 +33,27 @@ describe("buildGenerationPrompt", () => {
     expect(prompt).toMatch(/numeric comparator/i);
   });
 
+  it("includes real-ground-truth content discipline (rule 14)", () => {
+    const prompt = buildGenerationPrompt("Build something");
+    expect(prompt).toMatch(/Real ground-truth content/i);
+    expect(prompt).toMatch(/MUST invoke an external tool/);
+    expect(prompt).toMatch(/test runner|build|backtest CLI|training script|CI/i);
+    // Path convention is preserved (rule 3 still owns paths)
+    expect(prompt).toMatch(/Path stays per rule 3.*\{stage\}\/\{role\}/);
+    expect(prompt).toMatch(/anti-pattern/i);
+    expect(prompt).toMatch(/exact command/i);
+    expect(prompt).toMatch(/exit code/i);
+    expect(prompt).toMatch(/source output path/i);
+  });
+
+  it("documents check arrays for multi-condition AND gates", () => {
+    const prompt = buildGenerationPrompt("Improve annual return >= 9% and max drawdown >= -10%");
+    expect(prompt).toMatch(/check array/i);
+    expect(prompt).toMatch(/AND semantics/i);
+    expect(prompt).toMatch(/multiple numeric or measurable constraints/i);
+    expect(prompt).toContain("results.max_drawdown");
+  });
+
   it("includes the explicit pipeline-skeleton showing repeat: inside stages:", () => {
     const prompt = buildGenerationPrompt("Build something");
     expect(prompt).toMatch(/CORRECT shape/i);
@@ -56,7 +77,7 @@ describe("parseGeneratedFiles", () => {
   it("parses JSON file map from LLM output", () => {
     const output = JSON.stringify({
       "pipeline.yaml": "name: test\nstages: []",
-      "roles/worker/role.yaml": "persona: soul.md\nskills: []",
+      "roles/worker/role.yaml": "persona: soul.md\nplaybooks: []",
     });
     const files = parseGeneratedFiles(output);
     expect(files.size).toBe(2);

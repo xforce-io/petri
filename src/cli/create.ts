@@ -41,6 +41,11 @@ export async function runCreate(
     throw new Error("Missing description. Pass it as a positional argument or with --from <file>.");
   }
 
+  const petriDir = path.join(cwd, ".petri");
+  const goalPath = path.join(petriDir, "goal.md");
+  fs.mkdirSync(petriDir, { recursive: true });
+  fs.writeFileSync(goalPath, description.endsWith("\n") ? description : description + "\n", "utf-8");
+
   const petriYamlPath = path.join(cwd, "petri.yaml");
   if (!fs.existsSync(petriYamlPath)) {
     throw new Error(
@@ -154,6 +159,7 @@ export async function runCreate(
   const relGen = path.relative(cwd, generatedDir) || generatedDir;
   console.log(chalk.gray(`→ Inspect:  cat ${relGen}/pipeline.yaml`));
   console.log(chalk.gray(`→ Inspect:  cat ${relGen}/roles/<name>/soul.md`));
+  console.log(chalk.gray("→ Goal:     cat .petri/goal.md"));
   console.log(chalk.gray(`Output: ${relGen}`));
 }
 

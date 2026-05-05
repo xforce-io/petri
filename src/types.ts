@@ -42,12 +42,12 @@ export function isRepeatBlock(entry: StageEntry): entry is RepeatBlock {
 export interface RoleConfig {
   persona: string;
   model?: string;
-  skills: string[];
+  playbooks: string[];
 }
 
 // --- Gate ---
 
-export interface GateCheck {
+export interface GateCheckClause {
   field: string;
   equals?: unknown;
   gte?: number;
@@ -56,6 +56,8 @@ export interface GateCheck {
   lt?: number;
   in?: unknown[];
 }
+
+export type GateCheck = GateCheckClause | GateCheckClause[];
 
 export interface GateConfig {
   id: string;          // canonical gate id, e.g. "tests-pass"
@@ -112,7 +114,7 @@ export interface ArtifactEntry {
 
 export interface AgentConfig {
   persona: string;
-  skills: string[];
+  playbooks: string[];
   context: string;
   artifactDir: string;
   model: string;
@@ -142,6 +144,6 @@ export interface LoadedRole {
   name: string;
   persona: string;
   model: string;
-  skills: string[];
+  playbooks: string[];
   gate: GateConfig | null;
 }

@@ -488,7 +488,7 @@ function handleConfigFiles(res: http.ServerResponse, projectDir: string): void {
     }
   }
 
-  // roles/**/*.yaml, roles/*/soul.md, roles/*/skills/*.md
+  // roles/**/*.yaml, roles/*/soul.md, roles/*/playbooks/*.md
   // Order roles by pipeline stage order, then alphabetically for any not in pipeline
   const rolesDir = path.join(projectDir, "roles");
   if (fs.existsSync(rolesDir)) {
@@ -528,12 +528,11 @@ function handleConfigFiles(res: http.ServerResponse, projectDir: string): void {
         if (f.isFile() && f.name === "soul.md") {
           files.push(`${roleRel}/soul.md`);
         }
-        // skills/*.md
-        if (f.isDirectory() && f.name === "skills") {
-          const skillsDir = path.join(roleDir, "skills");
-          for (const sf of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+        if (f.isDirectory() && f.name === "playbooks") {
+          const playbooksDir = path.join(roleDir, f.name);
+          for (const sf of fs.readdirSync(playbooksDir, { withFileTypes: true })) {
             if (sf.isFile() && sf.name.endsWith(".md")) {
-              files.push(`${roleRel}/skills/${sf.name}`);
+              files.push(`${roleRel}/${f.name}/${sf.name}`);
             }
           }
         }
@@ -624,5 +623,3 @@ async function handleConfigFileWrite(
   fs.writeFileSync(absPath, parsed.content, "utf-8");
   sendJson(res, 200, { path: relPath, saved: true });
 }
-
-

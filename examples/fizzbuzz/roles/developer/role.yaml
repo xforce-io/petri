@@ -1,5 +1,5 @@
 persona: soul.md
-skills:
+playbooks:
   - petri:file_operations
   - petri:shell_tools
   - implement

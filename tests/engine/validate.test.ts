@@ -55,7 +55,7 @@ describe("validateProject", () => {
         "    roles: [worker]",
         "",
       ].join("\n"),
-      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/worker/soul.md": "You are a worker.\n",
       "roles/worker/gate.yaml": [
         "id: work-approved",
@@ -86,7 +86,7 @@ describe("validateProject", () => {
         "      roles: [worker]",
         "",
       ].join("\n"),
-      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/worker/soul.md": "You are a worker.\n",
       "roles/worker/gate.yaml": [
         "id: work-approved",
@@ -120,7 +120,7 @@ describe("validateProject", () => {
         "          role: worker", // singular typo
         "",
       ].join("\n"),
-      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/worker/soul.md": "You are a worker.\n",
       "roles/worker/gate.yaml": [
         "id: work-approved",
@@ -152,7 +152,7 @@ describe("validateProject", () => {
         "          roles: [worker]",
         "",
       ].join("\n"),
-      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/worker/soul.md": "You are a worker.\n",
       "roles/worker/gate.yaml": [
         "id: work-approved",
@@ -185,7 +185,7 @@ describe("validateProject", () => {
         "          roles: [worker]",
         "",
       ].join("\n"),
-      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/worker/soul.md": "You are a worker.\n",
       "roles/worker/gate.yaml": [
         "id: work-approved",
@@ -217,7 +217,7 @@ describe("validateProject", () => {
         "          roles: [worker]",
         "",
       ].join("\n"),
-      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/worker/soul.md": "You are a worker.\n",
       "roles/worker/gate.yaml": [
         "id: hypo-ready",
@@ -249,7 +249,7 @@ describe("validateProject", () => {
         "          roles: [worker]",
         "",
       ].join("\n"),
-      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/worker/soul.md": "You are a worker.\n",
       "roles/worker/gate.yaml": [
         "id: work-done",
@@ -266,5 +266,40 @@ describe("validateProject", () => {
     expect(
       result.errors.some((e) => /bad-loop/.test(e) && /completed/.test(e)),
     ).toBe(true);
+  });
+
+  it("allows a repeat until gate with strong checks plus a weak self-report check", () => {
+    const dir = writeFixture({
+      "petri.yaml": MIN_PETRI,
+      "pipeline.yaml": [
+        "name: multi-check-loop",
+        "stages:",
+        "  - repeat:",
+        "      name: target-loop",
+        "      max_iterations: 3",
+        "      until: target-met",
+        "      stages:",
+        "        - name: review",
+        "          roles: [reviewer]",
+        "",
+      ].join("\n"),
+      "roles/reviewer/role.yaml": "persona: soul.md\nplaybooks: []\n",
+      "roles/reviewer/soul.md": "You review metrics.\n",
+      "roles/reviewer/gate.yaml": [
+        "id: target-met",
+        "evidence:",
+        "  path: '{stage}/{role}/evaluation.json'",
+        "  check:",
+        "    - field: completed",
+        "      equals: true",
+        "    - field: oos_annual_return",
+        "      gte: 0.09",
+        "    - field: oos_mdd",
+        "      gte: -0.10",
+        "",
+      ].join("\n"),
+    });
+    const result = validateProject(dir);
+    expect(result.errors.some((e) => /self-report boolean/.test(e))).toBe(false);
   });
 });

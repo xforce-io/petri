@@ -7,10 +7,35 @@ import type {
   PipelineConfig,
   RoleConfig,
   GateConfig,
+  GateCheck,
+  GateCheckClause,
   LoadedRole,
 } from "../types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const COMPARATORS = ["equals", "gt", "gte", "lt", "lte", "in"] as const;
+
+function validateGateCheckClause(c: unknown, label: string): asserts c is GateCheckClause {
+  if (!c || typeof c !== "object" || Array.isArray(c) || typeof (c as any).field !== "string") {
+    throw new Error(`gate.yaml: '${label}.field' must be a string when 'evidence.check' is set`);
+  }
+  const hasComparator = COMPARATORS.some((k) => k in (c as any));
+  if (!hasComparator) {
+    throw new Error(`gate.yaml: '${label}' must include at least one of equals/gt/gte/lt/lte/in`);
+  }
+}
+
+function validateGateCheck(check: unknown): asserts check is GateCheck {
+  if (Array.isArray(check)) {
+    if (check.length === 0) {
+      throw new Error("gate.yaml: 'evidence.check' array must contain at least one check");
+    }
+    check.forEach((c, i) => validateGateCheckClause(c, `evidence.check[${i}]`));
+    return;
+  }
+  validateGateCheckClause(check, "evidence.check");
+}
 
 /**
  * Load petri.yaml from the project directory. Throws if missing.
@@ -41,7 +66,7 @@ export function loadPipelineConfig(
 
 /**
  * Load a role by name from roles/{roleName}/.
- * Reads role.yaml, soul.md, skills/, and gate.yaml.
+ * Reads role.yaml, soul.md, playbooks/, and gate.yaml.
  */
 export function loadRole(
   projectDir: string,
@@ -66,18 +91,21 @@ export function loadRole(
     persona = fs.readFileSync(soulPath, "utf-8");
   }
 
-  // Resolve skills
-  const skills: string[] = (roleConfig.skills ?? []).map((skillRef) => {
-    if (skillRef.startsWith("petri:")) {
-      const builtinName = skillRef.slice("petri:".length);
-      return loadBuiltinSkill(builtinName);
+  if (!Array.isArray(roleConfig.playbooks)) {
+    throw new Error(`roles/${roleName}/role.yaml: 'playbooks' must be an array`);
+  }
+  const playbookRefs = roleConfig.playbooks;
+  const playbooks: string[] = playbookRefs.map((playbookRef) => {
+    if (playbookRef.startsWith("petri:")) {
+      const builtinName = playbookRef.slice("petri:".length);
+      return loadBuiltinPlaybook(builtinName);
     }
-    // Local skill: read from roles/{roleName}/skills/{name}.md
-    const skillPath = path.join(roleDir, "skills", `${skillRef}.md`);
-    if (!fs.existsSync(skillPath)) {
-      throw new Error(`Skill not found: ${skillPath}`);
+    // Local playbook: read from roles/{roleName}/playbooks/{name}.md.
+    const playbookPath = path.join(roleDir, "playbooks", `${playbookRef}.md`);
+    if (!fs.existsSync(playbookPath)) {
+      throw new Error(`Playbook not found: ${playbookPath}`);
     }
-    return fs.readFileSync(skillPath, "utf-8");
+    return fs.readFileSync(playbookPath, "utf-8");
   });
 
   // Load gate.yaml if present
@@ -102,14 +130,7 @@ export function loadRole(
       throw new Error("gate.yaml: 'evidence.path' is required (string). Note: 'check' must be nested under 'evidence', not a top-level field.");
     }
     if (raw.evidence.check !== undefined) {
-      const c = raw.evidence.check;
-      if (!c || typeof c !== "object" || typeof c.field !== "string") {
-        throw new Error("gate.yaml: 'evidence.check.field' must be a string when 'evidence.check' is set");
-      }
-      const hasComparator = ["equals", "gt", "lt", "in"].some((k) => k in c);
-      if (!hasComparator) {
-        throw new Error("gate.yaml: 'evidence.check' must include at least one of equals/gt/lt/in");
-      }
+      validateGateCheck(raw.evidence.check);
     }
     gate = {
       id: gateId,
@@ -122,24 +143,24 @@ export function loadRole(
     name: roleName,
     persona,
     model: roleConfig.model ?? defaultModel,
-    skills,
+    playbooks,
     gate,
   };
 }
 
 /**
- * Load a built-in skill from src/skills/{name}.md.
+ * Load a built-in playbook from src/playbooks/{name}.md.
  */
-export function loadBuiltinSkill(name: string): string {
+export function loadBuiltinPlaybook(name: string): string {
   // Resolve relative to this file — check multiple candidates for bundled vs dev
   const candidates = [
-    path.join(__dirname, "..", "skills", `${name}.md`),             // dev: src/config/../skills
-    path.join(__dirname, "..", "src", "skills", `${name}.md`),      // bundled: dist/../src/skills
-    path.join(__dirname, "..", "..", "src", "skills", `${name}.md`), // bundled: dist/../../src/skills
+    path.join(__dirname, "..", "playbooks", `${name}.md`),             // dev: src/config/../playbooks
+    path.join(__dirname, "..", "src", "playbooks", `${name}.md`),      // bundled: dist/../src/playbooks
+    path.join(__dirname, "..", "..", "src", "playbooks", `${name}.md`), // bundled: dist/../../src/playbooks
   ];
-  const skillPath = candidates.find((p) => fs.existsSync(p));
-  if (!skillPath) {
-    throw new Error(`Built-in skill not found: ${name} (looked at ${candidates.join(", ")})`);
+  const playbookPath = candidates.find((p) => fs.existsSync(p));
+  if (!playbookPath) {
+    throw new Error(`Built-in playbook not found: ${name} (looked at ${candidates.join(", ")})`);
   }
-  return fs.readFileSync(skillPath, "utf-8");
+  return fs.readFileSync(playbookPath, "utf-8");
 }

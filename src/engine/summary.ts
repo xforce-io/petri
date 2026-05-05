@@ -1,11 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
+import type { GateCheckClause } from "../types.js";
 
 export interface PipelineSummaryRole {
   name: string;
   personaFirstLine: string;
-  skills: string[];
+  playbooks: string[];
 }
 
 export type GateStrength = "strong" | "weak" | "none";
@@ -51,6 +52,42 @@ interface RoleGateInfo {
   check: string; // human-readable: "approved = true (strong)" or "no gate"
 }
 
+const WEAK_BOOLEAN_FIELD = /(^|_)(completed?|done|finished|ready|written)$/i;
+
+function renderOneCheck(check: GateCheckClause): { strength: GateStrength; check: string } {
+  const field = typeof check.field === "string" ? check.field : "?";
+  let strength: GateStrength = "strong";
+  let renderedCheck: string;
+  if ("equals" in check) {
+    renderedCheck = `${field} = ${JSON.stringify(check.equals)}`;
+    if (check.equals === true && WEAK_BOOLEAN_FIELD.test(field)) strength = "weak";
+  } else if ("gt" in check) {
+    renderedCheck = `${field} > ${check.gt}`;
+  } else if ("gte" in check) {
+    renderedCheck = `${field} >= ${check.gte}`;
+  } else if ("lt" in check) {
+    renderedCheck = `${field} < ${check.lt}`;
+  } else if ("lte" in check) {
+    renderedCheck = `${field} <= ${check.lte}`;
+  } else if ("in" in check) {
+    renderedCheck = `${field} in ${JSON.stringify(check.in)}`;
+  } else {
+    renderedCheck = `${field} (no comparator)`;
+    strength = "weak";
+  }
+  return { strength, check: renderedCheck };
+}
+
+function renderCheck(check: unknown): RoleGateInfo {
+  const checks = Array.isArray(check) ? check : [check];
+  if (checks.length === 0) return { strength: "weak", check: "empty check" };
+  const rendered = checks.map((c) => renderOneCheck(c as GateCheckClause));
+  return {
+    strength: rendered.some((r) => r.strength === "strong") ? "strong" : "weak",
+    check: rendered.map((r) => r.check).join(" AND "),
+  };
+}
+
 function loadRoleGateInfo(generatedDir: string, roleName: string): RoleGateInfo {
   const gatePath = path.join(generatedDir, "roles", roleName, "gate.yaml");
   if (!fs.existsSync(gatePath)) return { strength: "none", check: "no gate" };
@@ -66,26 +103,7 @@ function loadRoleGateInfo(generatedDir: string, roleName: string): RoleGateInfo 
   if (!check || typeof check !== "object") {
     return { strength: "weak", check: "file-existence only" };
   }
-  const field = typeof check.field === "string" ? check.field : "?";
-  // Strength heuristic: any self-report boolean (`completed`, `done`, `*_ready`,
-  // `*_complete`, etc.) with `equals: true` is weak. Keep regex in sync with validate.ts.
-  const WEAK_BOOLEAN_FIELD = /(^|_)(completed?|done|finished|ready|written)$/i;
-  let strength: GateStrength = "strong";
-  let renderedCheck: string;
-  if ("equals" in check) {
-    renderedCheck = `${field} = ${JSON.stringify(check.equals)}`;
-    if (check.equals === true && WEAK_BOOLEAN_FIELD.test(field)) strength = "weak";
-  } else if ("gt" in check) {
-    renderedCheck = `${field} > ${check.gt}`;
-  } else if ("lt" in check) {
-    renderedCheck = `${field} < ${check.lt}`;
-  } else if ("in" in check) {
-    renderedCheck = `${field} in ${JSON.stringify(check.in)}`;
-  } else {
-    renderedCheck = `${field} (no comparator)`;
-    strength = "weak";
-  }
-  return { strength, check: renderedCheck };
+  return renderCheck(check);
 }
 
 function summarizeStages(generatedDir: string, raw: any[]): { stages: StageSummary[]; roleNames: Set<string> } {
@@ -149,12 +167,13 @@ export function buildPipelineSummary(generatedDir: string): PipelineSummary | nu
   const roles: PipelineSummaryRole[] = [];
   for (const name of roleNames) {
     const roleDir = path.join(generatedDir, "roles", name);
-    let skills: string[] = [];
+    let playbooks: string[] = [];
     let personaPath = path.join(roleDir, "soul.md");
     try {
       const roleYaml = parseYaml(fs.readFileSync(path.join(roleDir, "role.yaml"), "utf-8")) as any;
-      if (Array.isArray(roleYaml?.skills)) {
-        skills = roleYaml.skills.filter((s: unknown) => typeof s === "string");
+      const playbookRefs = roleYaml?.playbooks;
+      if (Array.isArray(playbookRefs)) {
+        playbooks = playbookRefs.filter((s: unknown) => typeof s === "string");
       }
       if (typeof roleYaml?.persona === "string") {
         personaPath = path.join(roleDir, roleYaml.persona);
@@ -166,7 +185,7 @@ export function buildPipelineSummary(generatedDir: string): PipelineSummary | nu
       personaFirstLine = truncate(firstNonEmptyLine(fs.readFileSync(personaPath, "utf-8")), PERSONA_MAX);
     } catch { /* soul.md missing */ }
 
-    roles.push({ name, personaFirstLine, skills });
+    roles.push({ name, personaFirstLine, playbooks });
   }
 
   return {

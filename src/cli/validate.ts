@@ -57,10 +57,10 @@ export async function validateCommand(): Promise<void> {
     try {
       const role = loadRole(cwd, name, defaultModel);
       const gateInfo = role.gate ? "gate" : "no gate";
-      const skillCount = role.skills.length;
+      const playbookCount = role.playbooks.length;
       console.log(
         chalk.green(
-          `✔ role "${name}" — ${skillCount} skill(s), ${gateInfo}`,
+          `✔ role "${name}" — ${playbookCount} playbook(s), ${gateInfo}`,
         ),
       );
     } catch (err: unknown) {

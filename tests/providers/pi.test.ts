@@ -76,7 +76,7 @@ import { PiProvider } from "../../src/providers/pi.js";
 describe("PiProvider", () => {
   const defaultConfig: AgentConfig = {
     persona: "You are a helpful coding assistant.",
-    skills: ["Write clean TypeScript", "Follow best practices"],
+    playbooks: ["Write clean TypeScript", "Follow best practices"],
     context: "Create a hello world program",
     artifactDir: "/tmp/test-artifacts",
     model: "sonnet",
