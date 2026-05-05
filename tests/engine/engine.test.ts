@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { Engine } from "../../src/engine/engine.js";
+import { RunLogger } from "../../src/engine/logger.js";
 import type {
   AgentConfig,
   AgentProvider,
@@ -51,7 +52,7 @@ function makeRole(name: string, gate: GateConfig | null): LoadedRole {
     name,
     persona: `${name} persona`,
     model: "test-model",
-    skills: [],
+    playbooks: [],
     gate,
   };
 }
@@ -146,6 +147,57 @@ describe("Engine", () => {
     const result = await engine.run(pipeline, "Do work");
     expect(result.status).toBe("done");
     expect(callCount).toBe(2);
+  });
+
+  it("snapshots each role artifact into the run directory before retries overwrite it", async () => {
+    let callCount = 0;
+    const gate = makeGate("{stage}/{role}/output.json", {
+      field: "approved",
+      equals: true,
+    });
+    const roles: Record<string, LoadedRole> = {
+      worker: makeRole("worker", gate),
+    };
+
+    const provider = createStubProvider(() => {
+      callCount++;
+      const dir = path.join(tmpDir, "artifacts", "work", "worker");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, "output.json"),
+        JSON.stringify({ approved: callCount >= 2, callCount }),
+      );
+    });
+
+    const pipeline: PipelineConfig = {
+      name: "test-pipeline",
+      stages: [{ name: "work", roles: ["worker"], max_retries: 2 }],
+    };
+    const logger = new RunLogger(tmpDir, pipeline.name, "Do work");
+
+    const engine = new Engine({
+      provider,
+      roles,
+      artifactBaseDir: path.join(tmpDir, "artifacts"),
+      logger,
+    });
+
+    const result = await engine.run(pipeline, "Do work");
+    logger.finish(result.status, result.stage, result.reason);
+
+    expect(result.status).toBe("done");
+    const first = JSON.parse(fs.readFileSync(
+      path.join(logger.runDir, "artifacts", "001-work", "worker", "output.json"),
+      "utf-8",
+    ));
+    const second = JSON.parse(fs.readFileSync(
+      path.join(logger.runDir, "artifacts", "002-work", "worker", "output.json"),
+      "utf-8",
+    ));
+    const runLog = JSON.parse(fs.readFileSync(path.join(logger.runDir, "run.json"), "utf-8"));
+    expect(first).toEqual({ approved: false, callCount: 1 });
+    expect(second).toEqual({ approved: true, callCount: 2 });
+    expect(runLog.stages.map((s: { attempt: number }) => s.attempt)).toEqual([1, 2]);
   });
 
   it("blocks after max_retries exhausted", async () => {
@@ -480,5 +532,81 @@ describe("Engine", () => {
     const result = await engine.run(pipeline, "Iterate");
     expect(result.status).toBe("done");
     expect(iterationCount).toBe(2);
+  });
+
+  it("blocks a repeat loop when non-until gate evidence is unchanged", async () => {
+    const designGate: GateConfig = {
+      id: "strategy-designed",
+      evidence: {
+        path: "design/designer/spec.json",
+        check: { field: "ready", equals: true },
+      },
+    };
+    const reviewGate: GateConfig = {
+      id: "review-approved",
+      evidence: {
+        path: "review/reviewer/verdict.json",
+        check: { field: "approved", equals: true },
+      },
+    };
+    const roles: Record<string, LoadedRole> = {
+      designer: makeRole("designer", designGate),
+      reviewer: makeRole("reviewer", reviewGate),
+    };
+
+    let designCalls = 0;
+    let reviewCalls = 0;
+    const provider = createStubProvider((config) => {
+      if (config.persona === "designer persona") {
+        designCalls++;
+        const dir = path.join(tmpDir, "design", "designer");
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(
+          path.join(dir, "spec.json"),
+          JSON.stringify({ ready: true, lookback_months: 6, top_k: 1 }),
+        );
+      } else {
+        reviewCalls++;
+        const dir = path.join(tmpDir, "review", "reviewer");
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(
+          path.join(dir, "verdict.json"),
+          JSON.stringify({
+            approved: false,
+            feedback: { improvement_suggestions: [`change-${reviewCalls}`] },
+          }),
+        );
+      }
+    });
+
+    const pipeline: PipelineConfig = {
+      name: "test-stagnating-repeat",
+      stages: [
+        {
+          repeat: {
+            name: "design-review-loop",
+            max_iterations: 6,
+            until: "review-approved",
+            stages: [
+              { name: "design", roles: ["designer"], max_retries: 0 },
+              { name: "review", roles: ["reviewer"], max_retries: 0 },
+            ],
+          },
+        },
+      ],
+    };
+
+    const engine = new Engine({
+      provider,
+      roles,
+      artifactBaseDir: tmpDir,
+    });
+
+    const result = await engine.run(pipeline, "Iterate");
+    expect(result.status).toBe("blocked");
+    expect(result.stage).toBe("design-review-loop");
+    expect(result.reason).toMatch(/Repeat stagnation detected/i);
+    expect(designCalls).toBe(2);
+    expect(reviewCalls).toBe(2);
   });
 });

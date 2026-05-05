@@ -13,6 +13,7 @@ describe("promoteGenerated", () => {
     const genDir = path.join(tmpDir, ".petri", "generated");
     fs.mkdirSync(path.join(genDir, "roles", "worker"), { recursive: true });
     fs.writeFileSync(path.join(genDir, "pipeline.yaml"), "name: test");
+    fs.writeFileSync(path.join(genDir, "manifest.json"), "{}");
     fs.writeFileSync(path.join(genDir, "roles", "worker", "role.yaml"), "persona: soul.md");
   });
 
@@ -26,6 +27,8 @@ describe("promoteGenerated", () => {
     expect(files).toContain("roles/worker/role.yaml");
     expect(fs.readFileSync(path.join(tmpDir, "pipeline.yaml"), "utf-8")).toBe("name: test");
     expect(fs.readFileSync(path.join(tmpDir, "roles", "worker", "role.yaml"), "utf-8")).toBe("persona: soul.md");
+    expect(files).not.toContain("manifest.json");
+    expect(fs.existsSync(path.join(tmpDir, "manifest.json"))).toBe(false);
   });
 
   it("returns empty array when no generated files exist", () => {

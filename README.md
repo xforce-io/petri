@@ -14,7 +14,7 @@ Most multi-agent frameworks ask you to choreograph agents: who talks to whom, in
 
 Petri takes a different approach. You define:
 
-- **Roles** — independent agents with personas, skills, and expertise
+- **Roles** — independent agents with personas, playbooks, and expertise
 - **Quality gates** — measurable acceptance criteria (does the code compile? did the model beat 75% accuracy?)
 - **Retry budget** — how many attempts the system gets
 
@@ -62,16 +62,16 @@ Same harness, different roles. Adding a new scenario = adding a directory:
 ```
 roles/
   your_new_role/
-    role.yaml       # Model, skills
+    role.yaml       # Model, playbooks
     soul.md         # Persona
     gate.yaml       # What "done" means
-    skills/
+    playbooks/
       do_the_thing.md
 ```
 
 No engine code changes. No orchestration rewiring. The pipeline doesn't know or care what the agents do — it only checks whether the gates pass.
 
-Shared skills can live in a project-level `skills/` directory alongside `roles/`, available to any role that references them.
+Role playbooks are prompt fragments scoped to a role.
 
 **Built-in examples spanning wildly different domains:**
 
@@ -194,7 +194,7 @@ petri run [--pipeline <file>]      # Execute pipeline
 petri status                       # Latest run status
 petri log [--run <id>]             # View logs
 petri list templates               # Available templates
-petri list skills                  # Built-in skills
+petri list playbooks               # Built-in playbooks
 petri validate                     # Check configuration
 petri web [--port <number>]        # Web dashboard
 ```

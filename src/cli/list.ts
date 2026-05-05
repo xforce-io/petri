@@ -17,11 +17,11 @@ function getTemplatesDir(): string | null {
   ]);
 }
 
-function getSkillsDir(): string | null {
+function getPlaybooksDir(): string | null {
   return resolveDir([
-    join("..", "skills"),              // bundled: dist/../skills
-    join("..", "..", "src", "skills"), // bundled: dist/../../src/skills
-    join("..", "src", "skills"),       // dev: src/cli/../src/skills
+    join("..", "playbooks"),              // bundled: dist/../playbooks
+    join("..", "..", "src", "playbooks"), // bundled: dist/../../src/playbooks
+    join("..", "src", "playbooks"),       // dev: src/cli/../src/playbooks
   ]);
 }
 
@@ -55,25 +55,25 @@ export async function listTemplatesCommand(): Promise<void> {
   }
 }
 
-export async function listSkillsCommand(): Promise<void> {
-  const dir = getSkillsDir();
+export async function listPlaybooksCommand(): Promise<void> {
+  const dir = getPlaybooksDir();
   if (!dir) {
-    console.log(chalk.gray("No skills directory found."));
+    console.log(chalk.gray("No playbooks directory found."));
     return;
   }
 
-  const skills = readdirSync(dir)
+  const playbooks = readdirSync(dir)
     .filter((f) => f.endsWith(".md"))
     .map((f) => f.replace(/\.md$/, ""));
 
-  if (skills.length === 0) {
-    console.log(chalk.gray("No built-in skills found."));
+  if (playbooks.length === 0) {
+    console.log(chalk.gray("No built-in playbooks found."));
     return;
   }
 
-  console.log(chalk.bold("Built-in skills (use with petri: prefix):"));
-  for (const name of skills) {
-    // Read first line of skill for description
+  console.log(chalk.bold("Built-in playbooks (use with petri: prefix):"));
+  for (const name of playbooks) {
+    // Read first line of playbook for description
     const content = readFileSync(join(dir, `${name}.md`), "utf-8");
     const firstLine = content.split("\n").find((l) => l.trim() && !l.startsWith("#"));
     const desc = firstLine ? chalk.gray(` — ${firstLine.trim()}`) : "";

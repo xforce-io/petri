@@ -47,10 +47,10 @@ describe("Petri Web Server", () => {
     fs.writeFileSync(path.join(tmpDir, "petri.yaml"), "providers:\n  pi:\n    type: pi\n", "utf-8");
     fs.writeFileSync(path.join(tmpDir, "pipeline.yaml"), "name: test\nstages: []\n", "utf-8");
     fs.mkdirSync(path.join(tmpDir, "roles", "dev"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, "roles", "dev", "role.yaml"), "persona: dev\nskills: []\n", "utf-8");
+    fs.writeFileSync(path.join(tmpDir, "roles", "dev", "role.yaml"), "persona: dev\nplaybooks: []\n", "utf-8");
     fs.writeFileSync(path.join(tmpDir, "roles", "dev", "soul.md"), "# Dev Soul\n", "utf-8");
-    fs.mkdirSync(path.join(tmpDir, "roles", "dev", "skills"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, "roles", "dev", "skills", "coding.md"), "# Coding\n", "utf-8");
+    fs.mkdirSync(path.join(tmpDir, "roles", "dev", "playbooks"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "roles", "dev", "playbooks", "coding.md"), "# Coding\n", "utf-8");
     fs.writeFileSync(path.join(tmpDir, "roles", "dev", "gate.yaml"), "id: tests-pass\nevidence:\n  path: output.json\n", "utf-8");
 
     result = await createPetriServer({ projectDir: tmpDir, port: 0 });
@@ -141,7 +141,7 @@ describe("Petri Web Server", () => {
       expect(data).toContain("roles/dev/role.yaml");
       expect(data).toContain("roles/dev/soul.md");
       expect(data).toContain("roles/dev/gate.yaml");
-      expect(data).toContain("roles/dev/skills/coding.md");
+      expect(data).toContain("roles/dev/playbooks/coding.md");
     });
   });
 

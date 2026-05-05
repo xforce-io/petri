@@ -66,23 +66,23 @@ Stage 重试耗尽 → 整个 run blocked；repeat 迭代耗尽 → 整个 run b
 
 ### Role
 
-自包含的角色插件。自带人格、技能、gate 声明。工作流和角色完全解耦——同一个角色可以
+自包含的角色插件。自带人格、playbook、gate 声明。工作流和角色完全解耦——同一个角色可以
 出现在完全不同的 pipeline 里，同一个 pipeline 可以插入任意角色。
 
 ```
 roles/
   researcher/
-    role.yaml         # model、skills 引用
+    role.yaml         # model、playbooks 引用
     soul.md           # 人格描述
     gate.yaml         # 约束声明（可选）
-    skills/
+    playbooks/
       deep_research.md
 ```
 
-### Skill
+### Playbook
 
-Markdown 指令，描述角色如何完成工作。分内置（`petri:` 前缀）和自定义两类。
-Skill 不是可调度的任务单元，而是角色的能力描述——agent 拿到全部 skills 后自行决定如何使用。
+Markdown 指令片段，描述角色如何完成工作。分内置（`petri:` 前缀）和自定义两类。
+Playbook 不是可调度的任务单元，也不是外部可安装能力；它只是拼入角色 prompt 的任务说明。
 
 ### Artifact
 
@@ -111,11 +111,11 @@ evidence:
 ### 概念关系
 
 ```
-Pipeline 编排 → Stage 激活 → Role 提供 persona + skills
+Pipeline 编排 → Stage 激活 → Role 提供 persona + playbooks
                                     ↓
                               Agent Provider 创建 agent
                                     ↓
-                              Agent 执行 skill（tool-use loop）
+                              Agent 执行任务（tool-use loop）
                                     ↓
                               产出 Artifact（写入约定路径）
                                     ↓
@@ -136,19 +136,17 @@ my-project/
   pipeline.yaml               # 默认 pipeline（可以有多个 pipeline-*.yaml）
   roles/
     researcher/
-      role.yaml               # model、skills 引用、provider 覆盖
+      role.yaml               # model、playbooks 引用、provider 覆盖
       soul.md                 # 人格描述
       gate.yaml               # 约束声明（可选）
-      skills/
+      playbooks/
         deep_research.md
     fact_checker/
       role.yaml
       soul.md
       gate.yaml
-      skills/
+      playbooks/
         verify_claims.md
-  skills/                     # 项目级共享 skill（可选）
-    custom_tool.md
   .petri/                     # 运行时产物（gitignore）
     artifacts/
       manifest.json           # engine 维护的 artifact 索引
@@ -207,10 +205,10 @@ stages:
 ```yaml
 persona: soul.md
 model: opus                      # 可选，覆盖 defaults
-skills:
-  - petri:web_search             # 内置 skill
-  - petri:file_operations        # 内置 skill
-  - deep_research.md             # 本地 skill（角色目录下）
+playbooks:
+  - petri:web_search             # 内置 prompt fragment
+  - petri:file_operations        # 内置 prompt fragment
+  - deep_research                # 本地 playbook（角色目录下）
 ```
 
 ---
@@ -300,7 +298,7 @@ async function executeRole(roleName: string, context: RunContext) {
 
   const agent = provider.createAgent({
     persona: role.soul,
-    skills: role.skills,
+    playbooks: role.playbooks,
     context: buildContext(context),
     artifactDir: `.petri/artifacts/${context.stageName}/${roleName}/`,
     model: role.model,
@@ -375,7 +373,7 @@ interface Agent {
 
 interface AgentConfig {
   persona: string           // soul.md 内容
-  skills: string[]          // 所有 skill markdown 内容
+  playbooks: string[]       // 所有 playbook markdown 内容
   context: string           // manifest + input + failure context
   artifactDir: string       // artifact 输出目录
   model: string             // 模型标识
@@ -444,7 +442,7 @@ petri web                           # 启动 web 界面（默认 :3000）
 
 # 辅助
 petri list templates                # 列出可用模板
-petri list skills                   # 列出内置 skills
+petri list playbooks                # 列出内置 playbooks
 petri validate                      # 校验项目配置
 ```
 
@@ -477,7 +475,7 @@ Welcome to Petri
 
 Created petri.yaml
 Created pipeline.yaml (3 stages)
-Created roles/ (3 roles with skills)
+Created roles/ (3 roles with playbooks)
 Ready!
 
   petri run       Run your pipeline
@@ -505,9 +503,9 @@ Ready!
 
 ---
 
-## 6. 内置模板与 Skills
+## 6. 内置模板与 Playbooks
 
-### 内置 Skills
+### 内置 Playbooks
 
 通过 `petri:` 前缀引用：
 
@@ -520,7 +518,7 @@ petri:git_operations      # Git diff、commit、log
 petri:shell_tools         # 常用命令行工具
 ```
 
-用户也可以在项目 `skills/` 目录放共享 skill，或在 role 的 `skills/` 目录放角色专属 skill。
+用户可以在 role 的 `playbooks/` 目录放角色专属 playbook。
 
 ### 内置模板
 
@@ -532,7 +530,7 @@ petri:shell_tools         # 常用命令行工具
 | **debate** | proposer, opponent, judge | propose → oppose → judge |
 | **model-training** | data_engineer, trainer, evaluator | data_prep → repeat: train → evaluate |
 
-模板生成完整的 roles/（含 soul.md、skills/、gate.yaml）和 pipeline.yaml，开箱即用。
+模板生成完整的 roles/（含 soul.md、playbooks/、gate.yaml）和 pipeline.yaml，开箱即用。
 
 ---
 
@@ -550,11 +548,11 @@ pipeline.yaml 预留 `instances` 字段但 MVP 不解析。
 | 模块 | 范围 |
 |---|---|
 | Engine | 线性 pipeline + repeat 块 + gate 检查 + 重试 |
-| Role 加载 | role.yaml / soul.md / gate.yaml / skills/ |
+| Role 加载 | role.yaml / soul.md / gate.yaml / playbooks/ |
 | Artifact | 文件系统 + manifest.json |
 | Gate | artifact 存在性 + JSON 字段检查 |
 | Agent Provider | Pi provider |
-| 内置 Skills | file_operations、shell_tools |
+| 内置 Playbooks | file_operations、shell_tools |
 | CLI | `petri init`、`petri run`、`petri status`、`petri validate` |
 | 模板 | code-dev（1 个先跑通） |
 

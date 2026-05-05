@@ -14,7 +14,7 @@ export class ClaudeCodeProvider implements AgentProvider {
   }
 
   private async runAgent(config: AgentConfig): Promise<AgentResult> {
-    const systemPrompt = [config.persona, "---", ...config.skills].join("\n\n");
+    const systemPrompt = [config.persona, "---", ...config.playbooks].join("\n\n");
     const fullPrompt = `${systemPrompt}\n\n---\n\n${config.context}`;
 
     // Write prompt to temp file to avoid shell escaping issues
@@ -34,6 +34,8 @@ export class ClaudeCodeProvider implements AgentProvider {
     // Default: 4 hours. Stage timeout is passed through if set.
     const agentTimeout = config.timeout ?? 4 * 3600_000;
     const timeoutMin = Math.round(agentTimeout / 60_000);
+    const startedAt = new Date();
+    const startedMs = Date.now();
     console.log(`  [claude-code] Running ${model} in ${config.artifactDir} (timeout: ${timeoutMin}m)...`);
 
     // Spawn in a new process group (detached) so we can SIGKILL the entire
@@ -77,6 +79,19 @@ export class ClaudeCodeProvider implements AgentProvider {
     } catch {
       output = existsSync(stdoutFile) ? readFileSync(stdoutFile, "utf-8") : "";
     }
+    const finishedAt = new Date();
+    writeFileSync(join(config.artifactDir, "_agent_run.json"), JSON.stringify({
+      provider: "claude_code",
+      model,
+      command: `cat "${promptFile}" | "${claudeBin}" -p --model ${model} --output-format json --dangerously-skip-permissions`,
+      cwd: config.artifactDir,
+      stdout_path: stdoutFile,
+      exit_code: exitCode,
+      timed_out: timedOut,
+      started_at: startedAt.toISOString(),
+      finished_at: finishedAt.toISOString(),
+      duration_ms: Date.now() - startedMs,
+    }, null, 2), "utf-8");
     if (timedOut) {
       const msg = `[claude-code] TIMEOUT: Agent killed after ${timeoutMin} minutes. If this task needs more time, increase the stage timeout in pipeline.yaml.`;
       console.error(`  ${msg}`);

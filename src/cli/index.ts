@@ -4,7 +4,7 @@ import { validateCommand } from "./validate.js";
 import { initCommand } from "./init.js";
 import { statusCommand } from "./status.js";
 import { logCommand } from "./log.js";
-import { listTemplatesCommand, listSkillsCommand } from "./list.js";
+import { listTemplatesCommand, listPlaybooksCommand } from "./list.js";
 import { webCommand } from "./web.js";
 import { createCommand } from "./create.js";
 
@@ -18,6 +18,8 @@ program
   .option("-i, --input <text>", "Input text")
   .option("--from <file>", "Read input from file")
   .option("--skip-to <stage>", "Resume from a stage, skipping earlier stages (reuses existing artifacts)")
+  .option("--require-clean", "Ensure git working tree is clean before running")
+  .option("--worktree [name]", "Run in a temporary git worktree to isolate changes")
   .action(runCommand);
 
 program
@@ -58,9 +60,9 @@ program
   .action(webCommand);
 
 list
-  .command("skills")
-  .description("List built-in skills")
-  .action(listSkillsCommand);
+  .command("playbooks")
+  .description("List built-in playbooks")
+  .action(listPlaybooksCommand);
 
 program
   .command("create")

@@ -281,6 +281,51 @@ describe("checkGates", () => {
     expect(result.passed).toBe(true);
   });
 
+  it("passes when all checks in an AND array pass", async () => {
+    const artifactPath = path.join(tmpDir, "review", "critic", "metrics.json");
+    fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
+    fs.writeFileSync(artifactPath, JSON.stringify({
+      oos_annual_return: 0.102,
+      oos_mdd: -0.094,
+    }));
+
+    const gate: GateConfig = {
+      id: "target-met",
+      evidence: {
+        path: "{stage}/{role}/metrics.json",
+        check: [
+          { field: "oos_annual_return", gte: 0.09 },
+          { field: "oos_mdd", gte: -0.10 },
+        ],
+      },
+    };
+    const result = await checkGates([{ gate, roleName: "critic" }], "review", tmpDir, "all");
+    expect(result.passed).toBe(true);
+  });
+
+  it("fails when any check in an AND array fails", async () => {
+    const artifactPath = path.join(tmpDir, "review", "critic", "metrics.json");
+    fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
+    fs.writeFileSync(artifactPath, JSON.stringify({
+      oos_annual_return: 0.12,
+      oos_mdd: -0.25,
+    }));
+
+    const gate: GateConfig = {
+      id: "target-met",
+      evidence: {
+        path: "{stage}/{role}/metrics.json",
+        check: [
+          { field: "oos_annual_return", gte: 0.09 },
+          { field: "oos_mdd", gte: -0.10 },
+        ],
+      },
+    };
+    const result = await checkGates([{ gate, roleName: "critic" }], "review", tmpDir, "all");
+    expect(result.passed).toBe(false);
+    expect(result.details[0].reason).toContain("oos_mdd");
+  });
+
   it("any strategy passes when at least one gate passes", async () => {
     const p = path.join(tmpDir, "review", "bob", "output.json");
     fs.mkdirSync(path.dirname(p), { recursive: true });

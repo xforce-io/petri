@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { ArtifactManifest } from "../../src/engine/manifest.js";
+import {
+  ArtifactManifest,
+  buildGeneratedManifest,
+  currentGeneratedHashes,
+  loadGeneratedManifest,
+  saveGeneratedManifest,
+  sha256,
+} from "../../src/engine/manifest.js";
 import type { ArtifactEntry } from "../../src/types.js";
 
 describe("ArtifactManifest", () => {
@@ -93,5 +100,45 @@ describe("ArtifactManifest", () => {
   it("load returns empty manifest when no file exists", () => {
     const loaded = ArtifactManifest.load(tmpDir);
     expect(loaded.entries()).toEqual([]);
+  });
+});
+
+describe("Generated pipeline manifest", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "petri-generated-manifest-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("hashes goal, pipeline, and role files", () => {
+    fs.writeFileSync(path.join(tmpDir, "pipeline.yaml"), "name: test\n", "utf-8");
+    fs.mkdirSync(path.join(tmpDir, "roles", "worker"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "roles", "worker", "role.yaml"), "persona: soul.md\n", "utf-8");
+    fs.writeFileSync(path.join(tmpDir, "roles", "worker", "soul.md"), "Worker.\n", "utf-8");
+
+    const manifest = buildGeneratedManifest(tmpDir, "Do the thing");
+    expect(manifest.goal_path).toBe(".petri/goal.md");
+    expect(manifest.goal_hash).toBe(sha256("Do the thing"));
+    expect(manifest.pipeline_hash).toHaveLength(64);
+    expect(manifest.roles_hash).toHaveLength(64);
+  });
+
+  it("saves, loads, and recomputes current generated hashes", () => {
+    fs.writeFileSync(path.join(tmpDir, "pipeline.yaml"), "name: test\n", "utf-8");
+    fs.mkdirSync(path.join(tmpDir, "roles", "worker"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "roles", "worker", "role.yaml"), "persona: soul.md\n", "utf-8");
+
+    const manifest = buildGeneratedManifest(tmpDir, "Goal");
+    saveGeneratedManifest(tmpDir, manifest);
+
+    expect(loadGeneratedManifest(tmpDir)).toEqual(manifest);
+    expect(currentGeneratedHashes(tmpDir)).toEqual({
+      pipeline_hash: manifest.pipeline_hash,
+      roles_hash: manifest.roles_hash,
+    });
   });
 });

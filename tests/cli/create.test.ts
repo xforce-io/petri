@@ -70,7 +70,7 @@ const VALID_PIPELINE_JSON = JSON.stringify({
   ].join("\n"),
   "roles/worker/role.yaml": [
     "persona: soul.md",
-    "skills: []",
+    "playbooks: []",
     "",
   ].join("\n"),
   "roles/worker/soul.md": "You are a worker.\n",
@@ -134,6 +134,8 @@ describe("petri create", () => {
     // Files actually on disk
     expect(fs.existsSync(path.join(tmpDir, ".petri/generated/pipeline.yaml"))).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, ".petri/generated/roles/worker/role.yaml"))).toBe(true);
+    expect(fs.readFileSync(path.join(tmpDir, ".petri/goal.md"), "utf-8")).toBe("Build a worker pipeline\n");
+    expect(fs.existsSync(path.join(tmpDir, ".petri/generated/manifest.json"))).toBe(true);
   });
 
   it("errors out when no description is provided", async () => {
@@ -182,6 +184,7 @@ describe("petri create", () => {
     const output = lines.join("\n");
     expect(output).toContain("generated");
     expect(fs.existsSync(path.join(tmpDir, ".petri/generated/pipeline.yaml"))).toBe(true);
+    expect(fs.readFileSync(path.join(tmpDir, ".petri/goal.md"), "utf-8")).toBe("Build a worker pipeline\nwith two stages\n");
   });
 
   it("errors when --from points at a non-existent file", async () => {
@@ -224,7 +227,7 @@ describe("petri create", () => {
         "          roles: [worker]",
         "",
       ].join("\n"),
-      "roles/worker/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/worker/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/worker/soul.md": "Helper.\n",
       "roles/worker/gate.yaml": [
         "id: work-approved",

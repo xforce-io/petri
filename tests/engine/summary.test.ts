@@ -27,9 +27,9 @@ describe("buildPipelineSummary", () => {
         "    roles: [designer]\n" +
         "  - name: develop\n" +
         "    roles: [developer]\n",
-      "roles/designer/role.yaml": "persona: soul.md\nskills: [design]\n",
+      "roles/designer/role.yaml": "persona: soul.md\nplaybooks: [design]\n",
       "roles/designer/soul.md": "You are a software architect who designs systems.\nMore detail.\n",
-      "roles/developer/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/developer/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/developer/soul.md": "You are a senior engineer.\n",
     });
 
@@ -43,7 +43,7 @@ describe("buildPipelineSummary", () => {
     expect(summary!.roles).toHaveLength(2);
     const designer = summary!.roles.find((r) => r.name === "designer")!;
     expect(designer.personaFirstLine).toContain("software architect");
-    expect(designer.skills).toEqual(["design"]);
+    expect(designer.playbooks).toEqual(["design"]);
   });
 
   it("returns null when pipeline.yaml is missing", () => {
@@ -60,7 +60,7 @@ describe("buildPipelineSummary", () => {
     writeTree(tmp, {
       "pipeline.yaml":
         "name: t\nstages:\n  - name: s\n    roles: [r]\n",
-      "roles/r/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/r/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/r/soul.md": longLine + "\n",
     });
     const summary = buildPipelineSummary(tmp)!;
@@ -84,7 +84,7 @@ describe("buildPipelineSummary", () => {
         "          roles: [developer]\n" +
         "        - name: review\n" +
         "          roles: [reviewer]\n",
-      "roles/designer/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/designer/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/designer/soul.md": "Designer.\n",
       "roles/designer/gate.yaml":
         "id: design-complete\n" +
@@ -93,7 +93,7 @@ describe("buildPipelineSummary", () => {
         "  check:\n" +
         "    field: completed\n" +
         "    equals: true\n",
-      "roles/developer/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/developer/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/developer/soul.md": "Developer.\n",
       "roles/developer/gate.yaml":
         "id: tests-pass\n" +
@@ -102,7 +102,7 @@ describe("buildPipelineSummary", () => {
         "  check:\n" +
         "    field: tests_passed\n" +
         "    equals: true\n",
-      "roles/reviewer/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/reviewer/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/reviewer/soul.md": "Reviewer.\n",
       "roles/reviewer/gate.yaml":
         "id: review-approved\n" +
@@ -137,11 +137,11 @@ describe("buildPipelineSummary", () => {
     writeTree(tmp, {
       "pipeline.yaml":
         "name: t\nstages:\n  - name: a\n    roles: [a]\n  - name: b\n    roles: [b]\n",
-      "roles/a/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/a/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/a/soul.md": "A.\n",
       "roles/a/gate.yaml":
         "id: a\nevidence:\n  path: 'x'\n  check:\n    field: oos_annual_return\n    gte: 0.09\n",
-      "roles/b/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/b/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/b/soul.md": "B.\n",
       "roles/b/gate.yaml":
         "id: b\nevidence:\n  path: 'x'\n  check:\n    field: max_drawdown\n    lte: -0.1\n",
@@ -153,6 +153,27 @@ describe("buildPipelineSummary", () => {
     expect(summary.stages[1].gateCheck).toBe("max_drawdown <= -0.1");
   });
 
+  it("renders check arrays as AND conditions", () => {
+    writeTree(tmp, {
+      "pipeline.yaml":
+        "name: t\nstages:\n  - name: review\n    roles: [reviewer]\n",
+      "roles/reviewer/role.yaml": "persona: soul.md\nplaybooks: []\n",
+      "roles/reviewer/soul.md": "Reviewer.\n",
+      "roles/reviewer/gate.yaml":
+        "id: target-met\n" +
+        "evidence:\n" +
+        "  path: 'review/reviewer/evaluation.json'\n" +
+        "  check:\n" +
+        "    - field: oos_annual_return\n" +
+        "      gte: 0.09\n" +
+        "    - field: oos_mdd\n" +
+        "      gte: -0.10\n",
+    });
+    const summary = buildPipelineSummary(tmp)!;
+    expect(summary.stages[0].gateStrength).toBe("strong");
+    expect(summary.stages[0].gateCheck).toBe("oos_annual_return >= 0.09 AND oos_mdd >= -0.1");
+  });
+
   it("classifies *_ready / *_complete / *_done equals=true as weak", () => {
     writeTree(tmp, {
       "pipeline.yaml":
@@ -161,15 +182,15 @@ describe("buildPipelineSummary", () => {
         "  - name: a\n    roles: [a]\n" +
         "  - name: b\n    roles: [b]\n" +
         "  - name: c\n    roles: [c]\n",
-      "roles/a/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/a/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/a/soul.md": "A.\n",
       "roles/a/gate.yaml":
         "id: a\nevidence:\n  path: 'x'\n  check:\n    field: hypothesis_ready\n    equals: true\n",
-      "roles/b/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/b/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/b/soul.md": "B.\n",
       "roles/b/gate.yaml":
         "id: b\nevidence:\n  path: 'x'\n  check:\n    field: backtest_complete\n    equals: true\n",
-      "roles/c/role.yaml": "persona: soul.md\nskills: []\n",
+      "roles/c/role.yaml": "persona: soul.md\nplaybooks: []\n",
       "roles/c/soul.md": "C.\n",
       "roles/c/gate.yaml":
         "id: c\nevidence:\n  path: 'x'\n  check:\n    field: write_done\n    equals: true\n",

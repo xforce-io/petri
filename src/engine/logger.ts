@@ -152,6 +152,7 @@ export class RunLogger extends EventEmitter {
     opts: {
       gatePassed: boolean;
       gateReason: string;
+      attempt?: number;
       usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
       artifacts: string[];
     },
@@ -163,7 +164,7 @@ export class RunLogger extends EventEmitter {
     const entry: StageLog = {
       stage: timer.stage,
       role: timer.role,
-      attempt: 0, // filled by caller context
+      attempt: opts.attempt ?? 0,
       model: timer.model,
       startedAt: timer.startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),

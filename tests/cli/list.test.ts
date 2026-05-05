@@ -17,15 +17,15 @@ describe("petri list templates", () => {
   });
 });
 
-describe("petri list skills", () => {
-  it("lists built-in skills", async () => {
+describe("petri list playbooks", () => {
+  it("lists built-in playbooks", async () => {
     const lines: string[] = [];
     const consoleSpy = vi.spyOn(console, "log").mockImplementation((...args) => {
       lines.push(args.join(" "));
     });
 
-    const { listSkillsCommand } = await import("../../src/cli/list.js");
-    await listSkillsCommand();
+    const { listPlaybooksCommand } = await import("../../src/cli/list.js");
+    await listPlaybooksCommand();
 
     const output = lines.join("\n");
     expect(output).toContain("file_operations");

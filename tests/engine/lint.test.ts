@@ -18,11 +18,11 @@ const HEALTHY_PIPELINE = {
     "stages:\n" +
     "  - name: review\n" +
     "    roles: [reviewer]\n",
-  "roles/reviewer/role.yaml": "persona: soul.md\nskills: [review]\n",
+  "roles/reviewer/role.yaml": "persona: soul.md\nplaybooks: [review]\n",
   "roles/reviewer/soul.md":
     "You are an experienced code reviewer focused on correctness, " +
     "test coverage, and security.\n",
-  "roles/reviewer/skills/review.md":
+  "roles/reviewer/playbooks/review.md":
     "# Review\nReview the diff for code quality, tests, and security issues.\n",
   "roles/reviewer/gate.yaml":
     "id: review-done\n" +
@@ -74,7 +74,7 @@ describe("lintPipeline", () => {
     writeTree(tmp, {
       ...HEALTHY_PIPELINE,
       "roles/reviewer/soul.md": "You write whimsical poetry about clouds and emotions.\n",
-      "roles/reviewer/skills/review.md": "# Poetry\nWrite stanzas.\n",
+      "roles/reviewer/playbooks/review.md": "# Poetry\nWrite stanzas.\n",
     });
     const concerns = lintPipeline({
       generatedDir: tmp,
