@@ -609,4 +609,78 @@ describe("Engine", () => {
     expect(designCalls).toBe(2);
     expect(reviewCalls).toBe(2);
   });
+
+  it("clears stale stage dirs from a previously-run pipeline at run start", async () => {
+    // Simulate leftover artifacts from a different earlier pipeline that used
+    // stages "propose" / "baseline", plus a stale role subdir inside "draft"
+    // (a stage name shared with the current pipeline).
+    fs.mkdirSync(path.join(tmpDir, "propose", "strategist"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "propose", "strategist", "proposal.json"), "stale");
+    fs.mkdirSync(path.join(tmpDir, "baseline"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "baseline", "old.json"), "stale");
+    fs.mkdirSync(path.join(tmpDir, "draft", "old_role"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "draft", "old_role", "leftover.json"), "stale");
+    fs.writeFileSync(path.join(tmpDir, "manifest.json"), "stale-manifest");
+
+    const gate = makeGate("{stage}/{role}/output.json", { field: "approved", equals: true });
+    const roles: Record<string, LoadedRole> = { writer: makeRole("writer", gate) };
+
+    const provider = createStubProvider(() => {
+      const dir = path.join(tmpDir, "draft", "writer");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "output.json"), JSON.stringify({ approved: true }));
+    });
+
+    const pipeline: PipelineConfig = {
+      name: "current",
+      stages: [{ name: "draft", roles: ["writer"], max_retries: 1 }],
+    };
+    const engine = new Engine({ provider, roles, artifactBaseDir: tmpDir });
+
+    const result = await engine.run(pipeline, "go");
+    expect(result.status).toBe("done");
+    // Out-of-pipeline subdirs are removed
+    expect(fs.existsSync(path.join(tmpDir, "propose"))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, "baseline"))).toBe(false);
+    // Stale role subdir under a current-pipeline stage is removed
+    expect(fs.existsSync(path.join(tmpDir, "draft", "old_role"))).toBe(false);
+    // Current run's role artifact is present
+    expect(fs.existsSync(path.join(tmpDir, "draft", "writer", "output.json"))).toBe(true);
+  });
+
+  it("preserves stale artifacts when resuming via skipTo", async () => {
+    // skipTo intentionally reuses previous run's artifacts as inputs to later stages
+    fs.mkdirSync(path.join(tmpDir, "draft", "writer"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, "draft", "writer", "output.json"),
+      JSON.stringify({ approved: true }),
+    );
+
+    const gate = makeGate("{stage}/{role}/output.json", { field: "approved", equals: true });
+    const roles: Record<string, LoadedRole> = {
+      writer: makeRole("writer", gate),
+      reviewer: makeRole("reviewer", gate),
+    };
+
+    const provider = createStubProvider((config) => {
+      const roleName = config.persona.replace(" persona", "");
+      const dir = path.join(tmpDir, "review", roleName);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "output.json"), JSON.stringify({ approved: true }));
+    });
+
+    const pipeline: PipelineConfig = {
+      name: "current",
+      stages: [
+        { name: "draft", roles: ["writer"], max_retries: 1 },
+        { name: "review", roles: ["reviewer"], max_retries: 1 },
+      ],
+    };
+    const engine = new Engine({ provider, roles, artifactBaseDir: tmpDir, skipTo: "review" });
+
+    const result = await engine.run(pipeline, "resume");
+    expect(result.status).toBe("done");
+    // Earlier stage's artifact still present (resume relies on it)
+    expect(fs.existsSync(path.join(tmpDir, "draft", "writer", "output.json"))).toBe(true);
+  });
 });

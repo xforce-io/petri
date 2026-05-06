@@ -1,7 +1,7 @@
 // src/engine/engine.ts
 
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, existsSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, existsSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
 import { ArtifactManifest } from "./manifest.js";
 import { checkGates, resolveGatePath, type GateInput, type GateDetail } from "./gate.js";
@@ -61,6 +61,15 @@ export class Engine {
     this.requirements = pipeline.requirements;
     this.gateResults.clear();
 
+    // Clear stale artifacts left by prior runs in the shared working dir.
+    // Without this, leftover stage subdirs (e.g. from a previously-run pipeline
+    // with different stage/role names) leak into the new run's working tree
+    // and agents may read them instead of the current run's artifacts.
+    // Skipped when resuming via --skip-to, which intentionally reuses earlier artifacts.
+    if (!this.skipTo) {
+      this.clearStaleArtifacts(pipeline);
+    }
+
     // Resume: load existing manifest if skipping stages, otherwise start fresh
     const manifest = this.skipTo
       ? ArtifactManifest.load(this.artifactBaseDir)
@@ -108,6 +117,38 @@ export class Engine {
     }
 
     return { status: "done" };
+  }
+
+  /**
+   * Whitelist-clean the shared artifact working dir. Subdirectories whose
+   * name matches a stage in the current pipeline are emptied (kept as shells);
+   * everything else (stale stages from a different pipeline, top-level files
+   * like a previous manifest.json, etc.) is removed. The current run will
+   * recreate stage/role subdirs and a fresh manifest as needed.
+   */
+  private clearStaleArtifacts(pipeline: PipelineConfig): void {
+    if (!existsSync(this.artifactBaseDir)) return;
+
+    const stageNames = new Set<string>();
+    const collect = (entries: import("../types.js").StageEntry[]): void => {
+      for (const entry of entries) {
+        if (isRepeatBlock(entry)) collect(entry.repeat.stages);
+        else stageNames.add(entry.name);
+      }
+    };
+    collect(pipeline.stages);
+
+    for (const ent of readdirSync(this.artifactBaseDir, { withFileTypes: true })) {
+      const fullPath = join(this.artifactBaseDir, ent.name);
+      if (!ent.isDirectory() || !stageNames.has(ent.name)) {
+        rmSync(fullPath, { recursive: true, force: true });
+        continue;
+      }
+      // Current-pipeline stage dir: clear stale role subdirs / files
+      for (const inner of readdirSync(fullPath)) {
+        rmSync(join(fullPath, inner), { recursive: true, force: true });
+      }
+    }
   }
 
   private containsStage(stages: import("../types.js").StageEntry[], target: string): boolean {
