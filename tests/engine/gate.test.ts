@@ -338,4 +338,22 @@ describe("checkGates", () => {
     const result = await checkGates(gates, "review", tmpDir, "any");
     expect(result.passed).toBe(true);
   });
+
+  it("treats malformed artifact JSON as gate failure (no fatal exception)", async () => {
+    // Reproduces the agent-emits-malformed-JSON crash: agent wrote a
+    // string with unescaped quotes, breaking JSON. The engine should
+    // record gate failure and let retry kick in, not crash the run.
+    const p = path.join(tmpDir, "backtest", "backtester", "metrics.json");
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, '{"notes": "核心假设"vol_adjusted"未能验证", "approved": true}');
+
+    const gate = makeGate("{stage}/{role}/metrics.json", {
+      field: "approved",
+      equals: true,
+    });
+    const result = await checkGates([{ gate, roleName: "backtester" }], "backtest", tmpDir, "all");
+    expect(result.passed).toBe(false);
+    expect(result.details[0].reason).toContain("malformed");
+    expect(result.details[0].reason).toContain("metrics.json");
+  });
 });

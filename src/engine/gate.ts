@@ -107,7 +107,22 @@ export async function checkGates(
     }
 
     if (gate.evidence.check) {
-      const content = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
+      let content: unknown;
+      try {
+        content = JSON.parse(fs.readFileSync(fullPath, "utf-8"));
+      } catch (err) {
+        // Agents occasionally emit malformed JSON (e.g. unescaped quotes in
+        // long Chinese strings). Treat as a gate failure so the engine's retry
+        // mechanism kicks in, instead of crashing the whole run.
+        const message = err instanceof Error ? err.message : String(err);
+        details.push({
+          gateId: gate.id,
+          roleName,
+          passed: false,
+          reason: `Artifact JSON malformed: ${resolvedPath} (${message})`,
+        });
+        continue;
+      }
       const failReason = evaluateCheck(content, gate.evidence.check);
 
       if (failReason) {
