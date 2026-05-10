@@ -86,8 +86,12 @@ export function startRun(opts: StartRunOpts): StartRunResult {
   // 7. Fire and forget engine.run()
   engine
     .run(pipelineConfig, input)
-    .then(() => {
-      logger.finish("done");
+    .then((runResult) => {
+      if (runResult.status === "done") {
+        logger.finish("done");
+      } else {
+        logger.finish("blocked", runResult.stage, runResult.reason);
+      }
       activeRuns.delete(logger.runId);
     })
     .catch((err) => {

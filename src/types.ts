@@ -135,7 +135,7 @@ export interface AgentProvider {
 }
 
 export interface PetriAgent {
-  run(): Promise<AgentResult>;
+  run(signal?: AbortSignal): Promise<AgentResult>;
 }
 
 // --- Loaded role (resolved from disk) ---

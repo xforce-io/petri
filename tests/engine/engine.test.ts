@@ -367,6 +367,48 @@ describe("Engine", () => {
     expect(result.reason).toMatch(/timed out|timeout|Stagnation/i);
   }, 10_000);
 
+  it("aborts the agent signal when a stage attempt times out", async () => {
+    let abortCount = 0;
+    const gate = makeGate("{stage}/{role}/output.json", {
+      field: "approved",
+      equals: true,
+    });
+    const roles: Record<string, LoadedRole> = {
+      worker: makeRole("worker", gate),
+    };
+
+    const abortAwareProvider: AgentProvider = {
+      createAgent(): PetriAgent {
+        return {
+          run(signal?: AbortSignal): Promise<AgentResult> {
+            return new Promise((_resolve, reject) => {
+              signal?.addEventListener("abort", () => {
+                abortCount++;
+                reject(signal.reason instanceof Error ? signal.reason : new Error("aborted"));
+              }, { once: true });
+            });
+          },
+        };
+      },
+    };
+
+    const pipeline: PipelineConfig = {
+      name: "test-pipeline",
+      stages: [{ name: "work", roles: ["worker"], max_retries: 0, timeout: 100 }],
+    };
+
+    const engine = new Engine({
+      provider: abortAwareProvider,
+      roles,
+      artifactBaseDir: tmpDir,
+    });
+
+    const result = await engine.run(pipeline, "Do work");
+    expect(result.status).toBe("blocked");
+    expect(result.reason).toMatch(/Max retries|timed out|timeout/i);
+    expect(abortCount).toBe(1);
+  }, 10_000);
+
   it("respects defaultTimeout from engine options", async () => {
     const gate = makeGate("{stage}/{role}/output.json", {
       field: "approved",

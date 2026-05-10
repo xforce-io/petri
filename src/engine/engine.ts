@@ -198,14 +198,16 @@ export class Engine {
       console.log(`  Stage "${stage.name}" attempt ${attempt + 1}/${maxRetries + 1}...`);
       this.logger?.logStageAttempt(stage.name, attempt + 1, maxRetries + 1);
 
-      // Execute all roles in parallel
+      // Execute all roles in parallel. A stage attempt has one cancellation
+      // signal so one hung role can abort the whole attempt.
       const roleTimers: Array<{ roleName: string; timer: import("./logger.js").StageTimer; usage?: import("../types.js").AgentResult["usage"]; artifacts: string[] }> = [];
 
       let agentTimedOut = false;
       let timeoutMessage = "";
+      const attemptAbort = new AbortController();
 
       try {
-        await Promise.all(
+        const roleResults = await Promise.allSettled(
           stage.roles.map(async (roleName) => {
             const role = this.roles[roleName];
             if (!role) return;
@@ -236,16 +238,30 @@ export class Engine {
             });
 
             const agentTimeout = stage.timeout ?? this.defaultTimeout;
+            let timeoutId: NodeJS.Timeout | undefined;
             const timeoutPromise = new Promise<never>((_, reject) => {
-              const id = setTimeout(
-                () => reject(new Error(`Agent timed out after ${agentTimeout}ms`)),
+              timeoutId = setTimeout(
+                () => {
+                  attemptAbort.abort(new Error(`Agent timed out after ${agentTimeout}ms`));
+                  reject(new Error(`Agent timed out after ${agentTimeout}ms`));
+                },
                 agentTimeout,
               );
               // Allow the Node process to exit even if the timer is still pending
-              if (typeof id === "object" && "unref" in id) (id as NodeJS.Timeout).unref();
+              timeoutId.unref();
             });
 
-            const result = await Promise.race([agent.run(), timeoutPromise]);
+            const runPromise = agent.run(attemptAbort.signal);
+            runPromise.catch(() => {
+              // The race below owns the error path. This prevents late provider
+              // rejection from surfacing as an unhandled rejection after timeout.
+            });
+            let result: import("../types.js").AgentResult;
+            try {
+              result = await Promise.race([runPromise, timeoutPromise]);
+            } finally {
+              if (timeoutId) clearTimeout(timeoutId);
+            }
             if (result.artifacts.length > 0) {
               manifest.collect(stage.name, roleName, result.artifacts);
             }
@@ -267,9 +283,16 @@ export class Engine {
             }
           }),
         );
+        const rejected = roleResults.find((result) => result.status === "rejected");
+        if (rejected?.status === "rejected") {
+          throw rejected.reason;
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        if (message.includes("Agent timed out")) {
+        if (attemptAbort.signal.aborted || message.includes("Agent timed out") || message.includes("TIMEOUT")) {
+          if (!attemptAbort.signal.aborted) {
+            attemptAbort.abort(err);
+          }
           agentTimedOut = true;
           timeoutMessage = message;
           console.log(`  Stage "${stage.name}" agent TIMED OUT: ${message}`);

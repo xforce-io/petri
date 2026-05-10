@@ -9,11 +9,11 @@ export class ClaudeCodeProvider implements AgentProvider {
 
   createAgent(config: AgentConfig): PetriAgent {
     return {
-      run: () => this.runAgent(config),
+      run: (signal?: AbortSignal) => this.runAgent(config, signal),
     };
   }
 
-  private async runAgent(config: AgentConfig): Promise<AgentResult> {
+  private async runAgent(config: AgentConfig, signal?: AbortSignal): Promise<AgentResult> {
     const systemPrompt = [config.persona, "---", ...config.playbooks].join("\n\n");
     const fullPrompt = `${systemPrompt}\n\n---\n\n${config.context}`;
 
@@ -55,22 +55,36 @@ export class ClaudeCodeProvider implements AgentProvider {
           stdio: ["ignore", "ignore", "inherit"],
           detached: true, // new process group
         });
-        const timer = setTimeout(() => {
-          timedOut = true;
-          // Kill the entire process group (negative PID). SIGKILL because
-          // SIGTERM is what we tried before and claude subprocesses ignored.
+        const killChildGroup = () => {
           if (child.pid !== undefined) {
             try { process.kill(-child.pid, "SIGKILL"); } catch { /* group gone */ }
           }
           try { child.kill("SIGKILL"); } catch { /* already dead */ }
+        };
+        const onAbort = () => {
+          timedOut = true;
+          killChildGroup();
+        };
+        if (signal?.aborted) {
+          onAbort();
+        } else {
+          signal?.addEventListener("abort", onAbort, { once: true });
+        }
+        const timer = setTimeout(() => {
+          timedOut = true;
+          // Kill the entire process group (negative PID). SIGKILL because
+          // SIGTERM is what we tried before and claude subprocesses ignored.
+          killChildGroup();
         }, agentTimeout);
         child.once("exit", (code) => {
           clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
           exitCode = code;
           resolve();
         });
         child.once("error", (err) => {
           clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
           exitErr = err;
           reject(err);
         });
@@ -96,6 +110,7 @@ export class ClaudeCodeProvider implements AgentProvider {
       const msg = `[claude-code] TIMEOUT: Agent killed after ${timeoutMin} minutes. If this task needs more time, increase the stage timeout in pipeline.yaml.`;
       console.error(`  ${msg}`);
       writeFileSync(join(config.artifactDir, "_error.txt"), msg, "utf-8");
+      throw new Error(msg);
     } else if (exitErr) {
       const errMsg = (exitErr as Error).message?.slice(0, 500) ?? "Unknown error";
       console.error(`  [claude-code] FAILED: ${errMsg}`);
