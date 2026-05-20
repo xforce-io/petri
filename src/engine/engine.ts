@@ -435,6 +435,29 @@ export class Engine {
       return { status: "blocked", stage: stage.name, reason: `Command failed: ${message}` };
     }
 
+    // The command ran. If it declares a gate, evaluate it against the output.
+    if (stage.gate) {
+      const gateResult = await checkGates(
+        [{ gate: stage.gate, roleName: stage.name }],
+        stage.name,
+        this.artifactBaseDir,
+        "all",
+      );
+      for (const detail of gateResult.details) {
+        this.gateResults.set(detail.gateId, detail);
+      }
+      this.logger?.logGateResult(stage.name, gateResult.passed, gateResult.reason);
+      if (!gateResult.passed) {
+        const detail = gateResult.details
+          .filter((d) => !d.passed)
+          .map((d) => d.reason)
+          .join("; ");
+        const reason = detail || gateResult.reason;
+        console.log(`  Command stage "${stage.name}" gate FAILED: ${reason}`);
+        return { status: "blocked", stage: stage.name, reason };
+      }
+    }
+
     console.log(`  Command stage "${stage.name}" completed`);
     return { status: "done" };
   }

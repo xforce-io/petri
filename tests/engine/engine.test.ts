@@ -800,4 +800,84 @@ describe("Engine", () => {
     // Earlier stage's artifact still present (resume relies on it)
     expect(fs.existsSync(path.join(tmpDir, "draft", "writer", "output.json"))).toBe(true);
   });
+
+  it("a command stage with a passing gate completes the run", async () => {
+    const pipeline: PipelineConfig = {
+      name: "gated-cmd",
+      stages: [
+        {
+          name: "measure",
+          command: "echo '{\"ok\": true}' > {artifact_dir}/result.json",
+          gate: {
+            id: "measured",
+            evidence: { path: "{stage}/result.json", check: { field: "ok", equals: true } },
+          },
+        },
+      ],
+    };
+    const engine = new Engine({
+      provider: createStubProvider(() => {}),
+      roles: {},
+      artifactBaseDir: tmpDir,
+    });
+    const result = await engine.run(pipeline, "go");
+    expect(result.status).toBe("done");
+  });
+
+  it("a command stage with a failing gate blocks the run", async () => {
+    const pipeline: PipelineConfig = {
+      name: "gated-cmd",
+      stages: [
+        {
+          name: "measure",
+          command: "echo '{\"ok\": false}' > {artifact_dir}/result.json",
+          gate: {
+            id: "measured",
+            evidence: { path: "{stage}/result.json", check: { field: "ok", equals: true } },
+          },
+        },
+      ],
+    };
+    const engine = new Engine({
+      provider: createStubProvider(() => {}),
+      roles: {},
+      artifactBaseDir: tmpDir,
+    });
+    const result = await engine.run(pipeline, "go");
+    expect(result.status).toBe("blocked");
+    expect(result.stage).toBe("measure");
+    expect(result.reason).toMatch(/ok/);
+  });
+
+  it("a command stage gate satisfies a repeat block's until condition", async () => {
+    const pipeline: PipelineConfig = {
+      name: "gated-cmd-repeat",
+      stages: [
+        {
+          repeat: {
+            name: "loop",
+            max_iterations: 3,
+            until: "measured",
+            stages: [
+              {
+                name: "measure",
+                command: "echo '{\"ok\": true}' > {artifact_dir}/result.json",
+                gate: {
+                  id: "measured",
+                  evidence: { path: "{stage}/result.json", check: { field: "ok", equals: true } },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+    const engine = new Engine({
+      provider: createStubProvider(() => {}),
+      roles: {},
+      artifactBaseDir: tmpDir,
+    });
+    const result = await engine.run(pipeline, "go");
+    expect(result.status).toBe("done");
+  });
 });
