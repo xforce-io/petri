@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { RunLogger } from "../../src/engine/logger.js";
+import { createTrack, runRootForTrack } from "../../src/engine/track.js";
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "petri-status-test-"));
@@ -76,6 +77,40 @@ describe("petri status", () => {
     const output = lines.join("\n");
     expect(output).toContain("blocked");
     expect(output).toContain("review");
+
+    consoleSpy.mockRestore();
+  });
+
+  it("displays latest run status for a track", async () => {
+    createTrack(tmpDir, "factor-weight-search", {
+      objective: "Tune factor weights",
+      baseline: "run_007_production",
+    });
+    const logger = new RunLogger(
+      runRootForTrack(tmpDir, "factor-weight-search"),
+      "tracked-pipeline",
+      "input",
+      "goal",
+      {
+        trackId: "factor-weight-search",
+        trackObjective: "Tune factor weights",
+        trackBaseline: "run_007_production",
+      },
+    );
+    logger.finish("done");
+
+    const lines: string[] = [];
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation((...args) => {
+      lines.push(args.join(" "));
+    });
+
+    const { statusCommand } = await import("../../src/cli/status.js");
+    await statusCommand({ track: "factor-weight-search" });
+
+    const output = lines.join("\n");
+    expect(output).toContain("run-001");
+    expect(output).toContain("Track: factor-weight-search");
+    expect(output).toContain("tracked-pipeline");
 
     consoleSpy.mockRestore();
   });

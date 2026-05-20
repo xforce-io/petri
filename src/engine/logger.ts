@@ -24,6 +24,9 @@ export interface StageLog {
 
 export interface RunLog {
   runId: string;
+  trackId?: string;
+  trackObjective?: string;
+  trackBaseline?: string;
   pipeline: string;
   input: string;
   goal?: string;
@@ -95,7 +98,13 @@ export class RunLogger extends EventEmitter {
   private jsonPath: string;
   private runLog: RunLog;
 
-  constructor(petriDir: string, pipelineName: string, input: string, goal?: string) {
+  constructor(
+    petriDir: string,
+    pipelineName: string,
+    input: string,
+    goal?: string,
+    opts: { trackId?: string; trackObjective?: string; trackBaseline?: string } = {},
+  ) {
     super();
     const runsDir = join(petriDir, "runs");
     this.runId = nextRunId(runsDir);
@@ -107,6 +116,9 @@ export class RunLogger extends EventEmitter {
 
     this.runLog = {
       runId: this.runId,
+      trackId: opts.trackId,
+      trackObjective: opts.trackObjective,
+      trackBaseline: opts.trackBaseline,
       pipeline: pipelineName,
       input,
       goal,
@@ -118,6 +130,11 @@ export class RunLogger extends EventEmitter {
     // Start fresh log file
     writeFileSync(this.logPath, "", "utf-8");
     this.append(`Run: run-${this.runId}`);
+    if (opts.trackId) {
+      this.append(`Track: ${opts.trackId}`);
+      if (opts.trackObjective) this.append(`Track objective: ${opts.trackObjective}`);
+      if (opts.trackBaseline) this.append(`Track baseline: ${opts.trackBaseline}`);
+    }
     this.append(`Pipeline: ${pipelineName}`);
     if (goal) {
       this.append(`Goal: ${goal.length > 200 ? goal.slice(0, 200) + "..." : goal}`);

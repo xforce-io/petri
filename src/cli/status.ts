@@ -1,14 +1,21 @@
 import * as path from "node:path";
 import chalk from "chalk";
 import { latestRunDir, loadRunLog, listRuns } from "../engine/logger.js";
+import { loadTrack, runRootForTrack } from "../engine/track.js";
 
-export async function statusCommand(): Promise<void> {
+interface StatusOptions {
+  track?: string;
+}
+
+export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
   const cwd = process.cwd();
-  const runsDir = path.join(cwd, ".petri", "runs");
+  const track = opts.track ? loadTrack(cwd, opts.track) : undefined;
+  const runsDir = path.join(runRootForTrack(cwd, opts.track), "runs");
   const runs = listRuns(runsDir);
 
   if (runs.length === 0) {
-    console.log(chalk.gray("No runs found. Use `petri run` to start a pipeline."));
+    const hint = track ? `petri run --track ${track.track_id}` : "petri run";
+    console.log(chalk.gray(`No runs found. Use \`${hint}\` to start a pipeline.`));
     return;
   }
 
@@ -27,6 +34,9 @@ export async function statusCommand(): Promise<void> {
   // Header
   const statusColor = runLog.status === "done" ? chalk.green : chalk.red;
   console.log(chalk.bold(`Run: run-${runLog.runId}`) + "  " + statusColor(runLog.status ?? "running"));
+  if (runLog.trackId) {
+    console.log(chalk.gray(`Track: ${runLog.trackId}`));
+  }
   console.log(chalk.gray(`Pipeline: ${runLog.pipeline}`));
   console.log(chalk.gray(`Started: ${runLog.startedAt}`));
   if (runLog.finishedAt) {

@@ -2,14 +2,17 @@ import * as path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import chalk from "chalk";
 import { latestRunDir, listRuns } from "../engine/logger.js";
+import { loadTrack, runRootForTrack } from "../engine/track.js";
 
 interface LogOptions {
   run?: string;
+  track?: string;
 }
 
 export async function logCommand(opts: LogOptions): Promise<void> {
   const cwd = process.cwd();
-  const runsDir = path.join(cwd, ".petri", "runs");
+  if (opts.track) loadTrack(cwd, opts.track);
+  const runsDir = path.join(runRootForTrack(cwd, opts.track), "runs");
 
   let runDir: string | null;
 

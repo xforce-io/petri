@@ -191,12 +191,38 @@ defaults:
 ```bash
 petri init [--template <name>]     # Scaffold project
 petri run [--pipeline <file>]      # Execute pipeline
+petri run --track <id>             # Execute under a named exploration track
 petri status                       # Latest run status
+petri status --track <id>          # Latest run status within a track
 petri log [--run <id>]             # View logs
+petri log --track <id>             # View logs within a track
+petri track init <id>              # Create an exploration track
+petri track list                   # List exploration tracks
 petri list templates               # Available templates
 petri list playbooks               # Built-in playbooks
 petri validate                     # Check configuration
 petri web [--port <number>]        # Web dashboard
+```
+
+### Exploration Tracks
+
+A track is a named, independent line of investigation. Use tracks when several optimization directions should each have their own run history instead of sharing one global `run-001`, `run-002`, ... sequence.
+
+```bash
+petri track init factor-weight-search \
+  --baseline run_007_production \
+  --objective "Tune live-ready factor weights"
+
+petri run --track factor-weight-search
+petri status --track factor-weight-search
+petri log --track factor-weight-search --run 001
+```
+
+Tracked runs are stored under:
+
+```text
+.petri/tracks/<id>/runs/run-NNN/
+.petri/tracks/<id>/artifacts/
 ```
 
 ## Engine Internals
@@ -207,7 +233,7 @@ petri web [--port <number>]        # Web dashboard
 - **Stagnation detection** — SHA-256 hash of failure reason; consecutive identical hashes → early block
 - **Agent timeout** — configurable per-stage (default 10 min), prevents hanging
 - **Artifact manifest** — tracks all outputs, provides context to downstream stages
-- **Run history** — structured JSON + text logs per run in `.petri/runs/run-NNN/`
+- **Run history** — structured JSON + text logs per run in `.petri/runs/run-NNN/` or `.petri/tracks/<id>/runs/run-NNN/`
 
 ## Development
 

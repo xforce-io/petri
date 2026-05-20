@@ -11,6 +11,18 @@ export interface PipelineConfig {
   input?: { description: string };
 }
 
+// --- Track ---
+
+export interface TrackConfig {
+  schema_version: number;
+  track_id: string;
+  status?: "active" | "paused" | "closed";
+  objective?: string;
+  baseline?: string;
+  created_at?: string;
+  notes?: string[];
+}
+
 export type StageEntry = StageConfig | RepeatBlock;
 
 export interface StageConfig {

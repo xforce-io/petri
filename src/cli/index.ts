@@ -7,6 +7,7 @@ import { logCommand } from "./log.js";
 import { listTemplatesCommand, listPlaybooksCommand } from "./list.js";
 import { webCommand } from "./web.js";
 import { createCommand } from "./create.js";
+import { trackInitCommand, trackListCommand } from "./track.js";
 
 const program = new Command();
 program.name("petri").description("Multi-agent stage runner").version("0.1.0");
@@ -20,6 +21,7 @@ program
   .option("--skip-to <stage>", "Resume from a stage, skipping earlier stages (reuses existing artifacts)")
   .option("--require-clean", "Ensure git working tree is clean before running")
   .option("--worktree [name]", "Run in a temporary git worktree to isolate changes")
+  .option("--track <id>", "Run under a named exploration track")
   .action(runCommand);
 
 program
@@ -36,12 +38,14 @@ program
 program
   .command("status")
   .description("Show current/recent run status")
+  .option("--track <id>", "Show status for a named exploration track")
   .action(statusCommand);
 
 program
   .command("log")
   .description("View run logs")
   .option("--run <id>", "Run ID (e.g. 001 or run-001)")
+  .option("--track <id>", "Read logs from a named exploration track")
   .action(logCommand);
 
 const list = program
@@ -70,5 +74,22 @@ program
   .argument("[description]", "What you want to build")
   .option("--from <file>", "Read description from a file instead of the argument")
   .action(createCommand);
+
+const track = program
+  .command("track")
+  .description("Manage exploration tracks");
+
+track
+  .command("init")
+  .description("Create a named exploration track")
+  .argument("<id>", "Track id")
+  .option("--objective <text>", "Track objective")
+  .option("--baseline <text>", "Baseline artifact or strategy")
+  .action(trackInitCommand);
+
+track
+  .command("list")
+  .description("List exploration tracks")
+  .action(trackListCommand);
 
 program.parse();
