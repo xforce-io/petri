@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { RunLogger } from "../../src/engine/logger.js";
-import { createTrack, runRootForTrack } from "../../src/engine/track.js";
+import { createBranch, runRootForBranch } from "../../src/engine/branch.js";
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "petri-status-test-"));
@@ -81,20 +81,20 @@ describe("petri status", () => {
     consoleSpy.mockRestore();
   });
 
-  it("displays latest run status for a track", async () => {
-    createTrack(tmpDir, "factor-weight-search", {
+  it("displays latest run status for a branch", async () => {
+    createBranch(tmpDir, "factor-weight-search", {
       objective: "Tune factor weights",
       baseline: "run_007_production",
     });
     const logger = new RunLogger(
-      runRootForTrack(tmpDir, "factor-weight-search"),
-      "tracked-pipeline",
+      runRootForBranch(tmpDir, "factor-weight-search"),
+      "branched-pipeline",
       "input",
       "goal",
       {
-        trackId: "factor-weight-search",
-        trackObjective: "Tune factor weights",
-        trackBaseline: "run_007_production",
+        branchId: "factor-weight-search",
+        branchObjective: "Tune factor weights",
+        branchBaseline: "run_007_production",
       },
     );
     logger.finish("done");
@@ -105,12 +105,12 @@ describe("petri status", () => {
     });
 
     const { statusCommand } = await import("../../src/cli/status.js");
-    await statusCommand({ track: "factor-weight-search" });
+    await statusCommand({ branch: "factor-weight-search" });
 
     const output = lines.join("\n");
     expect(output).toContain("run-001");
-    expect(output).toContain("Track: factor-weight-search");
-    expect(output).toContain("tracked-pipeline");
+    expect(output).toContain("Branch: factor-weight-search");
+    expect(output).toContain("branched-pipeline");
 
     consoleSpy.mockRestore();
   });

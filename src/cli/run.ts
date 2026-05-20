@@ -11,7 +11,7 @@ import { Engine } from "../engine/engine.js";
 import { RunLogger } from "../engine/logger.js";
 import { currentGeneratedHashes, loadGeneratedManifest, sha256 } from "../engine/manifest.js";
 import { acquireLock, releaseLock, killProcessTree } from "../engine/lock.js";
-import { loadTrack, runRootForTrack } from "../engine/track.js";
+import { loadBranch, runRootForBranch } from "../engine/branch.js";
 import { PiProvider } from "../providers/pi.js";
 import { ClaudeCodeProvider } from "../providers/claude-code.js";
 import { isRepeatBlock } from "../types.js";
@@ -24,13 +24,13 @@ interface RunOptions {
   skipTo?: string;
   requireClean?: boolean;
   worktree?: string | boolean;
-  track?: string;
+  branch?: string;
 }
 
 export async function runCommand(opts: RunOptions): Promise<void> {
   const cwd = process.cwd();
   let executionCwd = cwd;
-  const trackConfig = opts.track ? loadTrack(cwd, opts.track) : undefined;
+  const branchConfig = opts.branch ? loadBranch(cwd, opts.branch) : undefined;
 
   if (opts.requireClean) {
     try {
@@ -165,12 +165,12 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   }
 
   // 6. Create logger and engine
-  const petriDir = runRootForTrack(cwd, opts.track);
+  const petriDir = runRootForBranch(cwd, opts.branch);
   const artifactBaseDir = path.join(petriDir, "artifacts");
   const logger = new RunLogger(petriDir, pipelineConfig.name, input, pipelineConfig.goal, {
-    trackId: trackConfig?.track_id,
-    trackObjective: trackConfig?.objective,
-    trackBaseline: trackConfig?.baseline,
+    branchId: branchConfig?.branch_id,
+    branchObjective: branchConfig?.objective,
+    branchBaseline: branchConfig?.baseline,
   });
   const engine = new Engine({
     provider,
@@ -198,8 +198,8 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   process.on("SIGTERM", () => cleanup("SIGTERM"));
 
   // 8. Run and print result
-  const trackLabel = trackConfig ? ` track=${trackConfig.track_id}` : "";
-  console.log(chalk.blue(`Running pipeline: ${pipelineConfig.name} (run-${logger.runId}${trackLabel})`));
+  const branchLabel = branchConfig ? ` branch=${branchConfig.branch_id}` : "";
+  console.log(chalk.blue(`Running pipeline: ${pipelineConfig.name} (run-${logger.runId}${branchLabel})`));
   if (executionCwd !== cwd) {
     process.chdir(executionCwd);
   }

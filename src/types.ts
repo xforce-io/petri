@@ -11,16 +11,26 @@ export interface PipelineConfig {
   input?: { description: string };
 }
 
-// --- Track ---
+// --- Branch ---
 
-export interface TrackConfig {
+export interface BranchConfig {
   schema_version: number;
-  track_id: string;
+  branch_id: string;
   status?: "active" | "paused" | "closed";
   objective?: string;
   baseline?: string;
+  forked_from?: BranchForkSource;
   created_at?: string;
   notes?: string[];
+}
+
+export interface BranchForkSource {
+  type: "branch_run";
+  branch_id: string;
+  run_id: string;
+  artifact?: string;
+  reason?: string;
+  forked_at: string;
 }
 
 export type StageEntry = StageConfig | RepeatBlock;

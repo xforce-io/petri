@@ -7,7 +7,7 @@ import { logCommand } from "./log.js";
 import { listTemplatesCommand, listPlaybooksCommand } from "./list.js";
 import { webCommand } from "./web.js";
 import { createCommand } from "./create.js";
-import { trackInitCommand, trackListCommand } from "./track.js";
+import { branchForkCommand, branchInitCommand, branchListCommand } from "./branch.js";
 
 const program = new Command();
 program.name("petri").description("Multi-agent stage runner").version("0.1.0");
@@ -21,7 +21,7 @@ program
   .option("--skip-to <stage>", "Resume from a stage, skipping earlier stages (reuses existing artifacts)")
   .option("--require-clean", "Ensure git working tree is clean before running")
   .option("--worktree [name]", "Run in a temporary git worktree to isolate changes")
-  .option("--track <id>", "Run under a named exploration track")
+  .option("--branch <id>", "Run under a named exploration branch")
   .action(runCommand);
 
 program
@@ -38,14 +38,14 @@ program
 program
   .command("status")
   .description("Show current/recent run status")
-  .option("--track <id>", "Show status for a named exploration track")
+  .option("--branch <id>", "Show status for a named exploration branch")
   .action(statusCommand);
 
 program
   .command("log")
   .description("View run logs")
   .option("--run <id>", "Run ID (e.g. 001 or run-001)")
-  .option("--track <id>", "Read logs from a named exploration track")
+  .option("--branch <id>", "Read logs from a named exploration branch")
   .action(logCommand);
 
 const list = program
@@ -75,21 +75,33 @@ program
   .option("--from <file>", "Read description from a file instead of the argument")
   .action(createCommand);
 
-const track = program
-  .command("track")
-  .description("Manage exploration tracks");
+const branch = program
+  .command("branch")
+  .description("Manage exploration branches");
 
-track
+branch
   .command("init")
-  .description("Create a named exploration track")
-  .argument("<id>", "Track id")
-  .option("--objective <text>", "Track objective")
+  .description("Create a named exploration branch")
+  .argument("<id>", "Branch id")
+  .option("--objective <text>", "Branch objective")
   .option("--baseline <text>", "Baseline artifact or strategy")
-  .action(trackInitCommand);
+  .action(branchInitCommand);
 
-track
+branch
   .command("list")
-  .description("List exploration tracks")
-  .action(trackListCommand);
+  .description("List exploration branches")
+  .action(branchListCommand);
+
+branch
+  .command("fork")
+  .description("Fork a new exploration branch from an existing branch run")
+  .argument("<id>", "New branch id")
+  .requiredOption("--from-branch <id>", "Parent branch id")
+  .requiredOption("--from-run <id>", "Parent run id")
+  .option("--artifact <path>", "Parent run artifact that motivated the fork")
+  .option("--reason <text>", "Reason for the fork")
+  .option("--objective <text>", "Branch objective")
+  .option("--baseline <text>", "Baseline artifact or strategy")
+  .action(branchForkCommand);
 
 program.parse();

@@ -24,9 +24,9 @@ export interface StageLog {
 
 export interface RunLog {
   runId: string;
-  trackId?: string;
-  trackObjective?: string;
-  trackBaseline?: string;
+  branchId?: string;
+  branchObjective?: string;
+  branchBaseline?: string;
   pipeline: string;
   input: string;
   goal?: string;
@@ -103,7 +103,7 @@ export class RunLogger extends EventEmitter {
     pipelineName: string,
     input: string,
     goal?: string,
-    opts: { trackId?: string; trackObjective?: string; trackBaseline?: string } = {},
+    opts: { branchId?: string; branchObjective?: string; branchBaseline?: string } = {},
   ) {
     super();
     const runsDir = join(petriDir, "runs");
@@ -116,9 +116,9 @@ export class RunLogger extends EventEmitter {
 
     this.runLog = {
       runId: this.runId,
-      trackId: opts.trackId,
-      trackObjective: opts.trackObjective,
-      trackBaseline: opts.trackBaseline,
+      branchId: opts.branchId,
+      branchObjective: opts.branchObjective,
+      branchBaseline: opts.branchBaseline,
       pipeline: pipelineName,
       input,
       goal,
@@ -130,10 +130,10 @@ export class RunLogger extends EventEmitter {
     // Start fresh log file
     writeFileSync(this.logPath, "", "utf-8");
     this.append(`Run: run-${this.runId}`);
-    if (opts.trackId) {
-      this.append(`Track: ${opts.trackId}`);
-      if (opts.trackObjective) this.append(`Track objective: ${opts.trackObjective}`);
-      if (opts.trackBaseline) this.append(`Track baseline: ${opts.trackBaseline}`);
+    if (opts.branchId) {
+      this.append(`Branch: ${opts.branchId}`);
+      if (opts.branchObjective) this.append(`Branch objective: ${opts.branchObjective}`);
+      if (opts.branchBaseline) this.append(`Branch baseline: ${opts.branchBaseline}`);
     }
     this.append(`Pipeline: ${pipelineName}`);
     if (goal) {

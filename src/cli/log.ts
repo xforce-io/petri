@@ -2,17 +2,17 @@ import * as path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import chalk from "chalk";
 import { latestRunDir, listRuns } from "../engine/logger.js";
-import { loadTrack, runRootForTrack } from "../engine/track.js";
+import { loadBranch, runRootForBranch } from "../engine/branch.js";
 
 interface LogOptions {
   run?: string;
-  track?: string;
+  branch?: string;
 }
 
 export async function logCommand(opts: LogOptions): Promise<void> {
   const cwd = process.cwd();
-  if (opts.track) loadTrack(cwd, opts.track);
-  const runsDir = path.join(runRootForTrack(cwd, opts.track), "runs");
+  if (opts.branch) loadBranch(cwd, opts.branch);
+  const runsDir = path.join(runRootForBranch(cwd, opts.branch), "runs");
 
   let runDir: string | null;
 

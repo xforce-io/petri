@@ -191,38 +191,61 @@ defaults:
 ```bash
 petri init [--template <name>]     # Scaffold project
 petri run [--pipeline <file>]      # Execute pipeline
-petri run --track <id>             # Execute under a named exploration track
+petri run --branch <id>             # Execute under a named exploration branch
 petri status                       # Latest run status
-petri status --track <id>          # Latest run status within a track
+petri status --branch <id>          # Latest run status within a branch
 petri log [--run <id>]             # View logs
-petri log --track <id>             # View logs within a track
-petri track init <id>              # Create an exploration track
-petri track list                   # List exploration tracks
+petri log --branch <id>             # View logs within a branch
+petri branch init <id>              # Create an exploration branch
+petri branch fork <id>              # Fork a branch from an existing branch run
+petri branch list                   # List exploration branches
 petri list templates               # Available templates
 petri list playbooks               # Built-in playbooks
 petri validate                     # Check configuration
 petri web [--port <number>]        # Web dashboard
 ```
 
-### Exploration Tracks
+### Exploration Branches
 
-A track is a named, independent line of investigation. Use tracks when several optimization directions should each have their own run history instead of sharing one global `run-001`, `run-002`, ... sequence.
+A branch is a named, independent line of investigation. Use branches when several optimization directions should each have their own run history instead of sharing one global `run-001`, `run-002`, ... sequence.
 
 ```bash
-petri track init factor-weight-search \
+petri branch init factor-weight-search \
   --baseline run_007_production \
   --objective "Tune live-ready factor weights"
 
-petri run --track factor-weight-search
-petri status --track factor-weight-search
-petri log --track factor-weight-search --run 001
+petri run --branch factor-weight-search
+petri status --branch factor-weight-search
+petri log --branch factor-weight-search --run 001
 ```
 
-Tracked runs are stored under:
+Fork a sibling branch from a useful run:
+
+```bash
+petri branch fork risk-off-universe-search \
+  --from-branch factor-weight-search \
+  --from-run 003 \
+  --artifact candidate_strategy.json \
+  --baseline run_007_production \
+  --reason "Factor-weight candidate exposed risk-off concentration risk" \
+  --objective "Explore risk-off universe variants"
+```
+
+The child branch records lineage in `branch.yaml`:
+
+```yaml
+forked_from:
+  type: branch_run
+  branch_id: factor-weight-search
+  run_id: run-003
+  artifact: candidate_strategy.json
+```
+
+Branched runs are stored under:
 
 ```text
-.petri/tracks/<id>/runs/run-NNN/
-.petri/tracks/<id>/artifacts/
+.petri/branches/<id>/runs/run-NNN/
+.petri/branches/<id>/artifacts/
 ```
 
 ## Engine Internals
@@ -233,7 +256,7 @@ Tracked runs are stored under:
 - **Stagnation detection** — SHA-256 hash of failure reason; consecutive identical hashes → early block
 - **Agent timeout** — configurable per-stage (default 10 min), prevents hanging
 - **Artifact manifest** — tracks all outputs, provides context to downstream stages
-- **Run history** — structured JSON + text logs per run in `.petri/runs/run-NNN/` or `.petri/tracks/<id>/runs/run-NNN/`
+- **Run history** — structured JSON + text logs per run in `.petri/runs/run-NNN/` or `.petri/branches/<id>/runs/run-NNN/`
 
 ## Development
 
