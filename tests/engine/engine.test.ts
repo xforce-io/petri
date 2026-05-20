@@ -690,6 +690,51 @@ describe("Engine", () => {
     expect(fs.existsSync(path.join(tmpDir, "draft", "writer", "output.json"))).toBe(true);
   });
 
+  it("runs a command stage to completion (exit 0)", async () => {
+    const pipeline: PipelineConfig = {
+      name: "cmd-pipeline",
+      stages: [{ name: "measure", command: "exit 0" }],
+    };
+    const engine = new Engine({
+      provider: createStubProvider(() => {}),
+      roles: {},
+      artifactBaseDir: tmpDir,
+    });
+    const result = await engine.run(pipeline, "go");
+    expect(result.status).toBe("done");
+  });
+
+  it("blocks the run when a command stage exits non-zero", async () => {
+    const pipeline: PipelineConfig = {
+      name: "cmd-pipeline",
+      stages: [{ name: "measure", command: "exit 1" }],
+    };
+    const engine = new Engine({
+      provider: createStubProvider(() => {}),
+      roles: {},
+      artifactBaseDir: tmpDir,
+    });
+    const result = await engine.run(pipeline, "go");
+    expect(result.status).toBe("blocked");
+    expect(result.stage).toBe("measure");
+    expect(result.reason).toMatch(/command failed/i);
+  });
+
+  it("substitutes {artifact_dir} and creates the command stage artifact dir", async () => {
+    const pipeline: PipelineConfig = {
+      name: "cmd-pipeline",
+      stages: [{ name: "measure", command: "echo hi > {artifact_dir}/out.txt" }],
+    };
+    const engine = new Engine({
+      provider: createStubProvider(() => {}),
+      roles: {},
+      artifactBaseDir: tmpDir,
+    });
+    const result = await engine.run(pipeline, "go");
+    expect(result.status).toBe("done");
+    expect(fs.existsSync(path.join(tmpDir, "measure", "out.txt"))).toBe(true);
+  });
+
   it("preserves stale artifacts when resuming via skipTo", async () => {
     // skipTo intentionally reuses previous run's artifacts as inputs to later stages
     fs.mkdirSync(path.join(tmpDir, "draft", "writer"), { recursive: true });

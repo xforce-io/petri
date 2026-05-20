@@ -1,17 +1,19 @@
 // src/engine/engine.ts
 
 import { createHash } from "node:crypto";
+import { execSync } from "node:child_process";
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, existsSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
 import { ArtifactManifest } from "./manifest.js";
 import { checkGates, resolveGatePath, type GateInput, type GateDetail } from "./gate.js";
 import { buildContext } from "./context.js";
-import { isRepeatBlock } from "../types.js";
+import { isRepeatBlock, isCommandStage } from "../types.js";
 import type { RunLogger } from "./logger.js";
 import type {
   AgentProvider,
   PipelineConfig,
   StageConfig,
+  CommandStage,
   LoadedRole,
   RunResult,
   AttemptRecord,
@@ -95,6 +97,12 @@ export class Engine {
       }
       if (isRepeatBlock(entry)) {
         const result = await this.runRepeatBlock(entry.repeat, input, manifest);
+        if (result.status === "blocked") {
+          manifest.save();
+          return result;
+        }
+      } else if (isCommandStage(entry)) {
+        const result = await this.runCommandStage(entry);
         if (result.status === "blocked") {
           manifest.save();
           return result;
@@ -408,6 +416,27 @@ export class Engine {
       stage: stage.name,
       reason: `Max retries (${stage.max_retries ?? this.defaultMaxRetries}) exhausted`,
     };
+  }
+
+  private async runCommandStage(stage: CommandStage): Promise<RunResult> {
+    const artifactDir = join(this.artifactBaseDir, stage.name);
+    mkdirSync(artifactDir, { recursive: true });
+    const command = stage.command.replaceAll("{artifact_dir}", artifactDir);
+    const timeout = stage.timeout ?? this.defaultTimeout;
+
+    console.log(`  Command stage "${stage.name}": ${command}`);
+    this.logger?.logStageAttempt(stage.name, 1, 1);
+
+    try {
+      execSync(command, { stdio: "inherit", timeout });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.log(`  Command stage "${stage.name}" FAILED: ${message}`);
+      return { status: "blocked", stage: stage.name, reason: `Command failed: ${message}` };
+    }
+
+    console.log(`  Command stage "${stage.name}" completed`);
+    return { status: "done" };
   }
 
   private async runRepeatBlock(
