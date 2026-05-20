@@ -6,7 +6,7 @@ Petri is an evolutionary agent harness. You define goals, roles, and quality gat
 
 Named after the Petri dish: provide a culture medium, inoculate strains, set growth conditions, observe what emerges.
 
-[Design](docs/design.md) · [Examples](#examples) · [Quick Start](#quick-start) · [Web Dashboard](#web-dashboard)
+[Design](docs/design.md) · [Branches](docs/branches.md) · [Examples](#examples) · [Quick Start](#quick-start) · [Web Dashboard](#web-dashboard)
 
 ## Why Petri
 
@@ -209,9 +209,17 @@ petri web [--port <number>]        # Web dashboard
 
 A branch is a named, independent line of investigation. Use branches when several optimization directions should each have their own run history instead of sharing one global `run-001`, `run-002`, ... sequence.
 
+Branches can start in two ways:
+
+- `seeded_from` records an external source, such as a production strategy file in another project.
+- `forked_from` records a Petri branch/run parent.
+
 ```bash
 petri branch init factor-weight-search \
   --baseline run_007_production \
+  --seed-project quantitative_trading \
+  --seed-strategy-id run_007_production \
+  --seed-strategy-path config/strategies/rotation/run_007_production.json \
   --objective "Tune live-ready factor weights"
 
 petri run --branch factor-weight-search
@@ -219,7 +227,7 @@ petri status --branch factor-weight-search
 petri log --branch factor-weight-search --run 001
 ```
 
-Fork a sibling branch from a useful run:
+Fork a sibling branch from a useful Petri run:
 
 ```bash
 petri branch fork risk-off-universe-search \
@@ -247,6 +255,8 @@ Branched runs are stored under:
 .petri/branches/<id>/runs/run-NNN/
 .petri/branches/<id>/artifacts/
 ```
+
+See [Petri Branches](docs/branches.md) for the full branch, seed, fork, and promotion model.
 
 ## Engine Internals
 
