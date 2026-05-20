@@ -472,6 +472,8 @@ export class Engine {
         let result: RunResult;
         if (isRepeatBlock(entry)) {
           result = await this.runRepeatBlock(entry.repeat, input, manifest);
+        } else if (isCommandStage(entry)) {
+          result = await this.runCommandStage(entry);
         } else {
           result = await this.runStage(entry, input, manifest);
         }
@@ -596,6 +598,8 @@ export class Engine {
         files.push(...this.collectRepeatProgressEvidence(entry.repeat.stages, untilGateId));
         continue;
       }
+
+      if (isCommandStage(entry)) continue;  // command stages have no role gates
 
       for (const roleName of entry.roles) {
         const gate = this.roles[roleName]?.gate;

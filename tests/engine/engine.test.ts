@@ -735,6 +735,36 @@ describe("Engine", () => {
     expect(fs.existsSync(path.join(tmpDir, "measure", "out.txt"))).toBe(true);
   });
 
+  it("runs a command stage on every iteration of a repeat block", async () => {
+    // A repeat block with only a command stage has no until-gate evidence,
+    // so it runs to max_iterations and then blocks. We assert the command
+    // executed once per iteration.
+    const pipeline: PipelineConfig = {
+      name: "cmd-repeat",
+      stages: [
+        {
+          repeat: {
+            name: "loop",
+            max_iterations: 3,
+            until: "never-set",
+            stages: [
+              { name: "tick", command: "echo x >> {artifact_dir}/runs.txt" },
+            ],
+          },
+        },
+      ],
+    };
+    const engine = new Engine({
+      provider: createStubProvider(() => {}),
+      roles: {},
+      artifactBaseDir: tmpDir,
+    });
+    const result = await engine.run(pipeline, "go");
+    expect(result.status).toBe("blocked");
+    const runs = fs.readFileSync(path.join(tmpDir, "tick", "runs.txt"), "utf-8");
+    expect(runs.trim().split("\n")).toHaveLength(3);
+  });
+
   it("preserves stale artifacts when resuming via skipTo", async () => {
     // skipTo intentionally reuses previous run's artifacts as inputs to later stages
     fs.mkdirSync(path.join(tmpDir, "draft", "writer"), { recursive: true });
