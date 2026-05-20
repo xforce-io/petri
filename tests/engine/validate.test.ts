@@ -268,6 +268,26 @@ describe("validateProject", () => {
     ).toBe(true);
   });
 
+  it("accepts a pipeline whose only stage is a command stage", () => {
+    const dir = writeFixture({
+      "petri.yaml": MIN_PETRI,
+      "pipeline.yaml": "name: cmd-only\nstages:\n  - name: measure\n    command: python run.py\n",
+    });
+    const result = validateProject(dir);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("rejects a command stage missing its command field", () => {
+    const dir = writeFixture({
+      "petri.yaml": MIN_PETRI,
+      "pipeline.yaml": "name: bad\nstages:\n  - name: measure\n    command: \"\"\n",
+    });
+    const result = validateProject(dir);
+    expect(result.valid).toBe(false);
+    expect(result.errors.join("\n")).toMatch(/command stage "measure" missing required "command"/);
+  });
+
   it("allows a repeat until gate with strong checks plus a weak self-report check", () => {
     const dir = writeFixture({
       "petri.yaml": MIN_PETRI,

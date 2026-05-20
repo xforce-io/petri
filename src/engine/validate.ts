@@ -1,5 +1,5 @@
 import { loadPetriConfig, loadPipelineConfig, loadRole } from "../config/loader.js";
-import { isRepeatBlock, type GateCheck, type GateCheckClause, type LoadedRole, type StageEntry } from "../types.js";
+import { isRepeatBlock, isCommandStage, type GateCheck, type GateCheckClause, type LoadedRole, type StageEntry } from "../types.js";
 
 export interface ValidationResult {
   valid: boolean;
@@ -21,6 +21,7 @@ export function validateProject(projectDir: string): ValidationResult {
   // 2. Load pipeline.yaml — walk tree, count repeat blocks, collect (repeatName, untilId)
   const roleNames = new Set<string>();
   const repeatBlocks: { name: string; until: string }[] = [];
+  let commandStageCount = 0;
   try {
     const pipelineConfig = loadPipelineConfig(projectDir);
     function walk(stages: StageEntry[]): void {
@@ -45,6 +46,15 @@ export function validateProject(projectDir: string): ValidationResult {
           }
           repeatBlocks.push({ name: labeledName, until: typeof r.until === "string" ? r.until : "" });
           walk(Array.isArray(r.stages) ? r.stages : []);
+        } else if (isCommandStage(entry)) {
+          const cmdName = typeof entry.name === "string" && entry.name.length > 0 ? entry.name : "(unnamed)";
+          if (typeof entry.name !== "string" || entry.name.length === 0) {
+            errors.push(`pipeline.yaml: command stage missing required "name" field (string)`);
+          }
+          if (typeof entry.command !== "string" || entry.command.length === 0) {
+            errors.push(`pipeline.yaml: command stage "${cmdName}" missing required "command" field (non-empty string)`);
+          }
+          commandStageCount++;
         } else {
           const stageName = typeof entry.name === "string" && entry.name.length > 0 ? entry.name : "(unnamed)";
           if (typeof entry.name !== "string" || entry.name.length === 0) {
@@ -68,9 +78,9 @@ export function validateProject(projectDir: string): ValidationResult {
       );
     } else {
       walk(pipelineConfig.stages);
-      if (repeatBlocks.length === 0) {
+      if (repeatBlocks.length === 0 && commandStageCount === 0) {
         errors.push(
-          "pipeline.yaml: pipeline must contain at least one repeat: block (no feedback loop = workflow, not training pipeline)",
+          "pipeline.yaml: pipeline must contain at least one repeat: block or command stage (no feedback loop and no deterministic step = empty workflow)",
         );
       }
     }
