@@ -25,4 +25,17 @@ describe("isCommandStage", () => {
     expect(isCommandStage(entry)).toBe(false);
     expect(isRepeatBlock(entry)).toBe(true);
   });
+
+  it("accepts a command stage carrying an optional gate", () => {
+    const entry: CommandStage = {
+      name: "measure",
+      command: "python run.py",
+      gate: {
+        id: "measured",
+        evidence: { path: "{stage}/result.json", check: { field: "ok", equals: true } },
+      },
+    };
+    expect(isCommandStage(entry)).toBe(true);
+    expect(entry.gate?.id).toBe("measured");
+  });
 });

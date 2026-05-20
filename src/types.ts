@@ -64,13 +64,15 @@ export interface RepeatBlock {
 }
 
 /**
- * A deterministic, non-agent stage. Runs a shell command once.
- * No roles, no gates, no retry/feedback — re-running yields the same result.
+ * A deterministic, non-agent stage. Runs a shell command once — no roles,
+ * no retry/feedback (re-running yields the same result). It may declare an
+ * optional gate to check its output.
  */
 export interface CommandStage {
   name: string;
   command: string;       // shell command; "{artifact_dir}" is substituted at run time
   timeout?: number;      // max wall-clock ms (default: engine defaultTimeout)
+  gate?: GateConfig;     // optional pass/fail check on the command's output artifacts
 }
 
 export type GateStrategy = "all" | "majority" | "any";
