@@ -43,7 +43,7 @@ export interface BranchForkSource {
   forked_at: string;
 }
 
-export type StageEntry = StageConfig | RepeatBlock;
+export type StageEntry = StageConfig | RepeatBlock | CommandStage;
 
 export interface StageConfig {
   name: string;
@@ -63,10 +63,24 @@ export interface RepeatBlock {
   };
 }
 
+/**
+ * A deterministic, non-agent stage. Runs a shell command once.
+ * No roles, no gates, no retry/feedback — re-running yields the same result.
+ */
+export interface CommandStage {
+  name: string;
+  command: string;       // shell command; "{artifact_dir}" is substituted at run time
+  timeout?: number;      // max wall-clock ms (default: engine defaultTimeout)
+}
+
 export type GateStrategy = "all" | "majority" | "any";
 
 export function isRepeatBlock(entry: StageEntry): entry is RepeatBlock {
   return "repeat" in entry;
+}
+
+export function isCommandStage(entry: StageEntry): entry is CommandStage {
+  return "command" in entry;
 }
 
 // --- Role ---
