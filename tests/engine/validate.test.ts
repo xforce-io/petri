@@ -288,6 +288,26 @@ describe("validateProject", () => {
     expect(result.errors.join("\n")).toMatch(/command stage "measure" missing required "command"/);
   });
 
+  it("accepts a command stage with a well-formed gate", () => {
+    const dir = writeFixture({
+      "petri.yaml": MIN_PETRI,
+      "pipeline.yaml": "name: gated\nstages:\n  - name: measure\n    command: python run.py\n    gate:\n      id: measured\n      evidence:\n        path: \"{stage}/result.json\"\n",
+    });
+    const result = validateProject(dir);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("rejects a command stage gate missing evidence.path", () => {
+    const dir = writeFixture({
+      "petri.yaml": MIN_PETRI,
+      "pipeline.yaml": "name: bad-gate\nstages:\n  - name: measure\n    command: python run.py\n    gate:\n      id: measured\n",
+    });
+    const result = validateProject(dir);
+    expect(result.valid).toBe(false);
+    expect(result.errors.join("\n")).toMatch(/command stage "measure" gate must have "evidence.path"/);
+  });
+
   it("allows a repeat until gate with strong checks plus a weak self-report check", () => {
     const dir = writeFixture({
       "petri.yaml": MIN_PETRI,

@@ -1,5 +1,5 @@
 import { loadPetriConfig, loadPipelineConfig, loadRole } from "../config/loader.js";
-import { isRepeatBlock, isCommandStage, type GateCheck, type GateCheckClause, type LoadedRole, type StageEntry } from "../types.js";
+import { isRepeatBlock, isCommandStage, type GateCheck, type GateCheckClause, type GateConfig, type LoadedRole, type StageEntry } from "../types.js";
 
 export interface ValidationResult {
   valid: boolean;
@@ -53,6 +53,15 @@ export function validateProject(projectDir: string): ValidationResult {
           }
           if (typeof entry.command !== "string" || entry.command.length === 0) {
             errors.push(`pipeline.yaml: command stage "${cmdName}" missing required "command" field (non-empty string)`);
+          }
+          if (entry.gate !== undefined) {
+            const g = entry.gate as Partial<GateConfig>;
+            if (!g || typeof g !== "object" || typeof g.id !== "string" || g.id.length === 0) {
+              errors.push(`pipeline.yaml: command stage "${cmdName}" gate must have a non-empty string "id"`);
+            }
+            if (!g || typeof g !== "object" || !g.evidence || typeof g.evidence !== "object" || typeof g.evidence.path !== "string" || g.evidence.path.length === 0) {
+              errors.push(`pipeline.yaml: command stage "${cmdName}" gate must have "evidence.path" (string)`);
+            }
           }
           commandStageCount++;
         } else {
