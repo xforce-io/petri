@@ -435,6 +435,10 @@ export class Engine {
       return { status: "blocked", stage: stage.name, reason: `Command failed: ${message}` };
     }
 
+    // Snapshot the command's output into the run directory before the gate
+    // runs — a gate-rejected run still keeps its output for the lineage.
+    this.snapshotCommandArtifacts(stage.name, artifactDir);
+
     // The command ran. If it declares a gate, evaluate it against the output.
     if (stage.gate) {
       const gateResult = await checkGates(
@@ -679,6 +683,47 @@ export class Engine {
     }, null, 2), "utf-8");
 
     return copied;
+  }
+
+  /**
+   * Snapshot a command stage's output artifacts into the run directory.
+   * Command stages have no role dimension, so the snapshot directory is
+   * just artifacts/{seq}-{stage}/. Mirrors snapshotRoleArtifacts.
+   */
+  private snapshotCommandArtifacts(stageName: string, artifactDir: string): void {
+    if (!this.logger) return;
+
+    const files = resolveArtifactFiles(artifactDir, []);
+    if (files.length === 0) return;
+
+    const seq = String(++this.artifactSnapshotSeq).padStart(3, "0");
+    const snapshotDir = join(
+      this.logger.runDir,
+      "artifacts",
+      `${seq}-${safePathPart(stageName)}`,
+    );
+    mkdirSync(snapshotDir, { recursive: true });
+
+    const copied: string[] = [];
+    for (const file of files) {
+      const dest = uniqueDestination(snapshotDir, basename(file));
+      try {
+        copyFileSync(file, dest);
+        copied.push(dest);
+      } catch {
+        // Best-effort archival should not affect pipeline execution.
+      }
+    }
+
+    writeFileSync(join(snapshotDir, "_snapshot.json"), JSON.stringify({
+      sequence: Number(seq),
+      stage: stageName,
+      kind: "command",
+      source_artifact_dir: artifactDir,
+      source_files: files,
+      copied_files: copied,
+      created_at: new Date().toISOString(),
+    }, null, 2), "utf-8");
   }
 }
 

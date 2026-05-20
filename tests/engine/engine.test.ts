@@ -880,4 +880,27 @@ describe("Engine", () => {
     const result = await engine.run(pipeline, "go");
     expect(result.status).toBe("done");
   });
+
+  it("snapshots a command stage's output into the run directory", async () => {
+    const pipeline: PipelineConfig = {
+      name: "cmd-snapshot",
+      stages: [
+        { name: "measure", command: "echo '{\"ok\": true}' > {artifact_dir}/result.json" },
+      ],
+    };
+    const logger = new RunLogger(tmpDir, pipeline.name, "go");
+    const engine = new Engine({
+      provider: createStubProvider(() => {}),
+      roles: {},
+      artifactBaseDir: path.join(tmpDir, "artifacts"),
+      logger,
+    });
+    const result = await engine.run(pipeline, "go");
+    logger.finish(result.status, result.stage, result.reason);
+
+    expect(result.status).toBe("done");
+    const snapshot = path.join(logger.runDir, "artifacts", "001-measure", "result.json");
+    expect(fs.existsSync(snapshot)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(snapshot, "utf-8"))).toEqual({ ok: true });
+  });
 });
