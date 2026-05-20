@@ -58,4 +58,25 @@ describe("petri branch", () => {
     expect(child.forked_from?.run_id).toBe("run-003");
     expect(child.forked_from?.artifact).toBe("candidate_strategy.json");
   });
+
+  it("initializes a branch from an external strategy seed", async () => {
+    const { branchInitCommand } = await import("../../src/cli/branch.js");
+    await branchInitCommand("factor-weight-search", {
+      objective: "Tune factor weights",
+      baseline: "run_007_production",
+      seedProject: "quantitative_trading",
+      seedStrategyId: "run_007_production",
+      seedStrategyPath: "config/strategies/rotation/run_007_production.json",
+      seedReason: "Start from published SOTA.",
+    });
+
+    const output = lines.join("\n");
+    expect(output).toContain("Created branch: factor-weight-search");
+    expect(output).toContain("Seeded from: quantitative_trading/run_007_production");
+
+    const branch = loadBranch(tmpDir, "factor-weight-search");
+    expect(branch.seeded_from?.type).toBe("external_strategy");
+    expect(branch.seeded_from?.strategy_id).toBe("run_007_production");
+    expect(branch.forked_from).toBeUndefined();
+  });
 });

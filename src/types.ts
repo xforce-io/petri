@@ -19,9 +19,19 @@ export interface BranchConfig {
   status?: "active" | "paused" | "closed";
   objective?: string;
   baseline?: string;
+  seeded_from?: BranchSeedSource;
   forked_from?: BranchForkSource;
   created_at?: string;
   notes?: string[];
+}
+
+export interface BranchSeedSource {
+  type: "external_strategy";
+  project: string;
+  strategy_id: string;
+  strategy_path?: string;
+  reason?: string;
+  seeded_at: string;
 }
 
 export interface BranchForkSource {

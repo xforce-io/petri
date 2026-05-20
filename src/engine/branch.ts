@@ -8,6 +8,10 @@ const BRANCH_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export interface CreateBranchOptions {
   objective?: string;
   baseline?: string;
+  seedProject?: string;
+  seedStrategyId?: string;
+  seedStrategyPath?: string;
+  seedReason?: string;
 }
 
 export interface ForkBranchOptions extends CreateBranchOptions {
@@ -53,6 +57,19 @@ export function createBranch(projectDir: string, branchId: string, opts: CreateB
     baseline: opts.baseline,
     created_at: new Date().toISOString(),
   };
+  if (opts.seedProject || opts.seedStrategyId || opts.seedStrategyPath || opts.seedReason) {
+    if (!opts.seedProject || !opts.seedStrategyId) {
+      throw new Error("External strategy seeds require both seedProject and seedStrategyId.");
+    }
+    config.seeded_from = {
+      type: "external_strategy",
+      project: opts.seedProject,
+      strategy_id: opts.seedStrategyId,
+      strategy_path: opts.seedStrategyPath,
+      reason: opts.seedReason,
+      seeded_at: new Date().toISOString(),
+    };
+  }
 
   fs.mkdirSync(path.join(dir, "runs"), { recursive: true });
   fs.mkdirSync(path.join(dir, "artifacts"), { recursive: true });

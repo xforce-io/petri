@@ -37,6 +37,33 @@ describe("branch metadata", () => {
     expect(loaded.baseline).toBe("run_007_production");
   });
 
+  it("records an external strategy seed separately from fork lineage", () => {
+    const dir = makeTmpDir();
+
+    const branch = createBranch(dir, "factor-weight-search", {
+      objective: "Tune factor weights",
+      baseline: "run_007_production",
+      seedProject: "quantitative_trading",
+      seedStrategyId: "run_007_production",
+      seedStrategyPath: "config/strategies/rotation/run_007_production.json",
+      seedReason: "Start from the published SOTA strategy.",
+    });
+
+    expect(branch.forked_from).toBeUndefined();
+    expect(branch.seeded_from).toEqual({
+      type: "external_strategy",
+      project: "quantitative_trading",
+      strategy_id: "run_007_production",
+      strategy_path: "config/strategies/rotation/run_007_production.json",
+      reason: "Start from the published SOTA strategy.",
+      seeded_at: expect.any(String),
+    });
+
+    const loaded = loadBranch(dir, "factor-weight-search");
+    expect(loaded.seeded_from?.strategy_id).toBe("run_007_production");
+    expect(loaded.forked_from).toBeUndefined();
+  });
+
   it("lists branches in sorted order", () => {
     const dir = makeTmpDir();
     createBranch(dir, "z-branch");

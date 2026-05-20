@@ -85,6 +85,10 @@ branch
   .argument("<id>", "Branch id")
   .option("--objective <text>", "Branch objective")
   .option("--baseline <text>", "Baseline artifact or strategy")
+  .option("--seed-project <name>", "External project used as the branch seed")
+  .option("--seed-strategy-id <id>", "External strategy id used as the branch seed")
+  .option("--seed-strategy-path <path>", "External strategy path used as the branch seed")
+  .option("--seed-reason <text>", "Reason for seeding from the external strategy")
   .action(branchInitCommand);
 
 branch

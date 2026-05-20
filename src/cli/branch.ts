@@ -4,6 +4,10 @@ import { createBranch, forkBranch, listBranches } from "../engine/branch.js";
 export interface BranchInitOptions {
   objective?: string;
   baseline?: string;
+  seedProject?: string;
+  seedStrategyId?: string;
+  seedStrategyPath?: string;
+  seedReason?: string;
 }
 
 export interface BranchForkOptions extends BranchInitOptions {
@@ -20,6 +24,11 @@ export async function branchInitCommand(branchId: string, opts: BranchInitOption
     console.log(chalk.green(`Created branch: ${branch.branch_id}`));
     if (branch.objective) console.log(chalk.gray(`Objective: ${branch.objective}`));
     if (branch.baseline) console.log(chalk.gray(`Baseline: ${branch.baseline}`));
+    if (branch.seeded_from) {
+      console.log(chalk.gray(`Seeded from: ${branch.seeded_from.project}/${branch.seeded_from.strategy_id}`));
+      if (branch.seeded_from.strategy_path) console.log(chalk.gray(`Seed path: ${branch.seeded_from.strategy_path}`));
+      if (branch.seeded_from.reason) console.log(chalk.gray(`Seed reason: ${branch.seeded_from.reason}`));
+    }
     console.log(chalk.gray(`Path: .petri/branches/${branch.branch_id}`));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -42,7 +51,10 @@ export async function branchListCommand(): Promise<void> {
     const fork = branch.forked_from
       ? chalk.gray(`  forked from ${branch.forked_from.branch_id}/${branch.forked_from.run_id}`)
       : "";
-    console.log(`  ${chalk.cyan(branch.branch_id)}  ${chalk.gray(status)}${objective}${fork}`);
+    const seed = branch.seeded_from
+      ? chalk.gray(`  seeded from ${branch.seeded_from.project}/${branch.seeded_from.strategy_id}`)
+      : "";
+    console.log(`  ${chalk.cyan(branch.branch_id)}  ${chalk.gray(status)}${objective}${fork}${seed}`);
   }
 }
 
