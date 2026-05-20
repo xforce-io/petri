@@ -12,12 +12,14 @@ export interface PipelineSummaryRole {
 export type GateStrength = "strong" | "weak" | "none";
 
 export interface StageSummary {
-  kind: "stage" | "repeat";
+  kind: "stage" | "repeat" | "command";
   // For "stage":
   name?: string;
   roles?: string[];
   gateStrength?: GateStrength;
   gateCheck?: string;
+  // For "command":
+  command?: string;
   // For "repeat":
   repeatName?: string;
   maxIterations?: number;
@@ -121,6 +123,14 @@ function summarizeStages(generatedDir: string, raw: any[]): { stages: StageSumma
         maxIterations: typeof r.max_iterations === "number" ? r.max_iterations : undefined,
         until: typeof r.until === "string" ? r.until : undefined,
         innerStages: inner.stages,
+      });
+      continue;
+    }
+    if (typeof entry.command === "string") {
+      out.push({
+        kind: "command",
+        name: typeof entry.name === "string" ? entry.name : undefined,
+        command: entry.command,
       });
       continue;
     }

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { isRepeatBlock, isCommandStage } from "../types.js";
 import type {
   PetriConfig,
   PipelineConfig,
@@ -10,6 +11,7 @@ import type {
   GateCheck,
   GateCheckClause,
   LoadedRole,
+  StageEntry,
 } from "../types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -146,6 +148,27 @@ export function loadRole(
     playbooks,
     gate,
   };
+}
+
+/**
+ * Collect every role name referenced by a pipeline's stages, recursing into
+ * repeat blocks. Command stages have no roles and are skipped.
+ */
+export function collectRoleNames(stages: StageEntry[]): string[] {
+  const names = new Set<string>();
+  const walk = (entries: StageEntry[]): void => {
+    for (const entry of entries) {
+      if (isRepeatBlock(entry)) {
+        walk(entry.repeat.stages);
+      } else if (isCommandStage(entry)) {
+        continue;
+      } else {
+        for (const role of entry.roles) names.add(role);
+      }
+    }
+  };
+  walk(stages);
+  return [...names];
 }
 
 /**

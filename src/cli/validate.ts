@@ -4,7 +4,7 @@ import {
   loadPipelineConfig,
   loadRole,
 } from "../config/loader.js";
-import { isRepeatBlock } from "../types.js";
+import { isRepeatBlock, isCommandStage } from "../types.js";
 
 export async function validateCommand(): Promise<void> {
   const cwd = process.cwd();
@@ -33,8 +33,10 @@ export async function validateCommand(): Promise<void> {
           count += collectRoles(entry.repeat.stages);
         } else {
           count++;
-          for (const role of entry.roles) {
-            roleNames.add(role);
+          if (!isCommandStage(entry)) {
+            for (const role of entry.roles) {
+              roleNames.add(role);
+            }
           }
         }
       }

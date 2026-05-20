@@ -6,6 +6,7 @@ import {
   loadPetriConfig,
   loadPipelineConfig,
   loadRole,
+  collectRoleNames,
 } from "../config/loader.js";
 import { Engine } from "../engine/engine.js";
 import { RunLogger } from "../engine/logger.js";
@@ -14,7 +15,6 @@ import { acquireLock, releaseLock, killProcessTree } from "../engine/lock.js";
 import { loadBranch, runRootForBranch } from "../engine/branch.js";
 import { PiProvider } from "../providers/pi.js";
 import { ClaudeCodeProvider } from "../providers/claude-code.js";
-import { isRepeatBlock } from "../types.js";
 import type { AgentProvider, LoadedRole } from "../types.js";
 
 interface RunOptions {
@@ -125,20 +125,9 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     }
   }
 
-  // 3. Collect all role names from pipeline stages (recursing into nested repeats)
-  const roleNames = new Set<string>();
-  function collectRoles(stages: import("../types.js").StageEntry[]): void {
-    for (const entry of stages) {
-      if (isRepeatBlock(entry)) {
-        collectRoles(entry.repeat.stages);
-      } else {
-        for (const role of entry.roles) {
-          roleNames.add(role);
-        }
-      }
-    }
-  }
-  collectRoles(pipelineConfig.stages);
+  // 3. Collect all role names from pipeline stages (recursing into nested
+  //    repeats; command stages have no roles and are skipped)
+  const roleNames = new Set<string>(collectRoleNames(pipelineConfig.stages));
 
   // 4. Load all roles (from pipeline.yaml's directory if it has a roles/ sibling, else cwd)
   const defaultModel = petriConfig.defaults.model;

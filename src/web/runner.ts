@@ -1,10 +1,9 @@
 import * as path from "node:path";
-import { loadPetriConfig, loadPipelineConfig, loadRole } from "../config/loader.js";
+import { loadPetriConfig, loadPipelineConfig, loadRole, collectRoleNames } from "../config/loader.js";
 import { RunLogger } from "../engine/logger.js";
 import { Engine } from "../engine/engine.js";
-import { isRepeatBlock } from "../types.js";
 import { createProviderFromConfig } from "../util/provider.js";
-import type { AgentProvider, PipelineConfig, StageConfig } from "../types.js";
+import type { AgentProvider } from "../types.js";
 
 export interface StartRunOpts {
   projectDir: string;
@@ -18,34 +17,6 @@ export interface StartRunResult {
   logger: RunLogger;
 }
 
-/**
- * Collect all role names referenced in pipeline stages,
- * including those inside repeat blocks.
- */
-function collectRoleNames(pipeline: PipelineConfig): string[] {
-  const names = new Set<string>();
-
-  function fromStages(stages: StageConfig[]): void {
-    for (const stage of stages) {
-      for (const role of stage.roles) {
-        names.add(role);
-      }
-    }
-  }
-
-  for (const entry of pipeline.stages) {
-    if (isRepeatBlock(entry)) {
-      fromStages(entry.repeat.stages);
-    } else {
-      for (const role of entry.roles) {
-        names.add(role);
-      }
-    }
-  }
-
-  return Array.from(names);
-}
-
 export function startRun(opts: StartRunOpts): StartRunResult {
   const { projectDir, pipelineFile, input, activeRuns } = opts;
 
@@ -54,7 +25,7 @@ export function startRun(opts: StartRunOpts): StartRunResult {
   const pipelineConfig = loadPipelineConfig(projectDir, pipelineFile);
 
   // 2. Collect role names
-  const roleNames = collectRoleNames(pipelineConfig);
+  const roleNames = collectRoleNames(pipelineConfig.stages);
   const defaultModel = petriConfig.defaults.model;
 
   // 3. Load all roles

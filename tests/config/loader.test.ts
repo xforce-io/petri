@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { loadPetriConfig, loadPipelineConfig, loadRole, loadBuiltinPlaybook } from "../../src/config/loader.js";
+import { loadPetriConfig, loadPipelineConfig, loadRole, loadBuiltinPlaybook, collectRoleNames } from "../../src/config/loader.js";
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "petri-test-"));
@@ -414,5 +414,26 @@ describe("loadBuiltinPlaybook", () => {
 
   it("throws on unknown built-in playbook", () => {
     expect(() => loadBuiltinPlaybook("nonexistent_playbook")).toThrow();
+  });
+});
+
+describe("collectRoleNames", () => {
+  it("collects role names across nested repeat blocks and skips command stages", () => {
+    const names = collectRoleNames([
+      { name: "design", roles: ["designer"] },
+      { name: "measure", command: "python run.py" },
+      {
+        repeat: {
+          name: "loop",
+          max_iterations: 3,
+          until: "done",
+          stages: [
+            { name: "develop", roles: ["developer", "reviewer"] },
+            { name: "backtest", command: "python bt.py" },
+          ],
+        },
+      },
+    ]);
+    expect([...names].sort()).toEqual(["designer", "developer", "reviewer"]);
   });
 });

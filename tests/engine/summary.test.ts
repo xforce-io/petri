@@ -4,6 +4,16 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { buildPipelineSummary } from "../../src/engine/summary.js";
 
+function makeProject(files: Record<string, string>): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "petri-summary-test-"));
+  for (const [rel, content] of Object.entries(files)) {
+    const full = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, content);
+  }
+  return dir;
+}
+
 function writeTree(dir: string, files: Record<string, string>): void {
   for (const [rel, content] of Object.entries(files)) {
     const abs = path.join(dir, rel);
@@ -172,6 +182,17 @@ describe("buildPipelineSummary", () => {
     const summary = buildPipelineSummary(tmp)!;
     expect(summary.stages[0].gateStrength).toBe("strong");
     expect(summary.stages[0].gateCheck).toBe("oos_annual_return >= 0.09 AND oos_mdd >= -0.1");
+  });
+
+  it("marks a command stage with kind 'command'", () => {
+    const dir = makeProject({
+      "pipeline.yaml": "name: p\nstages:\n  - name: measure\n    command: python run.py\n",
+    });
+    const summary = buildPipelineSummary(dir);
+    expect(summary).not.toBeNull();
+    const measure = summary!.stages.find((s) => s.name === "measure");
+    expect(measure?.kind).toBe("command");
+    expect(measure?.command).toBe("python run.py");
   });
 
   it("classifies *_ready / *_complete / *_done equals=true as weak", () => {
