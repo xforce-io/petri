@@ -101,7 +101,7 @@ petri 进化的是 **artifact**。五个 primitive:
 - **Engine**:识别 `command` stage 并确定性执行;把 guardrail 反馈与 gate 裁决**分开**路由 —— 反馈进入下一轮 agent stage 的输入。
 - **Pipeline schema**:新增 `command` stage 条目。
 - **branch.yaml schema v2**:新增 `baseline`、`gates`、`guardrails`。
-- **gate**:支持 `equals` 之外的比较 —— 至少 `>=`、`<=`,以及 `improvement_vs_baseline_pp`(相对 branch baseline 对应指标的增量,单位 pp)。优化 branch 的 gate 在 `branch.yaml` 声明、对测量输出求值;现有的 role 级 gate(`roles/<r>/gate.yaml`)不变。
+- **gate**:**引擎零改动**。比较运算符 `gt/gte/lt/lte/in/equals` 已存在。baseline 相对比较由**测量步骤直接输出 delta 字段**(如 `delta_vs_baseline.real_etf_full_annual_return_pp`)解决,gate 用现成的 `gte` 即可。优化 branch 的 gate 在 `branch.yaml` 声明、检查测量产物;现有的 role 级 gate(`roles/<r>/gate.yaml`)不变。
 - **guardrail**:新增配置 —— 要观察的指标 / 趋势,以及它发出的反馈。
 
 ### 示意 schema(说明性,非规范;细节留给实现计划)
@@ -115,18 +115,16 @@ baseline:
   strategy_id: run_007_production
   strategy_path: config/strategies/rotation/run_007_production.json
 gates:
+  # 测量步骤直接输出 delta 字段;gate 用现成的比较运算符
   - id: primary-objective
-    metric: real_etf_full.annual_return
-    comparison: improvement_vs_baseline_pp
-    threshold: 1.0
+    field: delta_vs_baseline.real_etf_full_annual_return_pp
+    check: { gte: 1.0 }
   - id: drawdown-ceiling
-    metric: real_etf_full.max_drawdown
-    comparison: ">="            # MDD 为负;不得比上限更差
-    threshold: -0.1252
+    field: candidate.real_etf_full.max_drawdown
+    check: { gte: -0.1252 }       # MDD 为负;不得比上限更差
   - id: subset-floor
-    metric: real_etf_subset.annual_return
-    comparison: ">="
-    threshold: 0.0974
+    field: candidate.real_etf_subset.annual_return
+    check: { gte: 0.0974 }
 guardrails:
   - id: drawdown-headroom
     metric: real_etf_full.max_drawdown
@@ -149,13 +147,15 @@ guardrails:
 
 ---
 
-## 6. 错误处理
+## 6. 结局与错误处理
 
-区分两类失败:
+petri 的执行状态保持 `done | blocked` 两值 —— **不新增 `REJECT` 枚举**。"候选好不好"是另一根轴上的 **verdict**,它是产物内容,不是执行状态:
 
-- **进化结局 —— REJECT。** 测量成功;某个 gate 没过。这是一个**有效的、被记录的 run**。下一轮拿到 guardrail 反馈。
-- **基础设施失败 —— BLOCKED / ERROR。** `command` stage 非零退出,或产出残缺 / 非法的指标。这**不是** REJECT —— 是一个被中止的 run,无进化反馈,直接抛出命令的 stderr。
-- gate 的 evidence 文件缺失 → 视为测量 stage 的基础设施失败,在 gate 运行前就被拦截 —— gate 无从裁决,不应被当作 REJECT。
+- **verdict(ACCEPT / REJECT)** —— 由测量 / 评估步骤写进 `result.json` 的 `decision` 字段。`petri status` / `log` 读产物把它显示出来。一个 REJECT 的 run 是**有效的、被记录的实验**,其 `metrics.json` 是要保留的产物。
+- **执行状态 `done`** —— pipeline 跑到底,可能 verdict=ACCEPT 也可能 =REJECT。
+- **执行状态 `blocked`** —— pipeline 没跑到底:`command` stage 非零退出、或产出残缺 / 非法指标 —— 基础设施失败,无 verdict 可言。
+
+"真实验 vs 基础设施崩溃"的区分不需要状态枚举:崩溃的 run 没有 `metrics.json`,跑完的 run 有。
 
 ---
 
@@ -163,16 +163,15 @@ guardrails:
 
 - **Pipeline 解析**:含 `command` stage 的 pipeline 能加载;`command` stage 没有 `roles`。
 - **Engine**:`command` stage 只跑一次、不带反馈重试;非零退出 → run BLOCKED。
-- **gate 比较**:`>=`、`<=`、`improvement_vs_baseline` 对一份 fixture `metrics.json` 求值正确。
-- **组合**:所有 gate AND;一个 gate 失败 → REJECT;全部通过 → ACCEPT。
-- **guardrail 正交性不变式(关键回归测试)**:guardrail 产出反馈文本;guardrail 违反**不改变** run 的 decision。
+- **组合**:所有 gate AND;任一 gate 失败 → verdict=REJECT;全部通过 → verdict=ACCEPT。
+- **guardrail 正交性不变式(关键回归测试)**:guardrail 产出反馈文本;guardrail 违反**不改变** run 的 verdict。
 - **branch.yaml v2 解析**。
 
 ---
 
 ## 8. 范围
 
-**In(本 spec 涵盖):** 五 primitive 模型;gate / guardrail 解耦与正交性不变式;组合规则(所有 gate AND);`command` 确定性 stage 类型;`branch.yaml` v2 携带 baseline + gates + guardrails;gate 比较运算符。
+**In(本 spec 涵盖):** 五 primitive 模型;gate / guardrail 解耦与正交性不变式;组合规则(所有 gate AND);`command` 确定性 stage 类型;`command` stage 输出可被 gate 检查;`branch.yaml` v2 携带 baseline + gates + guardrails。
 
 **Out(各自单独的后续 spec):**
 
