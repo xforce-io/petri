@@ -129,12 +129,15 @@ export interface PetriConfig {
 }
 
 export interface ProviderConfig {
-  type: "pi" | "claude_code" | "codex";
+  type: "pi" | "claude_code" | "codex" | "milkie";
 }
 
 export interface ModelConfig {
   provider: string;
   model: string;
+  adapter?: string;                    // milkie gateway adapter, e.g. "openai-compatible" | "anthropic"
+  baseUrl?: string;                    // milkie endpoint; falls back to env when omitted
+  options?: Record<string, unknown>;  // passthrough to milkie ModelConfig.options
 }
 
 // --- Runtime ---

@@ -1,0 +1,20 @@
+# Minimal example: run a petri role via the milkie provider against an
+# OpenAI-compatible endpoint (here, Volcengine Ark / Doubao).
+#
+# Credentials come from the environment, never this file:
+#   export VOLCENGINE_TOKEN=<your token>          # API key
+#   export VOLCENGINE_API_BASE=<your endpoint>    # e.g. https://ark.cn-beijing.volces.com/api/coding/v3
+#
+# Run:  cd examples/milkie-smoke && petri run
+providers:
+  default: { type: milkie }
+models:
+  doubao:
+    provider: volcengine
+    model: doubao-seed-2-0-pro-260215
+    adapter: openai-compatible
+    # baseUrl omitted on purpose -> falls back to $VOLCENGINE_API_BASE
+defaults:
+  model: doubao
+  gate_strategy: all
+  max_retries: 2
