@@ -13,8 +13,7 @@ import { RunLogger } from "../engine/logger.js";
 import { currentGeneratedHashes, loadGeneratedManifest, sha256 } from "../engine/manifest.js";
 import { acquireLock, releaseLock, killProcessTree } from "../engine/lock.js";
 import { loadBranch, runRootForBranch } from "../engine/branch.js";
-import { PiProvider } from "../providers/pi.js";
-import { ClaudeCodeProvider } from "../providers/claude-code.js";
+import { createProviderFromConfig } from "../util/provider.js";
 import type { AgentProvider, LoadedRole } from "../types.js";
 
 interface RunOptions {
@@ -136,22 +135,8 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     roles[name] = loadRole(rolesBase, name, defaultModel);
   }
 
-  // 5. Create provider based on config
-  const defaultProviderType = Object.values(petriConfig.providers)[0]?.type ?? "pi";
-  let provider: AgentProvider;
-
-  if (defaultProviderType === "claude_code") {
-    provider = new ClaudeCodeProvider(defaultModel);
-  } else {
-    const modelMappings: Record<string, { piProvider: string; piModel: string }> = {};
-    for (const [alias, mc] of Object.entries(petriConfig.models)) {
-      modelMappings[alias] = {
-        piProvider: "anthropic",
-        piModel: mc.model,
-      };
-    }
-    provider = new PiProvider(modelMappings);
-  }
+  // 5. Create provider based on config (claude_code > milkie > pi)
+  const provider: AgentProvider = createProviderFromConfig(cwd);
 
   // 6. Create logger and engine
   const petriDir = runRootForBranch(cwd, opts.branch);

@@ -1,0 +1,9 @@
+name: milkie-smoke
+goal: |
+  Prove the milkie provider works by writing a result file.
+requirements:
+  - wrote-result
+stages:
+  - name: write
+    roles: [writer]
+    max_retries: 2

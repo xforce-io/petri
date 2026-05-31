@@ -1,0 +1,7 @@
+id: wrote-result
+description: result.json exists with done=true
+evidence:
+  path: "{stage}/{role}/result.json"
+  check:
+    field: done
+    equals: true
