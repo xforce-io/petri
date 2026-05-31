@@ -199,7 +199,11 @@ function scanArtifacts(dir: string): string[] {
         } catch {
           return false;
         }
-      });
+      })
+      // Return joined paths, like claude-code.ts: the engine's manifest.collect
+      // does path.relative(baseDir, p), which only yields a correct relative
+      // path for absolute/joined inputs. Bare names resolve against cwd.
+      .map((name) => join(dir, name));
   } catch {
     return [];
   }

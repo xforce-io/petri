@@ -150,9 +150,15 @@ describe("MilkieProvider", () => {
     expect(captured.invokeReq.goal.length).toBeGreaterThan(0);
   });
 
-  it("returns artifacts scanned from the artifact directory", async () => {
+  it("returns artifacts as joined paths under the artifact directory", async () => {
     const result = await provider.createAgent(defaultConfig).run();
-    expect(result.artifacts).toEqual(["result.json", "output.txt"]);
+    // Joined paths (not bare names) so the engine's manifest.collect computes a
+    // correct relative path via path.relative(baseDir, ...). Bare names would
+    // resolve against process.cwd and produce a broken climbing path.
+    expect(result.artifacts).toEqual([
+      "/tmp/test-artifacts/result.json",
+      "/tmp/test-artifacts/output.txt",
+    ]);
   });
 
   it("tallies usage from the wrapped gateway", async () => {

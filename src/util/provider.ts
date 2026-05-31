@@ -27,7 +27,6 @@ export function createProviderFromConfig(projectDir: string): AgentProvider {
         model: modelCfg.model,
         adapter: modelCfg.adapter ?? "openai-compatible",
         baseUrl: modelCfg.baseUrl,
-        options: modelCfg.options,
       };
     }
     return new MilkieProvider(milkieMappings);

@@ -135,9 +135,8 @@ export interface ProviderConfig {
 export interface ModelConfig {
   provider: string;
   model: string;
-  adapter?: string;                    // milkie gateway adapter, e.g. "openai-compatible" | "anthropic"
-  baseUrl?: string;                    // milkie endpoint; falls back to env when omitted
-  options?: Record<string, unknown>;  // passthrough to milkie ModelConfig.options
+  adapter?: string;  // milkie gateway adapter, e.g. "openai-compatible" | "anthropic"
+  baseUrl?: string;  // milkie endpoint; falls back to env when omitted
 }
 
 // --- Runtime ---
