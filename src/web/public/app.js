@@ -274,19 +274,23 @@ async function createProjectFromGlobalPanel() {
     if (errEl) errEl.textContent = "Project name is required.";
     return;
   }
-  // Reuse same fields expected by create API by temporarily setting onboarding inputs if present
-  const nameEl = $("#new-project-name");
-  const tplEl = $("#new-project-template");
-  if (nameEl) nameEl.value = name;
-  if (tplEl) {
-    if (![...tplEl.options].some((o) => o.value === template)) {
-      tplEl.innerHTML += `<option value="${escAttr(template)}">${escHtml(template)}</option>`;
-    }
-    tplEl.value = template;
+  const res = await fetch("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, template }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status !== 201) {
+    // Keep panel open and show error on the global form (issue #26)
+    if (errEl) errEl.textContent = data.error || "Failed to create project";
+    return;
   }
-  await createProjectFromTemplate();
   const panel = $("#global-new-project-panel");
   if (panel) panel.style.display = "none";
+  currentProject = data.name;
+  await loadProjects();
+  switchToTab("runs");
+  loadRunsTab();
 }
 
 async function createProjectFromTemplate() {
