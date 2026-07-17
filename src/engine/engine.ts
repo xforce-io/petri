@@ -489,7 +489,7 @@ export class Engine {
 
     // Snapshot the command's output into the run directory before the gate
     // runs — a gate-rejected run still keeps its output for the lineage.
-    this.snapshotCommandArtifacts(stage.name, artifactDir);
+    const cmdArtifacts = this.snapshotCommandArtifacts(stage.name, artifactDir);
     const durationHint = Date.now() - startedMs;
 
     // The command ran. If it declares a gate, evaluate it against the output.
@@ -508,7 +508,7 @@ export class Engine {
           gatePassed: gateResult.passed,
           gateReason: gateResult.reason,
           attempt: 1,
-          artifacts: [],
+          artifacts: cmdArtifacts,
         });
       }
       this.logger?.logGateResult(stage.name, gateResult.passed, gateResult.reason);
@@ -526,7 +526,7 @@ export class Engine {
         gatePassed: true,
         gateReason: "Command completed (no gate)",
         attempt: 1,
-        artifacts: [],
+        artifacts: cmdArtifacts,
       });
       this.logger?.logGateResult(stage.name, true, "Command completed (no gate)");
     }
@@ -760,11 +760,11 @@ export class Engine {
    * Command stages have no role dimension, so the snapshot directory is
    * just artifacts/{seq}-{stage}/. Mirrors snapshotRoleArtifacts.
    */
-  private snapshotCommandArtifacts(stageName: string, artifactDir: string): void {
-    if (!this.logger) return;
+  private snapshotCommandArtifacts(stageName: string, artifactDir: string): string[] {
+    if (!this.logger) return [];
 
     const files = resolveArtifactFiles(artifactDir, []);
-    if (files.length === 0) return;
+    if (files.length === 0) return [];
 
     const seq = String(++this.artifactSnapshotSeq).padStart(3, "0");
     const snapshotDir = join(
@@ -788,12 +788,15 @@ export class Engine {
     writeFileSync(join(snapshotDir, "_snapshot.json"), JSON.stringify({
       sequence: Number(seq),
       stage: stageName,
+      role: "command",
+      attempt: 1,
       kind: "command",
       source_artifact_dir: artifactDir,
       source_files: files,
       copied_files: copied,
       created_at: new Date().toISOString(),
     }, null, 2), "utf-8");
+    return copied;
   }
 }
 

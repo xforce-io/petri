@@ -1009,5 +1009,12 @@ describe("Engine", () => {
     const snapshot = path.join(logger.runDir, "artifacts", "001-measure", "result.json");
     expect(fs.existsSync(snapshot)).toBe(true);
     expect(JSON.parse(fs.readFileSync(snapshot, "utf-8"))).toEqual({ ok: true });
+    // StageLog must bind snapshot paths for web attempt panels (issue #18)
+    const runLog = JSON.parse(fs.readFileSync(path.join(logger.runDir, "run.json"), "utf-8"));
+    const cmdEntry = runLog.stages.find((s: { role: string }) => s.role === "command");
+    expect(cmdEntry).toBeDefined();
+    expect(Array.isArray(cmdEntry.artifacts)).toBe(true);
+    expect(cmdEntry.artifacts.length).toBeGreaterThan(0);
+    expect(cmdEntry.artifacts.some((a: string) => a.includes("result.json"))).toBe(true);
   });
 });

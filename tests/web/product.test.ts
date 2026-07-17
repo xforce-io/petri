@@ -285,3 +285,17 @@ describe("product web: command stage display (issue #18)", () => {
     expect(appJs).toMatch(/kind === ["']command["']/);
   });
 });
+
+
+describe("product web: command stage evolution label (issue #18)", () => {
+  it("evolution timeline branch labels command role as Command Stage", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    const evoIdx = appJs.indexOf("Prefer evolution view");
+    expect(evoIdx).toBeGreaterThanOrEqual(0);
+    // Evolution branch ends at stages fallback
+    const endIdx = appJs.indexOf("const stages = currentRunData.stages", evoIdx);
+    const evoChunk = appJs.slice(evoIdx, endIdx > evoIdx ? endIdx : evoIdx + 4000);
+    expect(evoChunk).toMatch(/Command Stage/);
+    expect(evoChunk).toMatch(/role === ["']command["']/);
+  });
+});

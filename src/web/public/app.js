@@ -540,7 +540,7 @@ function renderStageList() {
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
-          <div class="stage-meta">${escHtml(s.role || "")}${s.model ? " · " + escHtml(s.model) : ""} · ${formatDuration(s.durationMs)}</div>
+          <div class="stage-meta">${escHtml(s.role === "command" ? "Command Stage" : (s.role || ""))}${s.role === "command" ? "" : (s.model ? " · " + escHtml(s.model) : "")} · ${formatDuration(s.durationMs)}</div>
           ${s.gatePassed === false && s.gateReason ? `<div class="stage-fail-reason">${escHtml(s.gateReason)}</div>` : ""}
         </div>
       </div>`;
@@ -570,7 +570,7 @@ function renderStageList() {
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
-          <div class="stage-meta">${escHtml(s.role === "command" ? "Command Stage" : (s.role || ""))}${modelStr} · ${formatDuration(s.durationMs)}${costStr}${s.role === "command" ? " · command" : ""}</div>
+          <div class="stage-meta">${escHtml(s.role === "command" ? "Command Stage" : (s.role || ""))}${s.role === "command" ? "" : modelStr} · ${formatDuration(s.durationMs)}${costStr}</div>
         </div>
       </div>
     `;
