@@ -4,12 +4,14 @@ import { RunLogger } from "../engine/logger.js";
 import { Engine } from "../engine/engine.js";
 import { createProviderFromConfig } from "../util/provider.js";
 import type { AgentProvider } from "../types.js";
+import { loadBranch, runRootForBranch } from "../engine/branch.js";
 
 export interface StartRunOpts {
   projectDir: string;
   pipelineFile: string;
   input: string;
   activeRuns: Map<string, RunLogger>;
+  branchId?: string;
 }
 
 export interface StartRunResult {
@@ -18,7 +20,7 @@ export interface StartRunResult {
 }
 
 export function startRun(opts: StartRunOpts): StartRunResult {
-  const { projectDir, pipelineFile, input, activeRuns } = opts;
+  const { projectDir, pipelineFile, input, activeRuns, branchId } = opts;
 
   // 1. Load configs
   const petriConfig = loadPetriConfig(projectDir);
@@ -37,9 +39,17 @@ export function startRun(opts: StartRunOpts): StartRunResult {
   // 4. Create provider
   const provider: AgentProvider = createProviderFromConfig(projectDir);
 
-  // 5. Create logger and engine
-  const petriDir = path.join(projectDir, ".petri");
-  const logger = new RunLogger(petriDir, pipelineConfig.name, input, pipelineConfig.goal);
+  // 5. Create logger and engine (branch-scoped petri root when branchId set — issue #19)
+  let branchMeta: { branch_id: string; objective?: string; baseline?: string } | undefined;
+  if (branchId) {
+    branchMeta = loadBranch(projectDir, branchId);
+  }
+  const petriDir = runRootForBranch(projectDir, branchId);
+  const logger = new RunLogger(petriDir, pipelineConfig.name, input, pipelineConfig.goal, {
+    branchId: branchMeta?.branch_id,
+    branchObjective: branchMeta?.objective,
+    branchBaseline: branchMeta?.baseline,
+  });
   const artifactBaseDir = path.join(petriDir, "artifacts");
 
   const engine = new Engine({
