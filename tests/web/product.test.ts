@@ -276,3 +276,65 @@ describe("buildEvolutionView", () => {
     expect(view[0].attempts[1].gatePassed).toBe(true);
   });
 });
+
+
+describe("product web: attempt-bound artifacts (issue #16)", () => {
+  let projectDir: string;
+  let result: ServerResult;
+
+  beforeEach(async () => {
+    projectDir = makeTmpDir();
+    fs.writeFileSync(
+      path.join(projectDir, "petri.yaml"),
+      "providers:\n  default:\n    type: pi\ndefaults:\n  model: test\n  gate_strategy: all\n  max_retries: 1\n",
+    );
+    fs.writeFileSync(path.join(projectDir, "pipeline.yaml"), "name: t\nstages:\n  - name: work\n    roles: [worker]\n");
+    result = await createPetriServer({
+      projectDir,
+      projectDirs: [{ name: path.basename(projectDir), dir: projectDir }],
+      workspaceRoot: path.dirname(projectDir),
+      port: 0,
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => result.server.close(() => resolve()));
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it("S1: lists run snapshot artifacts with attempt metadata", async () => {
+    const runDir = path.join(projectDir, ".petri", "runs", "run-001");
+    const a1 = path.join(runDir, "artifacts", "001-work", "worker");
+    const a2 = path.join(runDir, "artifacts", "002-work", "worker");
+    fs.mkdirSync(a1, { recursive: true });
+    fs.mkdirSync(a2, { recursive: true });
+    fs.writeFileSync(path.join(a1, "out-a.json"), '{"v":1}');
+    fs.writeFileSync(
+      path.join(a1, "_snapshot.json"),
+      JSON.stringify({ sequence: 1, stage: "work", role: "worker", attempt: 1 }),
+    );
+    fs.writeFileSync(path.join(a2, "out-b.json"), '{"v":2}');
+    fs.writeFileSync(
+      path.join(a2, "_snapshot.json"),
+      JSON.stringify({ sequence: 2, stage: "work", role: "worker", attempt: 2 }),
+    );
+    fs.writeFileSync(path.join(runDir, "run.log"), "log");
+
+    const res = await request(result.port, "/api/runs/001/artifacts");
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body) as Array<{ path: string; attempt?: number; stage?: string }>;
+    expect(data.some((x) => x.path.includes("out-a") && x.attempt === 1)).toBe(true);
+    expect(data.some((x) => x.path.includes("out-b") && x.attempt === 2)).toBe(true);
+
+    const file = await request(result.port, "/api/runs/001/artifacts/002-work/worker/out-b.json");
+    expect(file.status).toBe(200);
+    expect(file.body).toContain('"v":2');
+  });
+
+  it("S1: frontend binds I/O log artifacts to attempt helpers", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).toMatch(/filterArtifactsForAttempt/);
+    expect(appJs).toMatch(/filterLogForAttempt/);
+    expect(appJs).toMatch(/resolveAttemptIoPrefix/);
+  });
+});

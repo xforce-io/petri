@@ -14,6 +14,7 @@ import { startRun } from "../runner.js";
 import { listFilesRecursive, filterGeneratedFiles } from "../../util/fs.js";
 import { listPresetTemplates } from "../../templates/list.js";
 import { listProjectPipelines } from "../pipelines.js";
+import type { ArtifactListItem } from "../attempt-artifacts.js";
 
 function handleListTemplates(res: http.ServerResponse): void {
   sendJson(res, 200, listPresetTemplates());
@@ -471,15 +472,42 @@ function handleRunLog(res: http.ServerResponse, projectDir: string, id: string):
   res.end(content);
 }
 
-function handleArtifacts(res: http.ServerResponse, projectDir: string, id: string): void {
-  const artifactsDir = path.join(projectDir, ".petri", "artifacts");
-  if (!fs.existsSync(artifactsDir)) {
-    sendJson(res, 200, []);
-    return;
+function runArtifactsDir(projectDir: string, id: string): string {
+  return path.join(projectDir, ".petri", "runs", `run-${id}`, "artifacts");
+}
+
+function sharedArtifactsDir(projectDir: string): string {
+  return path.join(projectDir, ".petri", "artifacts");
+}
+
+function readSnapshotMeta(
+  snapshotDir: string,
+): { stage?: string; role?: string; attempt?: number; sequence?: number } {
+  const metaPath = path.join(snapshotDir, "_snapshot.json");
+  if (!fs.existsSync(metaPath)) return {};
+  try {
+    const j = JSON.parse(fs.readFileSync(metaPath, "utf-8")) as {
+      stage?: string;
+      role?: string;
+      attempt?: number;
+      sequence?: number;
+    };
+    return {
+      stage: j.stage,
+      role: j.role,
+      attempt: j.attempt,
+      sequence: j.sequence,
+    };
+  } catch {
+    return {};
   }
+}
 
-  const files: Array<{ path: string; size: number }> = [];
-
+function walkArtifactFiles(
+  rootDir: string,
+  relBase: string,
+): ArtifactListItem[] {
+  const files: ArtifactListItem[] = [];
   function walk(dir: string, rel: string): void {
     if (!fs.existsSync(dir)) return;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -489,38 +517,76 @@ function handleArtifacts(res: http.ServerResponse, projectDir: string, id: strin
         walk(entryAbs, entryRel);
       } else {
         const stat = fs.statSync(entryAbs);
-        files.push({ path: entryRel, size: stat.size });
+        // Attach snapshot meta from nearest seq-stage(/role) directory
+        let meta: { stage?: string; role?: string; attempt?: number; sequence?: number } = {};
+        const parts = entryRel.split("/");
+        if (parts.length >= 2) {
+          const snapDir = path.join(rootDir, parts[0], parts[1]);
+          if (fs.existsSync(path.join(snapDir, "_snapshot.json"))) {
+            meta = readSnapshotMeta(snapDir);
+          } else {
+            const snapDir1 = path.join(rootDir, parts[0]);
+            if (fs.existsSync(path.join(snapDir1, "_snapshot.json"))) {
+              meta = readSnapshotMeta(snapDir1);
+            }
+          }
+        }
+        const pathOut = relBase ? `${relBase}/${entryRel}` : entryRel;
+        files.push({ path: pathOut, size: stat.size, ...meta });
       }
     }
   }
+  walk(rootDir, "");
+  return files;
+}
 
-  walk(artifactsDir, "");
-  sendJson(res, 200, files);
+function handleArtifacts(res: http.ServerResponse, projectDir: string, id: string): void {
+  const runDir = runArtifactsDir(projectDir, id);
+  const sharedDir = sharedArtifactsDir(projectDir);
+
+  // Prefer per-run snapshot tree (issue #16); fall back to shared working artifacts
+  if (fs.existsSync(runDir)) {
+    sendJson(res, 200, walkArtifactFiles(runDir, ""));
+    return;
+  }
+  if (!fs.existsSync(sharedDir)) {
+    sendJson(res, 200, []);
+    return;
+  }
+  sendJson(res, 200, walkArtifactFiles(sharedDir, ""));
 }
 
 function handleArtifactFile(
   res: http.ServerResponse,
   projectDir: string,
-  _id: string,
+  id: string,
   filePath: string,
 ): void {
-  const artifactsDir = path.join(projectDir, ".petri", "artifacts");
-  const absPath = path.resolve(artifactsDir, filePath);
-
-  // Path traversal protection
-  if (!absPath.startsWith(artifactsDir)) {
-    sendJson(res, 403, { error: "Forbidden" });
-    return;
+  const candidates: string[] = [];
+  const runDir = runArtifactsDir(projectDir, id);
+  const sharedDir = sharedArtifactsDir(projectDir);
+  // Support paths with optional "artifacts/" prefix from StageLog absolute paths
+  const cleaned = filePath.replace(/^artifacts\//, "");
+  if (fs.existsSync(runDir)) {
+    candidates.push(path.resolve(runDir, cleaned));
+    candidates.push(path.resolve(runDir, filePath));
   }
+  candidates.push(path.resolve(sharedDir, cleaned));
+  candidates.push(path.resolve(sharedDir, filePath));
 
-  if (!fs.existsSync(absPath) || fs.statSync(absPath).isDirectory()) {
-    sendJson(res, 404, { error: "Artifact not found" });
-    return;
+  for (const absPath of candidates) {
+    const root = absPath.startsWith(path.resolve(runDir))
+      ? path.resolve(runDir)
+      : path.resolve(sharedDir);
+    if (!absPath.startsWith(root)) continue;
+    if (fs.existsSync(absPath) && fs.statSync(absPath).isFile()) {
+      const content = fs.readFileSync(absPath, "utf-8");
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(content);
+      return;
+    }
   }
-
-  const content = fs.readFileSync(absPath, "utf-8");
-  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end(content);
+  sendJson(res, 404, { error: "Artifact not found" });
 }
 
 function handleConfigFiles(res: http.ServerResponse, projectDir: string): void {
