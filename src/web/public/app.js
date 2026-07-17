@@ -751,12 +751,20 @@ function connectSSE(runId) {
 
   eventSource = new EventSource(apiUrl("/api/events/" + runId));
   const logEl = $("#log-output");
+  // Dedupe live SSE appends (issue #21) — one UI line per event key / consecutive line
+  let lastSseLine = null;
+  const seenSseKeys = new Set();
 
   eventSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
       const line = formatSSEEvent(data);
-      if (line) {
+      const eventKey = data.id
+        ? "id:" + data.id
+        : [data.type, data.stage, data.role, data.attempt, data.passed, data.status].join("|");
+      if (line && line !== lastSseLine && !seenSseKeys.has(eventKey)) {
+        seenSseKeys.add(eventKey);
+        lastSseLine = line;
         logEl.textContent += "\n" + line;
         logEl.scrollTop = logEl.scrollHeight;
       }
