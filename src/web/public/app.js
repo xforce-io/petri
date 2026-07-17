@@ -166,22 +166,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const newBtn = $("#new-project-btn");
   if (newBtn) newBtn.addEventListener("click", createProjectFromTemplate);
 
-  // Config validate
+  // Config validate — include unsaved editor draft so illegal YAML cannot show success
   const validateBtn = $("#config-validate-btn");
   if (validateBtn) {
-    validateBtn.addEventListener("click", async () => {
-      const res = await api("/api/config/validate", { method: "POST", body: "{}" });
-      const box = $("#config-validate-result");
-      if (!box) return;
-      if (res.status === 200 && res.data?.valid) {
-        box.className = "validate-ok";
-        box.textContent = "Configuration is valid.";
-      } else {
-        box.className = "validate-err";
-        const errs = res.data?.errors || [res.data?.error || "Validation failed"];
-        box.textContent = Array.isArray(errs) ? errs.join("\n") : String(errs);
-      }
-    });
+    validateBtn.addEventListener("click", validateConfigDraft);
+  }
+  const editorEl = $("#editor-content");
+  if (editorEl) {
+    editorEl.addEventListener("input", clearConfigValidateResult);
   }
 
   // Load projects then dashboard
@@ -509,6 +501,13 @@ async function loadRun(runId) {
 
 function renderStageList() {
   const list = $("#stage-list");
+  // Prefer hierarchical Run Trace (issue #15) when present
+  const trace = currentRunData.trace;
+  if (trace && Array.isArray(trace.root) && trace.root.length > 0) {
+    renderTraceTimeline(list, trace);
+    return;
+  }
+
   // Prefer evolution view (stage → attempts) when present
   const evolution = currentRunData.evolution;
   if (Array.isArray(evolution) && evolution.length > 0) {
@@ -874,6 +873,82 @@ function formatSSEEvent(data) {
 let configPipelines = [];
 let selectedConfigPipelineFile = null;
 
+/** Hierarchical Run Trace timeline (Repeat → StageAttempt → Role → Gate). */
+function renderTraceTimeline(list, trace) {
+  const parts = [];
+  for (const node of trace.root) {
+    parts.push(renderTraceNode(node, 0));
+  }
+  list.innerHTML = parts.join("") || '<p class="empty-state">No trace nodes yet.</p>';
+  list.querySelectorAll("[data-trace-id]").forEach((el) => {
+    el.addEventListener("click", () => {
+      list.querySelectorAll("[data-trace-id]").forEach((e) => e.classList.remove("active"));
+      el.classList.add("active");
+      // Select first role under stage attempt for detail panels
+      const stage = el.getAttribute("data-stage");
+      const attempt = el.getAttribute("data-attempt");
+      if (stage && currentRunData && Array.isArray(currentRunData.stages)) {
+        const idx = currentRunData.stages.findIndex(
+          (s) => s.stage === stage && String(s.attempt) === String(attempt || s.attempt),
+        );
+        if (idx >= 0) {
+          currentStageIndex = idx;
+          renderStageDetail(currentRunData.stages[idx]);
+        }
+      }
+    });
+  });
+}
+
+function renderTraceNode(node, depth) {
+  const pad = depth * 12;
+  if (node.kind === "repeat_iteration") {
+    const kids = (node.children || []).map((c) => renderTraceNode(c, depth + 1)).join("");
+    return `<div class="trace-repeat" data-trace-id="${escAttr(node.id)}" style="margin-left:${pad}px">
+      <div class="stage-item trace-repeat-header">
+        <span class="stage-dot ${node.status === "done" ? "passed" : node.status === "running" ? "pending" : "failed"}"></span>
+        <div class="stage-name">Repeat ${escHtml(node.repeatName)} · iteration ${node.iteration}/${node.maxIterations}</div>
+        <div class="stage-meta">${escHtml(node.id)}</div>
+      </div>
+      ${kids}
+    </div>`;
+  }
+  // stage_attempt
+  const roles = (node.roles || [])
+    .map(
+      (r) => `<div class="trace-role" style="margin-left:${pad + 12}px">
+        <span class="stage-dot ${r.gatePassed === true ? "passed" : r.gatePassed === false ? "failed" : "pending"}"></span>
+        <span>${escHtml(r.role)}</span>
+        <span class="stage-meta">${escHtml(r.id)}</span>
+        ${r.gateReason ? `<div class="stage-fail-reason">${escHtml(r.gateReason)}</div>` : ""}
+      </div>`,
+    )
+    .join("");
+  const gate = node.stageGate
+    ? `<div class="trace-stage-gate" style="margin-left:${pad + 12}px">
+        Stage gate [${node.stageGate.passed ? "PASS" : "FAIL"}]${node.stageGate.strategy ? " · " + escHtml(node.stageGate.strategy) : ""}: ${escHtml(node.stageGate.reason || "")}
+        ${(node.stageGate.roleResults || [])
+          .map((rr) => `<div class="stage-meta">${escHtml(rr.role)}: ${rr.passed ? "PASS" : "FAIL"} — ${escHtml(rr.reason || "")}</div>`)
+          .join("")}
+      </div>`
+    : "";
+  const rep =
+    node.repeatName != null
+      ? ` · rep ${escHtml(node.repeatName)} i${node.iteration}`
+      : node.iteration
+        ? ` · i${node.iteration}`
+        : "";
+  return `<div class="trace-attempt" data-trace-id="${escAttr(node.id)}" data-stage="${escAttr(node.stage)}" data-attempt="${escAttr(String(node.attempt))}" style="margin-left:${pad}px">
+    <div class="stage-item">
+      <span class="stage-dot ${node.status === "done" ? "passed" : node.status === "running" ? "pending" : "failed"}"></span>
+      <div class="stage-name">${escHtml(node.stage)} · attempt ${node.attempt}${rep}</div>
+      <div class="stage-meta">${escHtml(node.id)}</div>
+    </div>
+    ${roles}
+    ${gate}
+  </div>`;
+}
+
 async function loadConfigTab() {
   // Project settings always available
   const projBtn = $("#config-project-settings");
@@ -1042,6 +1117,36 @@ async function loadConfigAllFilesTree() {
   });
 }
 
+
+function clearConfigValidateResult() {
+  const box = $("#config-validate-result");
+  if (!box) return;
+  box.textContent = "";
+  box.className = "config-validate-result";
+}
+
+async function validateConfigDraft() {
+  const box = $("#config-validate-result");
+  if (!box) return;
+  const payload = {};
+  if (currentConfigPath) {
+    const editor = $("#editor-content");
+    payload.drafts = { [currentConfigPath]: editor ? editor.value : "" };
+  }
+  const res = await api("/api/config/validate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 200 && res.data?.valid) {
+    box.className = "validate-ok";
+    box.textContent = "Configuration is valid.";
+  } else {
+    box.className = "validate-err";
+    const errs = res.data?.errors || [res.data?.error || "Validation failed"];
+    box.textContent = Array.isArray(errs) ? errs.join("\n") : String(errs);
+  }
+}
+
 async function loadConfigFile(filePath) {
   currentConfigPath = filePath;
   const editor = $("#editor-content");
@@ -1049,6 +1154,7 @@ async function loadConfigFile(filePath) {
   const saveBtn = $("#editor-save-btn");
   const statusEl = $("#editor-status");
 
+  clearConfigValidateResult();
   filenameEl.textContent = filePath;
   statusEl.textContent = "";
   statusEl.className = "editor-status";
