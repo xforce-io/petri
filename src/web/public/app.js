@@ -801,7 +801,6 @@ function formatSSEEvent(data) {
 let configPipelines = [];
 let selectedConfigPipelineFile = null;
 
-async 
 /** Hierarchical Run Trace timeline (Repeat → StageAttempt → Role → Gate). */
 function renderTraceTimeline(list, trace) {
   const parts = [];
@@ -878,7 +877,7 @@ function renderTraceNode(node, depth) {
   </div>`;
 }
 
-function loadConfigTab() {
+async function loadConfigTab() {
   // Project settings always available
   const projBtn = $("#config-project-settings");
   if (projBtn && !projBtn.dataset.bound) {

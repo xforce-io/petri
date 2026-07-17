@@ -352,3 +352,15 @@ describe("product web: run detail structured trace (issue #15)", () => {
     expect(appJs).toMatch(/stageGate|stage_gate|Stage gate/);
   });
 });
+
+
+describe("product web: app.js parseability after trace UI (issue #15)", () => {
+  it("app.js has no orphan async and loadConfigTab is async with await", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).not.toMatch(/^async\s*$/m);
+    expect(appJs).toMatch(/async function loadConfigTab/);
+    // loadConfigTab body uses await
+    const m = appJs.match(/async function loadConfigTab[\s\S]*?\nasync function |async function loadConfigTab[\s\S]*?\nfunction /);
+    expect(appJs).toMatch(/async function loadConfigTab\([\s\S]*?await /);
+  });
+});
