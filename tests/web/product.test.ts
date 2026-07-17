@@ -278,6 +278,14 @@ describe("buildEvolutionView", () => {
   });
 });
 
+describe("product web: command stage display (issue #18)", () => {
+  it("S1: config structure labels Command Stage", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).toMatch(/Command Stage/);
+    expect(appJs).toMatch(/kind === ["']command["']/);
+  });
+});
+
 describe("product web: quality success rate (issue #17)", () => {
   it("S1: app.js uses quality-based success rate helpers", () => {
     const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
@@ -373,6 +381,19 @@ describe("product web: config validate draft overlay (issue #14)", () => {
   });
 });
 
+
+describe("product web: command stage evolution label (issue #18)", () => {
+  it("evolution timeline branch labels command role as Command Stage", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    const evoIdx = appJs.indexOf("Prefer evolution view");
+    expect(evoIdx).toBeGreaterThanOrEqual(0);
+    // Evolution branch ends at stages fallback
+    const endIdx = appJs.indexOf("const stages = currentRunData.stages", evoIdx);
+    const evoChunk = appJs.slice(evoIdx, endIdx > evoIdx ? endIdx : evoIdx + 4000);
+    expect(evoChunk).toMatch(/Command Stage/);
+    expect(evoChunk).toMatch(/role === ["']command["']/);
+  });
+});
 
 describe("product web: non-default pipeline draft validate (issue #14 follow-up)", () => {
   let projectDir: string;

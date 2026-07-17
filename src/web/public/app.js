@@ -571,7 +571,7 @@ function renderStageList() {
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
-          <div class="stage-meta">${escHtml(s.role || "")}${s.model ? " · " + escHtml(s.model) : ""} · ${formatDuration(s.durationMs)}</div>
+          <div class="stage-meta">${escHtml(s.role === "command" ? "Command Stage" : (s.role || ""))}${s.role === "command" ? "" : (s.model ? " · " + escHtml(s.model) : "")} · ${formatDuration(s.durationMs)}</div>
           ${s.gatePassed === false && s.gateReason ? `<div class="stage-fail-reason">${escHtml(s.gateReason)}</div>` : ""}
         </div>
       </div>`;
@@ -601,7 +601,7 @@ function renderStageList() {
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
-          <div class="stage-meta">${escHtml(s.role || "")}${modelStr} · ${formatDuration(s.durationMs)}${costStr}</div>
+          <div class="stage-meta">${escHtml(s.role === "command" ? "Command Stage" : (s.role || ""))}${s.role === "command" ? "" : modelStr} · ${formatDuration(s.durationMs)}${costStr}</div>
         </div>
       </div>
     `;
@@ -1090,6 +1090,16 @@ function selectConfigPipeline(file) {
   </button>`;
 
   for (const stage of pipe.stages || []) {
+    const isCmd = stage.kind === "command" || (!stage.roles?.length && stage.command);
+    if (isCmd) {
+      html += `<div class="config-stage-label">Command Stage: ${escHtml(stage.name)}</div>`;
+      html += `<div class="config-role-block">
+        <div class="config-role-name">command</div>
+        <div class="config-nav-sub">${escHtml(stage.command || "(command)")}</div>
+        <div class="config-nav-sub">${stage.hasGate ? "gate: yes" : "gate: none"}</div>
+      </div>`;
+      continue;
+    }
     html += `<div class="config-stage-label">Stage: ${escHtml(stage.name)}</div>`;
     for (const role of stage.roles || []) {
       const rolePrefix = `roles/${role}`;
