@@ -114,6 +114,10 @@ describe("web branches (issue #19)", () => {
     expect(html).toMatch(/run-branch/);
     expect(app).toMatch(/loadBranches/);
     expect(app).toMatch(/body\.branch/);
+    expect(app).toMatch(/target === "io"\) loadStageIO\(\)/);
+    expect(app).toMatch(/target === "log"\) loadRunLog\(\)/);
+    expect(app).toMatch(/target === "artifacts"\) loadStageArtifacts\(\)/);
+    expect(app).toMatch(/target === "gate"\) renderGateDetail\(\)/);
   });
 
   it("S1: lists artifacts from branch run directory not only project root", async () => {

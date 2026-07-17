@@ -114,6 +114,11 @@ document.addEventListener("DOMContentLoaded", () => {
       $$(".sub-tab-content").forEach((c) => c.classList.remove("active"));
       st.classList.add("active");
       document.getElementById("subtab-" + target)?.classList.add("active");
+
+      if (target === "io") loadStageIO();
+      if (target === "log") loadRunLog();
+      if (target === "artifacts") loadStageArtifacts();
+      if (target === "gate") renderGateDetail();
     });
   });
 
