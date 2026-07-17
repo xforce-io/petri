@@ -20,9 +20,23 @@
     <div id="project-selector" class="project-selector" style="display:none;">
       <label for="project-select" class="project-label">Project</label>
       <select id="project-select"></select>
+      <button type="button" id="header-new-project-btn" class="btn-secondary">New Project</button>
     </div>
   </header>
 
+  <div id="global-new-project-panel" class="onboarding-card" style="display:none; margin: 1rem;">
+    <h3>New project from preset</h3>
+    <p>Copy a preset into this workspace. Existing projects stay available in the selector.</p>
+    <label for="global-new-project-name">Project name</label>
+    <input id="global-new-project-name" type="text" placeholder="my-project" maxlength="64" />
+    <label for="global-new-project-template">Preset</label>
+    <select id="global-new-project-template"></select>
+    <div style="margin-top:0.5rem; display:flex; gap:0.5rem;">
+      <button type="button" id="global-new-project-submit" class="btn-primary">Create project</button>
+      <button type="button" id="global-new-project-cancel" class="btn-secondary">Cancel</button>
+    </div>
+    <div id="global-new-project-error" class="error-msg"></div>
+  </div>
   <div id="global-banner" class="global-banner" style="display:none;" role="alert"></div>
 
   <main>
