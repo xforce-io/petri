@@ -278,6 +278,16 @@ describe("buildEvolutionView", () => {
   });
 });
 
+describe("product web: clear stale run errors (issue #20)", () => {
+  it("S1: clears run-error on input and when re-entering Runs tab", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).toMatch(/syncRunInputError/);
+    expect(appJs).toMatch(/clearRunFormErrorsOnEnter/);
+    expect(appJs).toMatch(/addEventListener\(\s*["']input["']/);
+    expect(appJs).toMatch(/loadRunsTab[\s\S]{0,200}clearRunFormErrorsOnEnter|clearRunFormErrorsOnEnter[\s\S]{0,80}loadRunsTab/);
+  });
+});
+
 describe("product web: command stage display (issue #18)", () => {
   it("S1: config structure labels Command Stage", () => {
     const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
