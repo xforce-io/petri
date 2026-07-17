@@ -362,3 +362,58 @@ describe("product web: config validate draft overlay (issue #14)", () => {
     expect(appJs).toMatch(/addEventListener\(\s*["']input["']/);
   });
 });
+
+
+describe("product web: non-default pipeline draft validate (issue #14 follow-up)", () => {
+  let projectDir: string;
+  let result: ServerResult;
+
+  beforeEach(async () => {
+    projectDir = makeTmpDir();
+    fs.writeFileSync(
+      path.join(projectDir, "petri.yaml"),
+      "providers:\n  default:\n    type: pi\ndefaults:\n  model: test\n  gate_strategy: all\n  max_retries: 1\n",
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "pipeline.yaml"),
+      "name: t\nstages:\n  - name: work\n    roles: [worker]\n  - repeat:\n      name: loop\n      max_iterations: 1\n      until: ok\n      stages:\n        - name: again\n          roles: [worker]\n",
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "pipeline-command.yaml"),
+      "name: cmd\nstages:\n  - name: measure\n    command: \"echo 1\"\n",
+    );
+    fs.mkdirSync(path.join(projectDir, "roles", "worker"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "roles", "worker", "role.yaml"), "persona: soul.md\nplaybooks: []\n");
+    fs.writeFileSync(path.join(projectDir, "roles", "worker", "soul.md"), "W\n");
+    fs.writeFileSync(
+      path.join(projectDir, "roles", "worker", "gate.yaml"),
+      "id: ok\nevidence:\n  path: '{stage}/{role}/out.json'\n  check:\n    field: score\n    gte: 1\n",
+    );
+    result = await createPetriServer({
+      projectDir,
+      projectDirs: [{ name: path.basename(projectDir), dir: projectDir }],
+      workspaceRoot: path.dirname(projectDir),
+      port: 0,
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => result.server.close(() => resolve()));
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it("S1: illegal draft of pipeline-command.yaml fails even when default pipeline is valid", async () => {
+    const res = await request(
+      result.port,
+      "/api/config/validate",
+      "POST",
+      JSON.stringify({ drafts: { "pipeline-command.yaml": "name: [\nbad" } }),
+    );
+    expect(res.status).toBe(400);
+    const data = JSON.parse(res.body);
+    expect(data.valid).toBe(false);
+    expect(data.errors.join("\n")).toMatch(/pipeline-command|YAML|syntax|bad|parse/i);
+    // default pipeline on disk unchanged
+    expect(fs.readFileSync(path.join(projectDir, "pipeline.yaml"), "utf-8")).toContain("name: t");
+  });
+});

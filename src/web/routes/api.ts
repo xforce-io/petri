@@ -568,11 +568,18 @@ async function handleConfigValidate(
 }
 
 function copyConfigTree(srcDir: string, destDir: string): void {
-  for (const name of ["petri.yaml", "pipeline.yaml"]) {
-    const src = path.join(srcDir, name);
-    if (fs.existsSync(src) && fs.statSync(src).isFile()) {
-      fs.copyFileSync(src, path.join(destDir, name));
+  // Copy petri.yaml + every pipeline*.yaml so non-default pipelines can be validated
+  try {
+    for (const name of fs.readdirSync(srcDir)) {
+      if (name === "petri.yaml" || /^pipeline.*\.ya?ml$/i.test(name)) {
+        const src = path.join(srcDir, name);
+        if (fs.statSync(src).isFile()) {
+          fs.copyFileSync(src, path.join(destDir, name));
+        }
+      }
     }
+  } catch {
+    /* ignore */
   }
   const rolesSrc = path.join(srcDir, "roles");
   if (fs.existsSync(rolesSrc) && fs.statSync(rolesSrc).isDirectory()) {
@@ -588,15 +595,32 @@ export function validateProjectWithDrafts(
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "petri-validate-draft-"));
   try {
     copyConfigTree(projectDir, tmp);
+    // Syntax-check every YAML draft first so illegal drafts never report success
+    const yamlErrors: string[] = [];
     for (const [rel, content] of Object.entries(drafts)) {
       if (!isPathSafe(tmp, rel)) {
         return { valid: false, errors: [`Forbidden draft path: ${rel}`] };
+      }
+      if (rel.endsWith(".yaml") || rel.endsWith(".yml")) {
+        try {
+          parseYaml(content);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Invalid YAML";
+          yamlErrors.push(`${rel}: YAML syntax error: ${message}`);
+        }
       }
       const abs = path.resolve(tmp, rel);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs, content, "utf-8");
     }
-    return validateProject(tmp);
+    if (yamlErrors.length > 0) {
+      return { valid: false, errors: yamlErrors };
+    }
+    // Prefer validating the pipeline file present in drafts (non-default pipelines)
+    const draftPipe =
+      Object.keys(drafts).find((p) => /^pipeline.*\.ya?ml$/i.test(path.basename(p))) ??
+      "pipeline.yaml";
+    return validateProject(tmp, draftPipe);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
