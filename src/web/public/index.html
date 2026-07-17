@@ -87,6 +87,11 @@
         <div class="runs-new">
           <h3>Start New Run</h3>
           <div class="new-run-form">
+            <label for="run-branch">Branch</label>
+            <select id="run-branch">
+              <option value="">(default project runs)</option>
+            </select>
+            <p id="run-branch-meta" class="config-nav-sub"></p>
             <label for="run-pipeline">Pipeline</label>
             <select id="run-pipeline"></select>
             <label for="run-input">Input</label>
@@ -139,10 +144,10 @@
             <div id="subtab-io" class="sub-tab-content active">
               <div class="io-section">
                 <div class="io-block">
-                  <div class="io-header" id="io-prompt-toggle">
+                  <button type="button" class="io-header" id="io-prompt-toggle" aria-expanded="true" aria-controls="io-prompt">
                     <span class="io-label">Prompt (Input)</span>
                     <span class="io-toggle">&#9660;</span>
-                  </div>
+                  </button>
                   <div id="io-prompt" class="io-content io-markdown">Select a stage to view agent I/O.</div>
                 </div>
                 <div class="io-block">
@@ -220,25 +225,25 @@
       </p>
       <!-- Step Indicator Bar -->
       <div class="step-bar">
-        <div class="step-item active" data-step="1">
+        <button type="button" class="step-item active" data-step="1">
           <div class="step-number">1</div>
           <div class="step-label">Describe / AI generate</div>
-        </div>
+        </button>
         <div class="step-line"></div>
-        <div class="step-item" data-step="2">
+        <button type="button" class="step-item" data-step="2">
           <div class="step-number">2</div>
           <div class="step-label">Generate</div>
-        </div>
+        </button>
         <div class="step-line"></div>
-        <div class="step-item" data-step="3">
+        <button type="button" class="step-item" data-step="3">
           <div class="step-number">3</div>
           <div class="step-label">Review</div>
-        </div>
+        </button>
         <div class="step-line"></div>
-        <div class="step-item" data-step="4">
+        <button type="button" class="step-item" data-step="4">
           <div class="step-number">4</div>
           <div class="step-label">Run</div>
-        </div>
+        </button>
       </div>
 
       <!-- Step 1: Choose -->

@@ -8,6 +8,7 @@ let currentRunData = null;
 let currentStageIndex = -1;
 let eventSource = null;
 let currentConfigPath = null;
+let currentBranch = ""; // empty = project default runs
 
 // Create tab wizard state
 let wizard = {
@@ -20,11 +21,49 @@ let wizard = {
   templates: [],
 };
 
+// ── Execution vs quality status (issue #17) ──
+function computeRunStatuses(run) {
+  const st = run && run.status;
+  let executionStatus = "unknown";
+  if (st === "running") executionStatus = "running";
+  else if (st === "done" || st === "blocked") executionStatus = "completed";
+
+  let qualityStatus = "unknown";
+  if (st === "running") qualityStatus = "pending";
+  else if (st === "blocked") qualityStatus = "failed";
+  else if (st === "done") {
+    const reqs = run.requirements;
+    if (Array.isArray(reqs) && reqs.length > 0) {
+      qualityStatus = reqs.every((r) => r.met) ? "passed" : "failed";
+    } else {
+      qualityStatus = "passed";
+    }
+  }
+  return {
+    executionStatus,
+    qualityStatus,
+    qualityPassed: qualityStatus === "passed",
+  };
+}
+
+function computeSuccessRate(runs) {
+  if (!runs.length) return 0;
+  const passed = runs.filter((r) => computeRunStatuses(r).qualityPassed).length;
+  return Math.round((passed / runs.length) * 100);
+}
+
 // ── API Helper ──
 function apiUrl(urlPath) {
-  if (!currentProject) return urlPath;
-  const sep = urlPath.includes("?") ? "&" : "?";
-  return urlPath + sep + "project=" + encodeURIComponent(currentProject);
+  let out = urlPath;
+  if (currentProject) {
+    const sep = out.includes("?") ? "&" : "?";
+    out = out + sep + "project=" + encodeURIComponent(currentProject);
+  }
+  if (currentBranch) {
+    const sep = out.includes("?") ? "&" : "?";
+    out = out + sep + "branch=" + encodeURIComponent(currentBranch);
+  }
+  return out;
 }
 
 async function api(urlPath, opts = {}) {
@@ -106,11 +145,21 @@ document.addEventListener("DOMContentLoaded", () => {
       $$(".sub-tab-content").forEach((c) => c.classList.remove("active"));
       st.classList.add("active");
       document.getElementById("subtab-" + target)?.classList.add("active");
+
+      if (target === "io") loadStageIO();
+      if (target === "log") loadRunLog();
+      if (target === "artifacts") loadStageArtifacts();
+      if (target === "gate") renderGateDetail();
     });
   });
 
   // Run button
   $("#run-start-btn").addEventListener("click", startNewRun);
+  const runInput = $("#run-input");
+  if (runInput && !runInput.dataset.errorClearBound) {
+    runInput.dataset.errorClearBound = "1";
+    runInput.addEventListener("input", syncRunInputError);
+  }
 
   // Save button
   $("#editor-save-btn").addEventListener("click", saveConfigFile);
@@ -157,8 +206,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.target.closest("#io-prompt-toggle")) {
       const el = $("#io-prompt");
       el.classList.toggle("collapsed");
-      const toggle = e.target.closest("#io-prompt-toggle").querySelector(".io-toggle");
-      if (toggle) toggle.textContent = el.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
+      const btn = e.target.closest("#io-prompt-toggle");
+      const toggle = btn.querySelector(".io-toggle");
+      const collapsed = el.classList.contains("collapsed");
+      if (toggle) toggle.textContent = collapsed ? "\u25B6" : "\u25BC";
+      if (btn && btn.setAttribute) btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
     }
   });
 
@@ -166,22 +218,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const newBtn = $("#new-project-btn");
   if (newBtn) newBtn.addEventListener("click", createProjectFromTemplate);
 
-  // Config validate
+  // Config validate — include unsaved editor draft so illegal YAML cannot show success
   const validateBtn = $("#config-validate-btn");
   if (validateBtn) {
-    validateBtn.addEventListener("click", async () => {
-      const res = await api("/api/config/validate", { method: "POST", body: "{}" });
-      const box = $("#config-validate-result");
-      if (!box) return;
-      if (res.status === 200 && res.data?.valid) {
-        box.className = "validate-ok";
-        box.textContent = "Configuration is valid.";
-      } else {
-        box.className = "validate-err";
-        const errs = res.data?.errors || [res.data?.error || "Validation failed"];
-        box.textContent = Array.isArray(errs) ? errs.join("\n") : String(errs);
-      }
-    });
+    validateBtn.addEventListener("click", validateConfigDraft);
+  }
+  const editorEl = $("#editor-content");
+  if (editorEl) {
+    editorEl.addEventListener("input", clearConfigValidateResult);
   }
 
   // Load projects then dashboard
@@ -298,10 +342,10 @@ async function loadDashboard() {
   const runs = (res.status === 200 && Array.isArray(res.data)) ? res.data : [];
 
   const total = runs.length;
-  const done = runs.filter((r) => r.status === "done").length;
   const running = runs.filter((r) => r.status === "running").length;
   const totalCost = runs.reduce((sum, r) => sum + (r.totalUsage?.costUsd || 0), 0);
-  const successRate = total > 0 ? Math.round((done / total) * 100) : 0;
+  const successRate = computeSuccessRate(runs);
+  const completed = runs.filter((r) => computeRunStatuses(r).executionStatus === "completed").length;
 
   $("#stats-cards").innerHTML = `
     <div class="stat-card">
@@ -311,6 +355,7 @@ async function loadDashboard() {
     <div class="stat-card">
       <div class="stat-value stat-success">${successRate}%</div>
       <div class="stat-label">Success Rate</div>
+      <div class="stat-sub">Quality passed · ${completed} completed</div>
     </div>
     <div class="stat-card">
       <div class="stat-value">${running}</div>
@@ -320,11 +365,14 @@ async function loadDashboard() {
       <div class="stat-value">${formatCost(totalCost)}</div>
       <div class="stat-label">Total Cost</div>
     </div>
-    <div class="stat-card stat-card-action" onclick="switchToTab('runs');">
+    <button type="button" class="stat-card stat-card-action" id="home-start-run-btn">
       <div class="stat-value">▶</div>
       <div class="stat-label">Start a Run</div>
-    </div>
+    </button>
   `;
+  const startRunBtn = $("#home-start-run-btn");
+  if (startRunBtn) startRunBtn.addEventListener("click", () => switchToTab("runs"));
+
 
   const sorted = runs.slice().sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
   const recent = sorted.slice(0, 10);
@@ -336,7 +384,17 @@ async function loadDashboard() {
     $("#overview-runs-table").style.display = "table";
     tbody.innerHTML = recent.map((r) => renderRunRow(r)).join("");
     tbody.querySelectorAll("tr").forEach((row) => {
-      row.addEventListener("click", () => openRunDetail(row.dataset.runid));
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-label", "Open run " + row.dataset.runid);
+      const open = () => openRunDetail(row.dataset.runid);
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          open();
+        }
+      });
     });
   } else {
     emptyMsg.style.display = "";
@@ -386,16 +444,76 @@ function openRunDetail(runId) {
   loadRun(runId);
 }
 
+async function loadBranches() {
+  const sel = $("#run-branch");
+  if (!sel) return;
+  const res = await api("/api/branches");
+  const prev = currentBranch;
+  sel.innerHTML = '<option value="">(default project runs)</option>';
+  if (res.status === 200 && Array.isArray(res.data)) {
+    for (const b of res.data) {
+      const id = b.branch_id || b.id;
+      sel.innerHTML += `<option value="${escAttr(id)}">${escHtml(id)}</option>`;
+    }
+  }
+  if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  else sel.value = "";
+  currentBranch = sel.value || "";
+  updateBranchMeta();
+  if (!sel.dataset.bound) {
+    sel.dataset.bound = "1";
+    sel.addEventListener("change", () => {
+      currentBranch = sel.value || "";
+      updateBranchMeta();
+      // reload run list for this branch context
+      if (!currentRunId) loadRunsTab();
+    });
+  }
+}
+
+function updateBranchMeta() {
+  const meta = $("#run-branch-meta");
+  if (!meta) return;
+  if (!currentBranch) {
+    meta.textContent = "Runs use project .petri/runs (no branch).";
+    return;
+  }
+  // Fetch branches again for meta - cache from options only
+  meta.textContent = "Branch: " + currentBranch + " · runs under .petri/branches/" + currentBranch + "/runs";
+  api("/api/branches").then((res) => {
+    if (res.status !== 200 || !Array.isArray(res.data)) return;
+    const b = res.data.find((x) => x.branch_id === currentBranch);
+    if (!b) return;
+    const parts = [`Branch: ${b.branch_id}`];
+    if (b.objective) parts.push("objective: " + b.objective);
+    if (b.baseline) parts.push("baseline: " + b.baseline);
+    meta.textContent = parts.join(" · ");
+  });
+}
+
 async function loadRunsTab() {
+  clearRunFormErrorsOnEnter();
+  await loadBranches();
+
   // Make sure we're on list view
   if (currentRunId) return; // detail view is showing, don't overwrite
 
   // Populate pipeline dropdown from GET /api/pipelines:
   // value = file path (engine), label = logical name (YAML name:)
   const pipelineSelect = $("#run-pipeline");
+  // Ensure input hint container exists (issue #23)
+  let inputHint = $("#run-input-hint");
+  if (!inputHint && $("#run-input")) {
+    inputHint = document.createElement("p");
+    inputHint.id = "run-input-hint";
+    inputHint.className = "config-nav-sub";
+    $("#run-input").parentElement?.insertBefore(inputHint, $("#run-input").nextSibling);
+  }
+
   const pipesRes = await api("/api/pipelines");
   if (pipesRes.status === 200 && Array.isArray(pipesRes.data) && pipesRes.data.length > 0) {
     const pipes = pipesRes.data;
+    runPipelineMeta = pipes;
     const nameCount = {};
     for (const p of pipes) nameCount[p.name] = (nameCount[p.name] || 0) + 1;
     pipelineSelect.innerHTML = pipes
@@ -410,6 +528,11 @@ async function loadRunsTab() {
   } else {
     pipelineSelect.innerHTML = '<option value="">No pipelines found</option>';
   }
+  updateRunInputHint();
+  if (!pipelineSelect.dataset.hintBound) {
+    pipelineSelect.dataset.hintBound = "1";
+    pipelineSelect.addEventListener("change", updateRunInputHint);
+  }
 
   // Load run history
   const runsRes = await api("/api/runs");
@@ -422,7 +545,17 @@ async function loadRunsTab() {
     $("#runs-table").style.display = "table";
     tbody.innerHTML = runs.map((r) => renderRunRow(r)).join("");
     tbody.querySelectorAll("tr").forEach((row) => {
-      row.addEventListener("click", () => openRunDetail(row.dataset.runid));
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-label", "Open run " + row.dataset.runid);
+      const open = () => openRunDetail(row.dataset.runid);
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          open();
+        }
+      });
     });
   } else {
     emptyMsg.style.display = "block";
@@ -445,6 +578,48 @@ function renderRunRow(r) {
   `;
 }
 
+let runPipelineMeta = [];
+
+function updateRunInputHint() {
+  const hint = $("#run-input-hint");
+  const sel = $("#run-pipeline");
+  if (!hint || !sel) return;
+  const meta = runPipelineMeta.find((p) => p.file === sel.value) || runPipelineMeta[0];
+  if (!meta) {
+    hint.textContent = "Input priority: explicit Input → .petri/goal.md → pipeline.goal";
+    return;
+  }
+  const parts = [];
+  if (meta.inputDescription) parts.push("Input: " + meta.inputDescription);
+  if (meta.goal) parts.push("Pipeline goal available (used if Input empty)");
+  parts.push("Priority: explicit Input → .petri/goal.md → pipeline.goal");
+  hint.textContent = parts.join(" · ");
+}
+
+function syncRunInputError() {
+  const errorEl = $("#run-error");
+  const inputEl = $("#run-input");
+  if (!errorEl || !inputEl) return;
+  const val = inputEl.value.trim();
+  // Clear stale required error once input is non-empty (issue #20)
+  if (val && errorEl.textContent.includes("required")) {
+    errorEl.textContent = "";
+  }
+  // When empty, do not show error until user submits — keep consistent re-entry
+  if (!val && errorEl.textContent.includes("required")) {
+    // leave until submit; re-entry clears below
+  }
+}
+
+function clearRunFormErrorsOnEnter() {
+  const errorEl = $("#run-error");
+  const inputEl = $("#run-input");
+  if (!errorEl || !inputEl) return;
+  // Re-entering Runs: error must match current value
+  if (inputEl.value.trim()) errorEl.textContent = "";
+  else errorEl.textContent = ""; // never keep stale error from prior visit
+}
+
 async function startNewRun() {
   const btn = $("#run-start-btn");
   const errorEl = $("#run-error");
@@ -452,13 +627,13 @@ async function startNewRun() {
   const input = $("#run-input").value.trim();
 
   errorEl.textContent = "";
-  if (!input) { errorEl.textContent = "Input is required."; return; }
-
+  // Explicit input optional when goal.md or pipeline.goal exists (issue #23)
   btn.disabled = true;
   btn.textContent = "Starting...";
 
-  const body = { input };
+  const body = { input: input || "" };
   if (pipeline) body.pipeline = pipeline;
+  if (currentBranch) body.branch = currentBranch;
 
   const res = await api("/api/runs", {
     method: "POST",
@@ -509,6 +684,13 @@ async function loadRun(runId) {
 
 function renderStageList() {
   const list = $("#stage-list");
+  // Prefer hierarchical Run Trace (issue #15) when present
+  const trace = currentRunData.trace;
+  if (trace && Array.isArray(trace.root) && trace.root.length > 0) {
+    renderTraceTimeline(list, trace);
+    return;
+  }
+
   // Prefer evolution view (stage → attempts) when present
   const evolution = currentRunData.evolution;
   if (Array.isArray(evolution) && evolution.length > 0) {
@@ -536,14 +718,14 @@ function renderStageList() {
       const dotClass = s.gatePassed === true ? "passed" : s.gatePassed === false ? "failed" : "pending";
       const attemptStr = s.attempt ? ` · attempt ${s.attempt}` : "";
       return `
-      <div class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
+      <button type="button" class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
-          <div class="stage-meta">${escHtml(s.role || "")}${s.model ? " · " + escHtml(s.model) : ""} · ${formatDuration(s.durationMs)}</div>
+          <div class="stage-meta">${escHtml(s.role === "command" ? "Command Stage" : (s.role || ""))}${s.role === "command" ? "" : (s.model ? " · " + escHtml(s.model) : "")} · ${formatDuration(s.durationMs)}</div>
           ${s.gatePassed === false && s.gateReason ? `<div class="stage-fail-reason">${escHtml(s.gateReason)}</div>` : ""}
         </div>
-      </div>`;
+      </button>`;
     }).join("");
     list.querySelectorAll(".stage-item").forEach((el) => {
       el.addEventListener("click", () => selectStage(parseInt(el.dataset.index, 10)));
@@ -566,13 +748,13 @@ function renderStageList() {
     const modelStr = s.model ? ` · ${s.model}` : "";
     const attemptStr = s.attempt ? ` · attempt ${s.attempt}` : "";
     return `
-      <div class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
+      <button type="button" class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
-          <div class="stage-meta">${escHtml(s.role || "")}${modelStr} · ${formatDuration(s.durationMs)}${costStr}</div>
+          <div class="stage-meta">${escHtml(s.role === "command" ? "Command Stage" : (s.role || ""))}${s.role === "command" ? "" : modelStr} · ${formatDuration(s.durationMs)}${costStr}</div>
         </div>
-      </div>
+      </button>
     `;
   }).join("");
 
@@ -584,18 +766,32 @@ function renderStageList() {
 function renderRunSummary() {
   const r = currentRunData;
   const usage = r.totalUsage || {};
-  const statusClass = r.status === "done" ? "stat-success" : r.status === "blocked" ? "stat-danger" : "";
+  const { executionStatus, qualityStatus } = computeRunStatuses(r);
+  const execClass = executionStatus === "completed" ? "" : executionStatus === "running" ? "stat-pending" : "";
+  const qualityClass =
+    qualityStatus === "passed" ? "stat-success" : qualityStatus === "failed" ? "stat-danger" : "";
   const blockedHtml =
     r.status === "blocked" && (r.blockedReason || r.blockedStage)
       ? `<div class="blocked-banner"><span class="label">Blocked:</span> ${escHtml(r.blockedStage || "")}${r.blockedStage && r.blockedReason ? " — " : ""}${escHtml(r.blockedReason || "unknown reason")}</div>`
       : "";
+  const reqs = Array.isArray(r.requirements) ? r.requirements : [];
+  const reqHtml = reqs.length
+    ? `<div class="requirements-summary"><span class="label">Requirements:</span> ${
+        reqs.map((x) => `<span class="${x.met ? "stat-success" : "stat-danger"}">${escHtml(x.id || "?")}: ${x.met ? "met" : "unmet"}${x.reason ? ` — ${escHtml(x.reason)}` : ""}</span>`).join(" · ")
+      }</div>`
+    : "";
   $("#run-summary").innerHTML = `
     <div><span class="label">Pipeline:</span> ${escHtml(r.pipeline)}</div>
-    <div><span class="label">Status:</span> <span class="${statusClass}">${escHtml(r.status)}</span></div>
+    ${r.branchId ? `<div><span class="label">Branch:</span> ${escHtml(r.branchId)}</div>` : ""}
+    <div><span class="label">Execution:</span> <span class="${execClass}">${escHtml(executionStatus)}</span> <span class="stage-meta">(${escHtml(r.status || "")})</span></div>
+    <div><span class="label">Quality:</span> <span class="${qualityClass}">${escHtml(qualityStatus)}</span></div>
+    <div><span class="label">Goal:</span> ${escHtml(r.goal || "(none)")}</div>
+    <div><span class="label">Input:</span> <pre class="run-input-preview">${escHtml((r.input || "").slice(0, 500))}${(r.input || "").length > 500 ? "…" : ""}</pre></div>
     <div><span class="label">Started:</span> ${formatDate(r.startedAt)}</div>
     <div><span class="label">Duration:</span> ${formatDuration(r.durationMs)}</div>
     <div><span class="label">Tokens:</span> ${(usage.inputTokens || 0) + (usage.outputTokens || 0)}</div>
     <div><span class="label">Cost:</span> ${formatCost(usage.costUsd)}</div>
+    ${reqHtml}
     ${blockedHtml}
   `;
 }
@@ -615,6 +811,22 @@ function currentStageEntry() {
   return currentRunData?.stages?.[currentStageIndex];
 }
 
+/** Prefer snapshot paths recorded on the selected attempt (issue #16). */
+function resolveAttemptIoPrefix(stage) {
+  const arts = stage.artifacts || [];
+  for (const raw of arts) {
+    const p = String(raw).replace(/\\/g, "/");
+    const idx = p.lastIndexOf("/artifacts/");
+    const rel = idx >= 0 ? p.slice(idx + "/artifacts/".length) : p;
+    if (/^\d+-/.test(rel) || rel.includes("/")) {
+      const parts = rel.split("/").filter(Boolean);
+      if (parts.length >= 2) return parts.slice(0, 2).join("/");
+      if (parts.length === 1) return parts[0];
+    }
+  }
+  return stage.stage + "/" + (stage.role || "");
+}
+
 async function loadStageIO() {
   const promptEl = $("#io-prompt");
   const resultEl = $("#io-result");
@@ -626,25 +838,66 @@ async function loadStageIO() {
     return;
   }
 
-  const prefix = stage.stage + "/" + (stage.role || "");
+  const prefix = resolveAttemptIoPrefix(stage);
 
-  // Load prompt (_prompt.md)
+  // Load prompt (_prompt.md) from attempt snapshot when available
   const promptRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_prompt.md");
   if (promptRes.status === 200 && promptRes.data) {
     promptEl.innerHTML = DOMPurify.sanitize(marked.parse(promptRes.data));
     promptEl.classList.add("collapsed");
   } else {
-    promptEl.textContent = "(No prompt saved for this stage — available in future runs)";
+    promptEl.textContent = "(No prompt saved for this attempt — available when snapshot includes _prompt.md)";
     promptEl.classList.remove("collapsed");
   }
 
-  // Load result (_result.md)
   const resultRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_result.md");
   if (resultRes.status === 200 && resultRes.data) {
     resultEl.innerHTML = DOMPurify.sanitize(marked.parse(resultRes.data));
   } else {
-    resultEl.textContent = "(No result saved for this stage — available in future runs)";
+    resultEl.textContent = "(No result saved for this attempt — available when snapshot includes _result.md)";
   }
+}
+
+/** Filter run.log to the selected stage attempt only (issue #16). */
+function filterLogForAttempt(logText, stage) {
+  const lines = logText.split("\n");
+  const filtered = [];
+  let inAttempt = false;
+  const stageHeader = `Stage "${stage.stage}"`;
+  const attemptMarker =
+    stage.attempt != null && stage.attempt > 0
+      ? `Stage "${stage.stage}" attempt ${stage.attempt}/`
+      : null;
+  const stagePrefix = `  ${stage.stage}/`;
+
+  for (const line of lines) {
+    if (line.includes(stageHeader) && line.includes(" attempt ")) {
+      inAttempt = attemptMarker ? line.includes(attemptMarker) : true;
+      if (inAttempt) filtered.push(line);
+      continue;
+    }
+    if (line.includes(stageHeader) && !attemptMarker) {
+      inAttempt = true;
+      filtered.push(line);
+      continue;
+    }
+    if (inAttempt) {
+      if (line.match(/\] Stage "/)) {
+        inAttempt = false;
+        if (line.includes(stageHeader) && attemptMarker && line.includes(attemptMarker)) {
+          inAttempt = true;
+          filtered.push(line);
+        }
+        continue;
+      }
+      if (line.includes(stagePrefix) || line.includes("  Gate [") || line.includes("  artifacts:")) {
+        filtered.push(line);
+      }
+    }
+  }
+  return filtered.length > 0
+    ? filtered.join("\n")
+    : `No log entries for stage "${stage.stage}"${stage.attempt ? ` attempt ${stage.attempt}` : ""}.`;
 }
 
 async function loadRunLog() {
@@ -660,25 +913,48 @@ async function loadRunLog() {
     return;
   }
 
-  // Filter log lines relevant to the selected stage
-  const lines = res.data.split("\n");
-  const filtered = [];
-  let inStage = false;
-  const stageHeader = `Stage "${stage.stage}"`;
-  const stagePrefix = `  ${stage.stage}/`;
+  $("#log-output").textContent = filterLogForAttempt(res.data, stage);
+}
 
-  for (const line of lines) {
-    if (line.includes(stageHeader)) {
-      inStage = true;
-      filtered.push(line);
-    } else if (inStage && (line.includes(stagePrefix) || line.includes("  Gate [") || line.includes("  artifacts:"))) {
-      filtered.push(line);
-    } else if (inStage && line.match(/\] Stage "/) && !line.includes(stageHeader)) {
-      inStage = false;
-    }
+/** Filter artifact list to the selected attempt using snapshot metadata (issue #16). */
+function filterArtifactsForAttempt(artifacts, stage) {
+  if (!stage) return artifacts;
+  const attempt = stage.attempt;
+  const role = stage.role;
+  // Prefer explicit attempt metadata from run snapshots
+  if (attempt != null && attempt > 0) {
+    const exact = artifacts.filter(
+      (a) => a.stage === stage.stage && a.attempt === attempt && (!role || !a.role || a.role === role),
+    );
+    if (exact.length > 0) return exact;
   }
-
-  $("#log-output").textContent = filtered.length > 0 ? filtered.join("\n") : `No log entries for stage "${stage.stage}".`;
+  // Prefer paths recorded on the StageLog entry for this attempt
+  if (Array.isArray(stage.artifacts) && stage.artifacts.length > 0) {
+    const norms = stage.artifacts.map((p) => String(p).replace(/\\/g, "/"));
+    const matched = artifacts.filter((a) => {
+      const ap = a.path.replace(/\\/g, "/");
+      return norms.some((n) => n.endsWith(ap) || n.includes(ap) || ap.includes(n.split("/artifacts/").pop() || "___"));
+    });
+    if (matched.length > 0) return matched;
+  }
+  // Path fallback: {seq}-{stage}/{role}/
+  const pathMatched = artifacts.filter((a) => {
+    const p = a.path.replace(/\\/g, "/");
+    if (a.stage && a.stage !== stage.stage) return false;
+    if (a.attempt != null && attempt != null && attempt > 0 && a.attempt !== attempt) return false;
+    const m = p.match(/^(\d+)-([^/]+)\/([^/]+)\//);
+    if (m) {
+      if (m[2] !== stage.stage) return false;
+      if (role && m[3] !== role) return false;
+      return true;
+    }
+    if (p.startsWith(stage.stage + "/")) {
+      if (role && !p.startsWith(stage.stage + "/" + role)) return false;
+      return true;
+    }
+    return false;
+  });
+  return pathMatched.length > 0 ? pathMatched : [];
 }
 
 async function loadStageArtifacts() {
@@ -692,18 +968,18 @@ async function loadStageArtifacts() {
   }
 
   const stage = currentStageEntry();
-  let artifacts = res.data;
-  if (stage) {
-    const prefix = stage.stage + "/" + (stage.role || "");
-    const filtered = artifacts.filter((a) => a.path.startsWith(prefix));
-    if (filtered.length > 0) artifacts = filtered;
+  const artifacts = filterArtifactsForAttempt(res.data, stage);
+
+  if (artifacts.length === 0) {
+    container.innerHTML = '<p class="empty-state">No artifacts for this attempt.</p>';
+    return;
   }
 
   container.innerHTML = artifacts.map((a) => `
-    <div class="artifact-item" data-path="${escAttr(a.path)}">
+    <button type="button" class="artifact-item" data-path="${escAttr(a.path)}">
       <span>${escHtml(a.path)}</span>
       <span class="artifact-size">${formatSize(a.size)}</span>
-    </div>
+    </button>
   `).join("");
 
   container.querySelectorAll(".artifact-item").forEach((el) => {
@@ -751,12 +1027,34 @@ function connectSSE(runId) {
 
   eventSource = new EventSource(apiUrl("/api/events/" + runId));
   const logEl = $("#log-output");
+  // Dedupe live SSE appends (issue #21): consecutive identical lines + structured keys
+  // that include iteration/repeatName so Repeat loops reusing attempt # are kept.
+  let lastSseLine = null;
+  const seenSseKeys = new Set();
+  let sseSeq = 0;
 
   eventSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
       const line = formatSSEEvent(data);
-      if (line) {
+      sseSeq += 1;
+      const key = data.id
+        ? "id:" + data.id
+        : [
+            data.type,
+            data.stage,
+            data.role,
+            data.attempt,
+            data.passed,
+            data.status,
+            data.iteration != null ? data.iteration : "",
+            data.repeatName != null ? data.repeatName : "",
+            // Without iteration/id, use monotonic seq so later repeat rounds survive
+            data.iteration != null || data.id ? "" : "s" + sseSeq,
+          ].join("|");
+      if (line && line !== lastSseLine && !seenSseKeys.has(key)) {
+        seenSseKeys.add(key);
+        lastSseLine = line;
         logEl.textContent += "\n" + line;
         logEl.scrollTop = logEl.scrollHeight;
       }
@@ -793,6 +1091,82 @@ function formatSSEEvent(data) {
 
 let configPipelines = [];
 let selectedConfigPipelineFile = null;
+
+/** Hierarchical Run Trace timeline (Repeat → StageAttempt → Role → Gate). */
+function renderTraceTimeline(list, trace) {
+  const parts = [];
+  for (const node of trace.root) {
+    parts.push(renderTraceNode(node, 0));
+  }
+  list.innerHTML = parts.join("") || '<p class="empty-state">No trace nodes yet.</p>';
+  list.querySelectorAll("[data-trace-id]").forEach((el) => {
+    el.addEventListener("click", () => {
+      list.querySelectorAll("[data-trace-id]").forEach((e) => e.classList.remove("active"));
+      el.classList.add("active");
+      // Select first role under stage attempt for detail panels
+      const stage = el.getAttribute("data-stage");
+      const attempt = el.getAttribute("data-attempt");
+      if (stage && currentRunData && Array.isArray(currentRunData.stages)) {
+        const idx = currentRunData.stages.findIndex(
+          (s) => s.stage === stage && String(s.attempt) === String(attempt || s.attempt),
+        );
+        if (idx >= 0) {
+          currentStageIndex = idx;
+          renderStageDetail(currentRunData.stages[idx]);
+        }
+      }
+    });
+  });
+}
+
+function renderTraceNode(node, depth) {
+  const pad = depth * 12;
+  if (node.kind === "repeat_iteration") {
+    const kids = (node.children || []).map((c) => renderTraceNode(c, depth + 1)).join("");
+    return `<div class="trace-repeat" data-trace-id="${escAttr(node.id)}" style="margin-left:${pad}px">
+      <div class="stage-item trace-repeat-header">
+        <span class="stage-dot ${node.status === "done" ? "passed" : node.status === "running" ? "pending" : "failed"}"></span>
+        <div class="stage-name">Repeat ${escHtml(node.repeatName)} · iteration ${node.iteration}/${node.maxIterations}</div>
+        <div class="stage-meta">${escHtml(node.id)}</div>
+      </div>
+      ${kids}
+    </div>`;
+  }
+  // stage_attempt
+  const roles = (node.roles || [])
+    .map(
+      (r) => `<div class="trace-role" style="margin-left:${pad + 12}px">
+        <span class="stage-dot ${r.gatePassed === true ? "passed" : r.gatePassed === false ? "failed" : "pending"}"></span>
+        <span>${escHtml(r.role)}</span>
+        <span class="stage-meta">${escHtml(r.id)}</span>
+        ${r.gateReason ? `<div class="stage-fail-reason">${escHtml(r.gateReason)}</div>` : ""}
+      </div>`,
+    )
+    .join("");
+  const gate = node.stageGate
+    ? `<div class="trace-stage-gate" style="margin-left:${pad + 12}px">
+        Stage gate [${node.stageGate.passed ? "PASS" : "FAIL"}]${node.stageGate.strategy ? " · " + escHtml(node.stageGate.strategy) : ""}: ${escHtml(node.stageGate.reason || "")}
+        ${(node.stageGate.roleResults || [])
+          .map((rr) => `<div class="stage-meta">${escHtml(rr.role)}: ${rr.passed ? "PASS" : "FAIL"} — ${escHtml(rr.reason || "")}</div>`)
+          .join("")}
+      </div>`
+    : "";
+  const rep =
+    node.repeatName != null
+      ? ` · rep ${escHtml(node.repeatName)} i${node.iteration}`
+      : node.iteration
+        ? ` · i${node.iteration}`
+        : "";
+  return `<div class="trace-attempt" data-trace-id="${escAttr(node.id)}" data-stage="${escAttr(node.stage)}" data-attempt="${escAttr(String(node.attempt))}" style="margin-left:${pad}px">
+    <div class="stage-item">
+      <span class="stage-dot ${node.status === "done" ? "passed" : node.status === "running" ? "pending" : "failed"}"></span>
+      <div class="stage-name">${escHtml(node.stage)} · attempt ${node.attempt}${rep}</div>
+      <div class="stage-meta">${escHtml(node.id)}</div>
+    </div>
+    ${roles}
+    ${gate}
+  </div>`;
+}
 
 async function loadConfigTab() {
   // Project settings always available
@@ -892,6 +1266,16 @@ function selectConfigPipeline(file) {
   </button>`;
 
   for (const stage of pipe.stages || []) {
+    const isCmd = stage.kind === "command" || (!stage.roles?.length && stage.command);
+    if (isCmd) {
+      html += `<div class="config-stage-label">Command Stage: ${escHtml(stage.name)}</div>`;
+      html += `<div class="config-role-block">
+        <div class="config-role-name">command</div>
+        <div class="config-nav-sub">${escHtml(stage.command || "(command)")}</div>
+        <div class="config-nav-sub">${stage.hasGate ? "gate: yes" : "gate: none"}</div>
+      </div>`;
+      continue;
+    }
     html += `<div class="config-stage-label">Stage: ${escHtml(stage.name)}</div>`;
     for (const role of stage.roles || []) {
       const rolePrefix = `roles/${role}`;
@@ -948,7 +1332,7 @@ async function loadConfigAllFilesTree() {
     groups[dir].sort().forEach((f) => {
       const name = f.split("/").pop();
       const activeClass = f === currentConfigPath ? " active" : "";
-      html += `<div class="file-item${activeClass}" data-path="${escAttr(f)}">${escHtml(name)}</div>`;
+      html += `<button type="button" class="file-item${activeClass}" data-path="${escAttr(f)}">${escHtml(name)}</button>`;
     });
   }
 
@@ -962,6 +1346,36 @@ async function loadConfigAllFilesTree() {
   });
 }
 
+
+function clearConfigValidateResult() {
+  const box = $("#config-validate-result");
+  if (!box) return;
+  box.textContent = "";
+  box.className = "config-validate-result";
+}
+
+async function validateConfigDraft() {
+  const box = $("#config-validate-result");
+  if (!box) return;
+  const payload = {};
+  if (currentConfigPath) {
+    const editor = $("#editor-content");
+    payload.drafts = { [currentConfigPath]: editor ? editor.value : "" };
+  }
+  const res = await api("/api/config/validate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 200 && res.data?.valid) {
+    box.className = "validate-ok";
+    box.textContent = "Configuration is valid.";
+  } else {
+    box.className = "validate-err";
+    const errs = res.data?.errors || [res.data?.error || "Validation failed"];
+    box.textContent = Array.isArray(errs) ? errs.join("\n") : String(errs);
+  }
+}
+
 async function loadConfigFile(filePath) {
   currentConfigPath = filePath;
   const editor = $("#editor-content");
@@ -969,6 +1383,7 @@ async function loadConfigFile(filePath) {
   const saveBtn = $("#editor-save-btn");
   const statusEl = $("#editor-status");
 
+  clearConfigValidateResult();
   filenameEl.textContent = filePath;
   statusEl.textContent = "";
   statusEl.className = "editor-status";
@@ -1040,17 +1455,36 @@ async function loadTemplates() {
 
 function renderTemplateGrid() {
   const grid = $("#template-grid");
-  let html = '<div class="template-card blank-card' + (wizard.templateId === null ? " selected" : "") + '" data-template-id="">' +
+  const blankSel = wizard.templateId === null ? " selected" : "";
+  let html =
+    '<button type="button" class="template-card blank-card' +
+    blankSel +
+    '" data-template-id="" aria-label="Blank template">' +
     '<div class="template-name">Blank</div>' +
     '<div class="template-desc">Start from scratch with a custom description.</div>' +
-    '</div>';
+    "</button>";
   for (const t of wizard.templates) {
     const sel = wizard.templateId === t.id ? " selected" : "";
-    html += '<div class="template-card' + sel + '" data-template-id="' + escAttr(t.id) + '">' +
-      '<div class="template-name">' + escHtml(t.name) + '</div>' +
-      '<div class="template-desc">' + escHtml(t.description) + '</div>' +
-      '<div class="template-meta">' + t.stages.length + ' stages · ' + escHtml(t.roles.join(", ")) + '</div>' +
-      '</div>';
+    html +=
+      '<button type="button" class="template-card' +
+      sel +
+      '" data-template-id="' +
+      escAttr(t.id) +
+      '" aria-label="' +
+      escAttr(t.name) +
+      '">' +
+      '<div class="template-name">' +
+      escHtml(t.name) +
+      "</div>" +
+      '<div class="template-desc">' +
+      escHtml(t.description) +
+      "</div>" +
+      '<div class="template-meta">' +
+      t.stages.length +
+      " stages · " +
+      escHtml(t.roles.join(", ")) +
+      "</div>" +
+      "</button>";
   }
   grid.innerHTML = html;
   grid.querySelectorAll(".template-card").forEach((card) => {
@@ -1168,7 +1602,7 @@ function renderGeneratedFileTree() {
     groups[dir].sort().forEach((f) => {
       const name = f.split("/").pop();
       const activeClass = f === wizard.selectedFile ? " active" : "";
-      html += '<div class="file-item' + activeClass + '" data-path="' + escAttr(f) + '">' + escHtml(name) + '</div>';
+      html += '<button type="button" class="file-item' + activeClass + '" data-path="' + escAttr(f) + '">' + escHtml(name) + '</button>';
     });
   }
   tree.innerHTML = html;
@@ -1257,30 +1691,50 @@ async function renderPipelinePreview() {
     return;
   }
   const content = typeof res.data === "string" ? res.data : res.data.content || "";
-  let html = "";
-  const nameMatch = content.match(/^name:\s*(.+)$/m);
-  const descMatch = content.match(/^description:\s*(.+)$/m);
-  const goalMatch = content.match(/^goal:\s*(.+)$/m);
-  html += '<div class="preview-header">';
-  if (nameMatch) html += "<h3>" + escHtml(nameMatch[1]) + "</h3>";
-  if (descMatch) html += "<p>" + escHtml(descMatch[1]) + "</p>";
-  if (goalMatch) html += "<p>" + escHtml(goalMatch[1]) + "</p>";
+  const prev = await api("/api/pipeline/preview", {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+  if (prev.status !== 200 || !prev.data) {
+    container.innerHTML = '<p class="empty-state">Could not parse pipeline structure.</p>';
+    return;
+  }
+  const tree = prev.data;
+  let html = '<div class="preview-header">';
+  if (tree.name) html += "<h3>" + escHtml(tree.name) + "</h3>";
+  if (tree.description) html += "<p>" + escHtml(tree.description) + "</p>";
+  if (tree.goal) html += "<p><strong>Goal:</strong> " + escHtml(tree.goal) + "</p>";
   html += "</div>";
-  const stageRegex = /- name:\s*(.+)\n\s*roles:\s*\[([^\]]*)\]/g;
-  const stages = [];
-  let match;
-  while ((match = stageRegex.exec(content)) !== null) {
-    stages.push({ name: match[1].trim(), roles: match[2].trim() });
-  }
-  for (let i = 0; i < stages.length; i++) {
-    if (i > 0) html += '<div class="preview-arrow">↓</div>';
-    html += '<div class="preview-stage">' +
-      '<div class="preview-stage-name">' + (i + 1) + ". " + escHtml(stages[i].name) + "</div>" +
-      '<div class="preview-stage-meta">→ ' + escHtml(stages[i].roles) + "</div>" +
-      "</div>";
-  }
+  html += renderPreviewNodesClient(tree.nodes || [], 0);
   container.innerHTML = html || '<p class="empty-state">Could not parse pipeline structure.</p>';
 }
+
+function renderPreviewNodesClient(nodes, depth) {
+  let html = "";
+  (nodes || []).forEach((n, i) => {
+    if (i > 0 && depth === 0) html += '<div class="preview-arrow">↓</div>';
+    const pad = depth * 12;
+    if (n.kind === "repeat") {
+      html += `<div class="preview-stage preview-repeat" style="margin-left:${pad}px">
+        <div class="preview-stage-name">Repeat: ${escHtml(n.name)}</div>
+        <div class="preview-stage-meta">max ${n.maxIterations ?? "?"} · until ${escHtml(n.until || "?")}</div>
+      </div>`;
+      html += renderPreviewNodesClient(n.children || [], depth + 1);
+    } else if (n.kind === "command") {
+      html += `<div class="preview-stage preview-command" style="margin-left:${pad}px">
+        <div class="preview-stage-name">Command: ${escHtml(n.name)}</div>
+        <div class="preview-stage-meta">${escHtml(n.command || "")}${n.hasGate ? " · gate" : ""}</div>
+      </div>`;
+    } else {
+      html += `<div class="preview-stage" style="margin-left:${pad}px">
+        <div class="preview-stage-name">${escHtml(n.name)}</div>
+        <div class="preview-stage-meta">→ ${escHtml((n.roles || []).join(", ") || "(no roles)")}</div>
+      </div>`;
+    }
+  });
+  return html;
+}
+
 
 function renderRunStep() {
   if (!wizard.generateResult) return;
