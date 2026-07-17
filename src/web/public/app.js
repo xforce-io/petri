@@ -967,12 +967,34 @@ function connectSSE(runId) {
 
   eventSource = new EventSource(apiUrl("/api/events/" + runId));
   const logEl = $("#log-output");
+  // Dedupe live SSE appends (issue #21): consecutive identical lines + structured keys
+  // that include iteration/repeatName so Repeat loops reusing attempt # are kept.
+  let lastSseLine = null;
+  const seenSseKeys = new Set();
+  let sseSeq = 0;
 
   eventSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
       const line = formatSSEEvent(data);
-      if (line) {
+      sseSeq += 1;
+      const key = data.id
+        ? "id:" + data.id
+        : [
+            data.type,
+            data.stage,
+            data.role,
+            data.attempt,
+            data.passed,
+            data.status,
+            data.iteration != null ? data.iteration : "",
+            data.repeatName != null ? data.repeatName : "",
+            // Without iteration/id, use monotonic seq so later repeat rounds survive
+            data.iteration != null || data.id ? "" : "s" + sseSeq,
+          ].join("|");
+      if (line && line !== lastSseLine && !seenSseKeys.has(key)) {
+        seenSseKeys.add(key);
+        lastSseLine = line;
         logEl.textContent += "\n" + line;
         logEl.scrollTop = logEl.scrollHeight;
       }
