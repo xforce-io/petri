@@ -1691,30 +1691,50 @@ async function renderPipelinePreview() {
     return;
   }
   const content = typeof res.data === "string" ? res.data : res.data.content || "";
-  let html = "";
-  const nameMatch = content.match(/^name:\s*(.+)$/m);
-  const descMatch = content.match(/^description:\s*(.+)$/m);
-  const goalMatch = content.match(/^goal:\s*(.+)$/m);
-  html += '<div class="preview-header">';
-  if (nameMatch) html += "<h3>" + escHtml(nameMatch[1]) + "</h3>";
-  if (descMatch) html += "<p>" + escHtml(descMatch[1]) + "</p>";
-  if (goalMatch) html += "<p>" + escHtml(goalMatch[1]) + "</p>";
+  const prev = await api("/api/pipeline/preview", {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+  if (prev.status !== 200 || !prev.data) {
+    container.innerHTML = '<p class="empty-state">Could not parse pipeline structure.</p>';
+    return;
+  }
+  const tree = prev.data;
+  let html = '<div class="preview-header">';
+  if (tree.name) html += "<h3>" + escHtml(tree.name) + "</h3>";
+  if (tree.description) html += "<p>" + escHtml(tree.description) + "</p>";
+  if (tree.goal) html += "<p><strong>Goal:</strong> " + escHtml(tree.goal) + "</p>";
   html += "</div>";
-  const stageRegex = /- name:\s*(.+)\n\s*roles:\s*\[([^\]]*)\]/g;
-  const stages = [];
-  let match;
-  while ((match = stageRegex.exec(content)) !== null) {
-    stages.push({ name: match[1].trim(), roles: match[2].trim() });
-  }
-  for (let i = 0; i < stages.length; i++) {
-    if (i > 0) html += '<div class="preview-arrow">↓</div>';
-    html += '<div class="preview-stage">' +
-      '<div class="preview-stage-name">' + (i + 1) + ". " + escHtml(stages[i].name) + "</div>" +
-      '<div class="preview-stage-meta">→ ' + escHtml(stages[i].roles) + "</div>" +
-      "</div>";
-  }
+  html += renderPreviewNodesClient(tree.nodes || [], 0);
   container.innerHTML = html || '<p class="empty-state">Could not parse pipeline structure.</p>';
 }
+
+function renderPreviewNodesClient(nodes, depth) {
+  let html = "";
+  (nodes || []).forEach((n, i) => {
+    if (i > 0 && depth === 0) html += '<div class="preview-arrow">↓</div>';
+    const pad = depth * 12;
+    if (n.kind === "repeat") {
+      html += `<div class="preview-stage preview-repeat" style="margin-left:${pad}px">
+        <div class="preview-stage-name">Repeat: ${escHtml(n.name)}</div>
+        <div class="preview-stage-meta">max ${n.maxIterations ?? "?"} · until ${escHtml(n.until || "?")}</div>
+      </div>`;
+      html += renderPreviewNodesClient(n.children || [], depth + 1);
+    } else if (n.kind === "command") {
+      html += `<div class="preview-stage preview-command" style="margin-left:${pad}px">
+        <div class="preview-stage-name">Command: ${escHtml(n.name)}</div>
+        <div class="preview-stage-meta">${escHtml(n.command || "")}${n.hasGate ? " · gate" : ""}</div>
+      </div>`;
+    } else {
+      html += `<div class="preview-stage" style="margin-left:${pad}px">
+        <div class="preview-stage-name">${escHtml(n.name)}</div>
+        <div class="preview-stage-meta">→ ${escHtml((n.roles || []).join(", ") || "(no roles)")}</div>
+      </div>`;
+    }
+  });
+  return html;
+}
+
 
 function renderRunStep() {
   if (!wizard.generateResult) return;

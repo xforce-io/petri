@@ -17,6 +17,7 @@ import { loadPipelineConfig } from "../../config/loader.js";
 import { listFilesRecursive, filterGeneratedFiles } from "../../util/fs.js";
 import { listPresetTemplates } from "../../templates/list.js";
 import { listProjectPipelines } from "../pipelines.js";
+import { buildPipelinePreviewTree } from "../pipeline-preview.js";
 import { listBranches, loadBranch, runRootForBranch } from "../../engine/branch.js";
 import type { ArtifactListItem } from "../attempt-artifacts.js";
 
@@ -327,6 +328,23 @@ export async function handleApiRequest(
     fs.mkdirSync(path.dirname(absPath), { recursive: true });
     fs.writeFileSync(absPath, parsed.content, "utf-8");
     sendJson(res, 200, { path: relPath, saved: true });
+    return;
+  }
+
+  // POST /api/pipeline/preview — structured StageEntry preview (issue #24)
+  if (pathname === "/api/pipeline/preview" && method === "POST") {
+    try {
+      const body = await readBody(req);
+      const parsed = JSON.parse(body || "{}") as { content?: string };
+      if (typeof parsed.content !== "string") {
+        sendJson(res, 400, { error: "Missing content" });
+        return;
+      }
+      sendJson(res, 200, buildPipelinePreviewTree(parsed.content));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 400, { error: message });
+    }
     return;
   }
 
