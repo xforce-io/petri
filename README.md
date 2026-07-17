@@ -86,36 +86,40 @@ All powered by the same engine. The only difference is the roles directory.
 
 ## Quick Start
 
-**Node >= 20** required.
+**Node >= 20** required. **Recommended entry: Web UI** (single-user, local).
 
 ```bash
 # From source
 git clone https://github.com/xforce-io/petri.git
 cd petri && npm install && npm run build
 
-# Scaffold a project
+# Product UI — works even with zero projects (create from a preset template in the browser)
+petri web
+# → http://localhost:3000
+```
+
+Or via CLI:
+
+```bash
 petri init --template code-dev
-
-# Run it
 petri run --input "Build a CLI calculator in Python"
-
-# Watch the evolution
 petri status
 petri log
 ```
 
-## Web Dashboard
+## Web (product entry)
 
 ```bash
 petri web
 # → http://localhost:3000
 ```
 
-- **Dashboard** — overview: stats cards (total runs, success rate, cost), recent runs
-- **Runs** — start runs, browse history, drill into run detail (stage timeline, per-stage logs, artifacts, gate results)
-- **Config** — edit pipelines, roles, and config files with YAML validation
+- **Home** — onboarding when empty; create a project from a **preset template**; stats + recent runs when a project exists
+- **Runs** — start runs, history, evolution view (stage / attempt / gate / blocked reason), logs, artifacts
+- **Config** — edit instance pipeline/roles, validate, save
+- **Create** — experimental NL generator (not the primary path; prefer Home → template)
 
-Multi-project: run `petri web` from a parent directory to auto-discover all Petri projects underneath.
+Multi-project: run `petri web` from a parent directory to auto-discover Petri projects underneath. New projects from templates are created under the workspace (cwd).
 
 ## Configuration
 

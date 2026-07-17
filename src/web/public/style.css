@@ -45,6 +45,220 @@ header h1 {
   color: var(--accent);
 }
 
+.tab-secondary {
+  opacity: 0.75;
+  font-size: 0.9em;
+}
+
+.project-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-right: 0.35rem;
+}
+
+.global-banner {
+  padding: 0.5rem 1.5rem;
+  background: #fff8c5;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+.global-banner.banner-error {
+  background: #ffebe9;
+  color: var(--danger);
+}
+
+.onboarding {
+  max-width: 960px;
+  margin: 2rem auto;
+  padding: 0 1.5rem;
+}
+.onboarding h2 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+.onboarding-lead {
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+  max-width: 40rem;
+}
+.onboarding-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+.onboarding-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  background: var(--bg-secondary);
+}
+.onboarding-card h3 {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+.onboarding-card label {
+  display: block;
+  font-size: 0.8rem;
+  margin-top: 0.75rem;
+  color: var(--text-muted);
+}
+.onboarding-card input,
+.onboarding-card select {
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+.onboarding-card .btn-primary {
+  margin-top: 1rem;
+}
+.onboarding-card .muted {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+.onboarding-card code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+}
+
+.blocked-banner {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: #ffebe9;
+  border-radius: 6px;
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+.stage-fail-reason {
+  font-size: 0.75rem;
+  color: var(--danger);
+  margin-top: 0.2rem;
+}
+.experimental-banner {
+  margin: 1rem 1.5rem 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.btn-secondary {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-right: 0.5rem;
+}
+.btn-secondary:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.config-validate-result {
+  white-space: pre-wrap;
+  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+}
+.validate-ok { color: var(--success); }
+.validate-err { color: var(--danger); }
+
+/* Config pipeline-centric nav (#12) */
+.config-nav-section {
+  margin-bottom: 1rem;
+}
+.config-nav-section h3 {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+  padding: 0 0.25rem;
+}
+.config-nav-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
+  cursor: pointer;
+  color: var(--text);
+  margin-bottom: 0.25rem;
+  font: inherit;
+}
+.config-nav-item:hover {
+  background: var(--bg);
+  border-color: var(--border);
+}
+.config-nav-item.active {
+  background: #ddf4ff;
+  border-color: #54aeff;
+}
+.config-nav-title {
+  display: block;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.config-nav-sub {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.1rem;
+}
+.config-structure-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.config-structure-item {
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+}
+.config-structure-item:hover,
+.config-structure-item.active {
+  background: #ddf4ff;
+}
+.config-stage-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 0.5rem 0 0.2rem;
+  padding: 0 0.35rem;
+}
+.config-role-block {
+  margin-left: 0.5rem;
+  margin-bottom: 0.35rem;
+  border-left: 2px solid var(--border);
+  padding-left: 0.4rem;
+}
+.config-role-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 0.15rem;
+}
+.config-all-files {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.config-all-files summary {
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+}
+
 nav {
   display: flex;
   gap: 0.25rem;

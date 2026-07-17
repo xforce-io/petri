@@ -162,33 +162,102 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // New project from preset template
+  const newBtn = $("#new-project-btn");
+  if (newBtn) newBtn.addEventListener("click", createProjectFromTemplate);
+
+  // Config validate
+  const validateBtn = $("#config-validate-btn");
+  if (validateBtn) {
+    validateBtn.addEventListener("click", async () => {
+      const res = await api("/api/config/validate", { method: "POST", body: "{}" });
+      const box = $("#config-validate-result");
+      if (!box) return;
+      if (res.status === 200 && res.data?.valid) {
+        box.className = "validate-ok";
+        box.textContent = "Configuration is valid.";
+      } else {
+        box.className = "validate-err";
+        const errs = res.data?.errors || [res.data?.error || "Validation failed"];
+        box.textContent = Array.isArray(errs) ? errs.join("\n") : String(errs);
+      }
+    });
+  }
+
   // Load projects then dashboard
   loadProjects();
 });
 
 // ── Project Selector ──
+function normalizeProjects(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((p) => (typeof p === "string" ? p : p.name)).filter(Boolean);
+}
+
 async function loadProjects() {
   const res = await fetch("/api/projects");
-  if (res.ok) projects = await res.json();
+  if (res.ok) {
+    projects = normalizeProjects(await res.json());
+  } else {
+    projects = [];
+    showBanner("Cannot reach Petri server. Restart with: petri web", "error");
+  }
 
-  if (projects.length > 1) {
-    const selector = $("#project-selector");
-    const select = $("#project-select");
+  const selector = $("#project-selector");
+  const select = $("#project-select");
+  if (projects.length >= 1) {
     selector.style.display = "";
     select.innerHTML = projects.map((p) =>
       `<option value="${escAttr(p)}">${escHtml(p)}</option>`
     ).join("");
-    currentProject = projects[0];
-    select.addEventListener("change", () => {
+    if (!currentProject || !projects.includes(currentProject)) {
+      currentProject = projects[0];
+    }
+    select.value = currentProject;
+    select.onchange = () => {
       currentProject = select.value;
       resetState();
       loadDashboard();
-    });
-  } else if (projects.length === 1) {
-    currentProject = projects[0];
+    };
+  } else {
+    selector.style.display = "none";
+    currentProject = null;
   }
 
   loadDashboard();
+}
+
+function showBanner(msg, kind) {
+  const el = $("#global-banner");
+  if (!el) return;
+  el.style.display = msg ? "" : "none";
+  el.className = "global-banner" + (kind ? " banner-" + kind : "");
+  el.textContent = msg || "";
+}
+
+async function createProjectFromTemplate() {
+  const name = ($("#new-project-name")?.value || "").trim();
+  const template = $("#new-project-template")?.value || "code-dev";
+  const errEl = $("#new-project-error");
+  if (errEl) errEl.textContent = "";
+  if (!name) {
+    if (errEl) errEl.textContent = "Enter a project name (letters, numbers, _ or -).";
+    return;
+  }
+  const res = await fetch("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, template }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status !== 201) {
+    if (errEl) errEl.textContent = data.error || "Failed to create project";
+    return;
+  }
+  currentProject = data.name;
+  await loadProjects();
+  switchToTab("runs");
+  loadRunsTab();
 }
 
 function resetState() {
@@ -204,13 +273,32 @@ function resetState() {
 // ══════════════════════════════════════
 
 async function loadDashboard() {
+  const onboarding = $("#onboarding");
+  const overview = $("#overview-page");
+
+  // Zero projects → product onboarding (template create path)
+  if (!projects.length) {
+    if (onboarding) onboarding.style.display = "";
+    if (overview) overview.style.display = "none";
+    await populateTemplateSelect();
+    return;
+  }
+
+  if (onboarding) onboarding.style.display = "none";
+  if (overview) overview.style.display = "";
+
   const res = await api("/api/runs");
+  if (res.status === 0) {
+    showBanner(res.data?.error || "Server unreachable. Run: petri web", "error");
+  } else if (res.status === 400 && res.data?.code === "NO_PROJECT") {
+    showBanner(res.data.error, "error");
+  } else {
+    showBanner("");
+  }
   const runs = (res.status === 200 && Array.isArray(res.data)) ? res.data : [];
 
-  // Stats cards
   const total = runs.length;
   const done = runs.filter((r) => r.status === "done").length;
-  const blocked = runs.filter((r) => r.status === "blocked").length;
   const running = runs.filter((r) => r.status === "running").length;
   const totalCost = runs.reduce((sum, r) => sum + (r.totalUsage?.costUsd || 0), 0);
   const successRate = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -232,10 +320,13 @@ async function loadDashboard() {
       <div class="stat-value">${formatCost(totalCost)}</div>
       <div class="stat-label">Total Cost</div>
     </div>
+    <div class="stat-card stat-card-action" onclick="switchToTab('runs');">
+      <div class="stat-value">▶</div>
+      <div class="stat-label">Start a Run</div>
+    </div>
   `;
 
-  // Recent runs table (latest 10)
-  const sorted = runs.sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
+  const sorted = runs.slice().sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
   const recent = sorted.slice(0, 10);
   const tbody = $("#overview-runs-tbody");
   const emptyMsg = $("#overview-runs-empty");
@@ -248,27 +339,29 @@ async function loadDashboard() {
       row.addEventListener("click", () => openRunDetail(row.dataset.runid));
     });
   } else {
-    emptyMsg.style.display = "none";
+    emptyMsg.style.display = "";
+    emptyMsg.textContent = "No runs yet. Open the Runs tab to start one.";
     $("#overview-runs-table").style.display = "none";
     tbody.innerHTML = "";
-    // Show empty state with CTA
-    $("#stats-cards").innerHTML = `
-      <div class="dashboard-empty">
-        <h2>Welcome to Petri</h2>
-        <p>Create your first pipeline to get started.</p>
-        <button class="btn-primary btn-large" onclick="switchToTab('create'); loadCreateTab();">Create Pipeline</button>
-      </div>
-    `;
+  }
+}
+
+async function populateTemplateSelect() {
+  const sel = $("#new-project-template");
+  if (!sel) return;
+  const res = await fetch("/api/templates");
+  if (!res.ok) {
+    sel.innerHTML = '<option value="code-dev">code-dev</option>';
     return;
   }
-
-  // Add create button to stats area when runs exist
-  $("#stats-cards").innerHTML += `
-    <div class="stat-card stat-card-action" onclick="switchToTab('create'); loadCreateTab();">
-      <div class="stat-value">+</div>
-      <div class="stat-label">Create Pipeline</div>
-    </div>
-  `;
+  const templates = await res.json();
+  if (!Array.isArray(templates) || templates.length === 0) {
+    sel.innerHTML = '<option value="code-dev">code-dev</option>';
+    return;
+  }
+  sel.innerHTML = templates.map((t) =>
+    `<option value="${escAttr(t.id)}">${escHtml(t.name || t.id)}${t.description ? " — " + escHtml(t.description.slice(0, 60)) : ""}</option>`
+  ).join("");
 }
 
 // ══════════════════════════════════════
@@ -297,20 +390,25 @@ async function loadRunsTab() {
   // Make sure we're on list view
   if (currentRunId) return; // detail view is showing, don't overwrite
 
-  // Populate pipeline dropdown
-  const configRes = await api("/api/config/files");
+  // Populate pipeline dropdown from GET /api/pipelines:
+  // value = file path (engine), label = logical name (YAML name:)
   const pipelineSelect = $("#run-pipeline");
-  if (configRes.status === 200 && Array.isArray(configRes.data)) {
-    const pipelineFiles = configRes.data.filter((f) =>
-      typeof f === "string" ? f.match(/pipeline.*\.yaml$/i) : (f.path || "").match(/pipeline.*\.yaml$/i)
-    );
-    pipelineSelect.innerHTML = pipelineFiles.map((f) => {
-      const p = typeof f === "string" ? f : f.path;
-      return `<option value="${escAttr(p)}">${escHtml(p)}</option>`;
-    }).join("");
-    if (pipelineFiles.length === 0) {
-      pipelineSelect.innerHTML = '<option value="">No pipelines found</option>';
-    }
+  const pipesRes = await api("/api/pipelines");
+  if (pipesRes.status === 200 && Array.isArray(pipesRes.data) && pipesRes.data.length > 0) {
+    const pipes = pipesRes.data;
+    const nameCount = {};
+    for (const p of pipes) nameCount[p.name] = (nameCount[p.name] || 0) + 1;
+    pipelineSelect.innerHTML = pipes
+      .map((pipe) => {
+        let label = pipe.name || pipe.file;
+        if (nameCount[pipe.name] > 1 && pipe.name !== pipe.file) {
+          label = `${pipe.name} (${pipe.file})`;
+        }
+        return `<option value="${escAttr(pipe.file)}">${escHtml(label)}</option>`;
+      })
+      .join("");
+  } else {
+    pipelineSelect.innerHTML = '<option value="">No pipelines found</option>';
   }
 
   // Load run history
@@ -411,10 +509,53 @@ async function loadRun(runId) {
 
 function renderStageList() {
   const list = $("#stage-list");
+  // Prefer evolution view (stage → attempts) when present
+  const evolution = currentRunData.evolution;
+  if (Array.isArray(evolution) && evolution.length > 0) {
+    const flat = [];
+    for (const e of evolution) {
+      for (const a of e.attempts || []) {
+        flat.push({
+          stage: e.stage,
+          role: a.role,
+          attempt: a.attempt,
+          model: a.model,
+          durationMs: a.durationMs,
+          gatePassed: a.gatePassed,
+          gateReason: a.gateReason,
+          artifacts: a.artifacts,
+        });
+      }
+    }
+    currentRunData._flatStages = flat;
+    if (flat.length === 0) {
+      list.innerHTML = '<p class="empty-state">No stage attempts yet.</p>';
+      return;
+    }
+    list.innerHTML = flat.map((s, i) => {
+      const dotClass = s.gatePassed === true ? "passed" : s.gatePassed === false ? "failed" : "pending";
+      const attemptStr = s.attempt ? ` · attempt ${s.attempt}` : "";
+      return `
+      <div class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
+        <div class="stage-dot ${dotClass}"></div>
+        <div class="stage-info">
+          <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
+          <div class="stage-meta">${escHtml(s.role || "")}${s.model ? " · " + escHtml(s.model) : ""} · ${formatDuration(s.durationMs)}</div>
+          ${s.gatePassed === false && s.gateReason ? `<div class="stage-fail-reason">${escHtml(s.gateReason)}</div>` : ""}
+        </div>
+      </div>`;
+    }).join("");
+    list.querySelectorAll(".stage-item").forEach((el) => {
+      el.addEventListener("click", () => selectStage(parseInt(el.dataset.index, 10)));
+    });
+    return;
+  }
+
   const stages = currentRunData.stages || [];
+  currentRunData._flatStages = stages;
 
   if (stages.length === 0) {
-    list.innerHTML = '<p class="empty-state">No stages in this run.</p>';
+    list.innerHTML = '<p class="empty-state">No stages in this run yet. Waiting for attempts…</p>';
     return;
   }
 
@@ -423,11 +564,12 @@ function renderStageList() {
     const usage = s.usage || {};
     const costStr = usage.costUsd ? ` · ${formatCost(usage.costUsd)}` : "";
     const modelStr = s.model ? ` · ${s.model}` : "";
+    const attemptStr = s.attempt ? ` · attempt ${s.attempt}` : "";
     return `
       <div class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
-          <div class="stage-name">${escHtml(s.stage)}</div>
+          <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
           <div class="stage-meta">${escHtml(s.role || "")}${modelStr} · ${formatDuration(s.durationMs)}${costStr}</div>
         </div>
       </div>
@@ -443,6 +585,10 @@ function renderRunSummary() {
   const r = currentRunData;
   const usage = r.totalUsage || {};
   const statusClass = r.status === "done" ? "stat-success" : r.status === "blocked" ? "stat-danger" : "";
+  const blockedHtml =
+    r.status === "blocked" && (r.blockedReason || r.blockedStage)
+      ? `<div class="blocked-banner"><span class="label">Blocked:</span> ${escHtml(r.blockedStage || "")}${r.blockedStage && r.blockedReason ? " — " : ""}${escHtml(r.blockedReason || "unknown reason")}</div>`
+      : "";
   $("#run-summary").innerHTML = `
     <div><span class="label">Pipeline:</span> ${escHtml(r.pipeline)}</div>
     <div><span class="label">Status:</span> <span class="${statusClass}">${escHtml(r.status)}</span></div>
@@ -450,6 +596,7 @@ function renderRunSummary() {
     <div><span class="label">Duration:</span> ${formatDuration(r.durationMs)}</div>
     <div><span class="label">Tokens:</span> ${(usage.inputTokens || 0) + (usage.outputTokens || 0)}</div>
     <div><span class="label">Cost:</span> ${formatCost(usage.costUsd)}</div>
+    ${blockedHtml}
   `;
 }
 
@@ -462,11 +609,17 @@ function selectStage(index) {
   renderGateDetail();
 }
 
+function currentStageEntry() {
+  const flat = currentRunData?._flatStages;
+  if (flat && flat[currentStageIndex]) return flat[currentStageIndex];
+  return currentRunData?.stages?.[currentStageIndex];
+}
+
 async function loadStageIO() {
   const promptEl = $("#io-prompt");
   const resultEl = $("#io-result");
 
-  const stage = currentRunData.stages?.[currentStageIndex];
+  const stage = currentStageEntry();
   if (!stage) {
     promptEl.textContent = "Select a stage to view agent I/O.";
     resultEl.textContent = "";
@@ -501,7 +654,7 @@ async function loadRunLog() {
     return;
   }
 
-  const stage = currentRunData.stages?.[currentStageIndex];
+  const stage = currentStageEntry();
   if (!stage) {
     $("#log-output").textContent = res.data;
     return;
@@ -538,7 +691,7 @@ async function loadStageArtifacts() {
     return;
   }
 
-  const stage = currentRunData.stages?.[currentStageIndex];
+  const stage = currentStageEntry();
   let artifacts = res.data;
   if (stage) {
     const prefix = stage.stage + "/" + (stage.role || "");
@@ -565,12 +718,12 @@ async function loadStageArtifacts() {
 
 function renderGateDetail() {
   const gate = $("#gate-detail");
-  if (currentStageIndex < 0 || !currentRunData.stages[currentStageIndex]) {
+  const stage = currentStageEntry();
+  if (currentStageIndex < 0 || !stage) {
     gate.innerHTML = '<p class="empty-state">Select a stage to view gate results.</p>';
     return;
   }
 
-  const stage = currentRunData.stages[currentStageIndex];
   const passed = stage.gatePassed;
   const statusClass = passed === true ? "passed" : passed === false ? "failed" : "pending";
   const statusText = passed === true ? "Passed" : passed === false ? "Failed" : "Pending";
@@ -635,12 +788,138 @@ function formatSSEEvent(data) {
 }
 
 // ══════════════════════════════════════
-// ── Config Tab
+// ── Config Tab (pipeline-centric, #12)
 // ══════════════════════════════════════
 
+let configPipelines = [];
+let selectedConfigPipelineFile = null;
+
 async function loadConfigTab() {
+  // Project settings always available
+  const projBtn = $("#config-project-settings");
+  if (projBtn && !projBtn.dataset.bound) {
+    projBtn.dataset.bound = "1";
+    projBtn.addEventListener("click", () => {
+      clearConfigNavActive();
+      projBtn.classList.add("active");
+      selectedConfigPipelineFile = null;
+      $("#config-structure-section").style.display = "none";
+      loadConfigFile("petri.yaml");
+    });
+  }
+
+  // Pipeline list by logical name
+  const listEl = $("#config-pipeline-list");
+  const emptyEl = $("#config-pipelines-empty");
+  const pipesRes = await api("/api/pipelines");
+  if (pipesRes.status !== 200 || !Array.isArray(pipesRes.data)) {
+    if (listEl) {
+      listEl.innerHTML =
+        '<p class="empty-state">Failed to load pipelines. Check project selection or restart petri web.</p>';
+    }
+    configPipelines = [];
+  } else {
+    configPipelines = pipesRes.data;
+    if (configPipelines.length === 0) {
+      if (emptyEl) {
+        emptyEl.style.display = "";
+        emptyEl.textContent =
+          "No pipelines found. Add a pipeline.yaml or create a project from a template on Home.";
+      }
+      if (listEl) listEl.innerHTML = emptyEl ? emptyEl.outerHTML : "";
+    } else {
+      if (emptyEl) emptyEl.style.display = "none";
+      const nameCount = {};
+      for (const p of configPipelines) nameCount[p.name] = (nameCount[p.name] || 0) + 1;
+      listEl.innerHTML = configPipelines
+        .map((p) => {
+          let label = p.name || p.file;
+          if (nameCount[p.name] > 1 && p.name !== p.file) {
+            label = `${p.name} (${p.file})`;
+          }
+          const active =
+            selectedConfigPipelineFile === p.file ? " active" : "";
+          return `<button type="button" class="config-nav-item config-pipeline-item${active}" data-file="${escAttr(p.file)}">
+            <span class="config-nav-title">${escHtml(label)}</span>
+            <span class="config-nav-sub">${escHtml(p.file)}</span>
+          </button>`;
+        })
+        .join("");
+      listEl.querySelectorAll(".config-pipeline-item").forEach((el) => {
+        el.addEventListener("click", () => selectConfigPipeline(el.dataset.file));
+      });
+    }
+  }
+
+  // Optional full file tree under "All files"
+  await loadConfigAllFilesTree();
+
+  // Restore selection
+  if (selectedConfigPipelineFile) {
+    selectConfigPipeline(selectedConfigPipelineFile);
+  } else if (currentConfigPath) {
+    loadConfigFile(currentConfigPath);
+  }
+}
+
+function clearConfigNavActive() {
+  $$(".config-nav-item").forEach((el) => el.classList.remove("active"));
+  $$(".config-structure-item").forEach((el) => el.classList.remove("active"));
+}
+
+function selectConfigPipeline(file) {
+  selectedConfigPipelineFile = file;
+  const pipe = configPipelines.find((p) => p.file === file);
+  clearConfigNavActive();
+  $$(".config-pipeline-item").forEach((el) => {
+    el.classList.toggle("active", el.dataset.file === file);
+  });
+
+  const section = $("#config-structure-section");
+  const tree = $("#config-structure-tree");
+  const title = $("#config-structure-title");
+  if (!pipe) {
+    if (section) section.style.display = "none";
+    return;
+  }
+  if (section) section.style.display = "";
+  if (title) title.textContent = pipe.name || file;
+
+  let html = "";
+  html += `<button type="button" class="config-structure-item" data-path="${escAttr(pipe.file)}">
+    <strong>Pipeline definition</strong>
+    <span class="config-nav-sub">${escHtml(pipe.file)}</span>
+  </button>`;
+
+  for (const stage of pipe.stages || []) {
+    html += `<div class="config-stage-label">Stage: ${escHtml(stage.name)}</div>`;
+    for (const role of stage.roles || []) {
+      const rolePrefix = `roles/${role}`;
+      html += `<div class="config-role-block">
+        <div class="config-role-name">${escHtml(role)}</div>
+        <button type="button" class="config-structure-item" data-path="${escAttr(rolePrefix + "/role.yaml")}">role.yaml</button>
+        <button type="button" class="config-structure-item" data-path="${escAttr(rolePrefix + "/soul.md")}">soul.md</button>
+        <button type="button" class="config-structure-item" data-path="${escAttr(rolePrefix + "/gate.yaml")}">gate.yaml</button>
+      </div>`;
+    }
+  }
+  tree.innerHTML = html;
+  tree.querySelectorAll(".config-structure-item").forEach((el) => {
+    el.addEventListener("click", () => {
+      tree.querySelectorAll(".config-structure-item").forEach((e) => e.classList.remove("active"));
+      el.classList.add("active");
+      loadConfigFile(el.dataset.path);
+    });
+  });
+
+  // Open pipeline file by default
+  loadConfigFile(pipe.file);
+}
+
+async function loadConfigAllFilesTree() {
   const res = await api("/api/config/files");
   const tree = $("#file-tree");
+  if (!tree) return;
 
   if (res.status !== 200 || !Array.isArray(res.data)) {
     tree.innerHTML = '<p class="empty-state">Failed to load files.</p>';
@@ -702,7 +981,12 @@ async function loadConfigFile(filePath) {
     editor.disabled = false;
     saveBtn.disabled = false;
   } else {
-    editor.value = "Failed to load file.";
+    const err =
+      (res.data && res.data.error) ||
+      (res.status === 404 ? "File not found." : "Failed to load file.");
+    editor.value = err;
+    statusEl.textContent = err;
+    statusEl.className = "editor-status error";
   }
 }
 
