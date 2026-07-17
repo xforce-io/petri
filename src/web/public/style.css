@@ -1511,3 +1511,68 @@ main {
   flex: 1;
   overflow: hidden;
 }
+
+
+/* a11y focus (issue #22) */
+:focus-visible {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: 2px;
+}
+button.stage-item,
+button.stat-card {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+}
+button.stat-card-action {
+  border: 1px solid var(--border, #333);
+  background: inherit;
+  border-radius: inherit;
+}
+tr[role="button"] {
+  cursor: pointer;
+}
+
+button.file-item,
+button.template-card {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  display: block;
+  width: 100%;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+}
+button.template-card {
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+button.io-header,
+button.artifact-item,
+button.step-item {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  width: 100%;
+  display: block;
+}
+button.step-item {
+  width: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+button.artifact-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.35rem 0.5rem;
+}

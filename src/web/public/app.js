@@ -206,8 +206,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.target.closest("#io-prompt-toggle")) {
       const el = $("#io-prompt");
       el.classList.toggle("collapsed");
-      const toggle = e.target.closest("#io-prompt-toggle").querySelector(".io-toggle");
-      if (toggle) toggle.textContent = el.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
+      const btn = e.target.closest("#io-prompt-toggle");
+      const toggle = btn.querySelector(".io-toggle");
+      const collapsed = el.classList.contains("collapsed");
+      if (toggle) toggle.textContent = collapsed ? "\u25B6" : "\u25BC";
+      if (btn && btn.setAttribute) btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
     }
   });
 
@@ -362,11 +365,14 @@ async function loadDashboard() {
       <div class="stat-value">${formatCost(totalCost)}</div>
       <div class="stat-label">Total Cost</div>
     </div>
-    <div class="stat-card stat-card-action" onclick="switchToTab('runs');">
+    <button type="button" class="stat-card stat-card-action" id="home-start-run-btn">
       <div class="stat-value">▶</div>
       <div class="stat-label">Start a Run</div>
-    </div>
+    </button>
   `;
+  const startRunBtn = $("#home-start-run-btn");
+  if (startRunBtn) startRunBtn.addEventListener("click", () => switchToTab("runs"));
+
 
   const sorted = runs.slice().sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
   const recent = sorted.slice(0, 10);
@@ -378,7 +384,17 @@ async function loadDashboard() {
     $("#overview-runs-table").style.display = "table";
     tbody.innerHTML = recent.map((r) => renderRunRow(r)).join("");
     tbody.querySelectorAll("tr").forEach((row) => {
-      row.addEventListener("click", () => openRunDetail(row.dataset.runid));
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-label", "Open run " + row.dataset.runid);
+      const open = () => openRunDetail(row.dataset.runid);
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          open();
+        }
+      });
     });
   } else {
     emptyMsg.style.display = "";
@@ -514,7 +530,17 @@ async function loadRunsTab() {
     $("#runs-table").style.display = "table";
     tbody.innerHTML = runs.map((r) => renderRunRow(r)).join("");
     tbody.querySelectorAll("tr").forEach((row) => {
-      row.addEventListener("click", () => openRunDetail(row.dataset.runid));
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-label", "Open run " + row.dataset.runid);
+      const open = () => openRunDetail(row.dataset.runid);
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          open();
+        }
+      });
     });
   } else {
     emptyMsg.style.display = "block";
@@ -660,14 +686,14 @@ function renderStageList() {
       const dotClass = s.gatePassed === true ? "passed" : s.gatePassed === false ? "failed" : "pending";
       const attemptStr = s.attempt ? ` · attempt ${s.attempt}` : "";
       return `
-      <div class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
+      <button type="button" class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
           <div class="stage-meta">${escHtml(s.role === "command" ? "Command Stage" : (s.role || ""))}${s.role === "command" ? "" : (s.model ? " · " + escHtml(s.model) : "")} · ${formatDuration(s.durationMs)}</div>
           ${s.gatePassed === false && s.gateReason ? `<div class="stage-fail-reason">${escHtml(s.gateReason)}</div>` : ""}
         </div>
-      </div>`;
+      </button>`;
     }).join("");
     list.querySelectorAll(".stage-item").forEach((el) => {
       el.addEventListener("click", () => selectStage(parseInt(el.dataset.index, 10)));
@@ -690,13 +716,13 @@ function renderStageList() {
     const modelStr = s.model ? ` · ${s.model}` : "";
     const attemptStr = s.attempt ? ` · attempt ${s.attempt}` : "";
     return `
-      <div class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
+      <button type="button" class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
           <div class="stage-meta">${escHtml(s.role === "command" ? "Command Stage" : (s.role || ""))}${s.role === "command" ? "" : modelStr} · ${formatDuration(s.durationMs)}${costStr}</div>
         </div>
-      </div>
+      </button>
     `;
   }).join("");
 
@@ -916,10 +942,10 @@ async function loadStageArtifacts() {
   }
 
   container.innerHTML = artifacts.map((a) => `
-    <div class="artifact-item" data-path="${escAttr(a.path)}">
+    <button type="button" class="artifact-item" data-path="${escAttr(a.path)}">
       <span>${escHtml(a.path)}</span>
       <span class="artifact-size">${formatSize(a.size)}</span>
-    </div>
+    </button>
   `).join("");
 
   container.querySelectorAll(".artifact-item").forEach((el) => {
@@ -1272,7 +1298,7 @@ async function loadConfigAllFilesTree() {
     groups[dir].sort().forEach((f) => {
       const name = f.split("/").pop();
       const activeClass = f === currentConfigPath ? " active" : "";
-      html += `<div class="file-item${activeClass}" data-path="${escAttr(f)}">${escHtml(name)}</div>`;
+      html += `<button type="button" class="file-item${activeClass}" data-path="${escAttr(f)}">${escHtml(name)}</button>`;
     });
   }
 
@@ -1395,17 +1421,36 @@ async function loadTemplates() {
 
 function renderTemplateGrid() {
   const grid = $("#template-grid");
-  let html = '<div class="template-card blank-card' + (wizard.templateId === null ? " selected" : "") + '" data-template-id="">' +
+  const blankSel = wizard.templateId === null ? " selected" : "";
+  let html =
+    '<button type="button" class="template-card blank-card' +
+    blankSel +
+    '" data-template-id="" aria-label="Blank template">' +
     '<div class="template-name">Blank</div>' +
     '<div class="template-desc">Start from scratch with a custom description.</div>' +
-    '</div>';
+    "</button>";
   for (const t of wizard.templates) {
     const sel = wizard.templateId === t.id ? " selected" : "";
-    html += '<div class="template-card' + sel + '" data-template-id="' + escAttr(t.id) + '">' +
-      '<div class="template-name">' + escHtml(t.name) + '</div>' +
-      '<div class="template-desc">' + escHtml(t.description) + '</div>' +
-      '<div class="template-meta">' + t.stages.length + ' stages · ' + escHtml(t.roles.join(", ")) + '</div>' +
-      '</div>';
+    html +=
+      '<button type="button" class="template-card' +
+      sel +
+      '" data-template-id="' +
+      escAttr(t.id) +
+      '" aria-label="' +
+      escAttr(t.name) +
+      '">' +
+      '<div class="template-name">' +
+      escHtml(t.name) +
+      "</div>" +
+      '<div class="template-desc">' +
+      escHtml(t.description) +
+      "</div>" +
+      '<div class="template-meta">' +
+      t.stages.length +
+      " stages · " +
+      escHtml(t.roles.join(", ")) +
+      "</div>" +
+      "</button>";
   }
   grid.innerHTML = html;
   grid.querySelectorAll(".template-card").forEach((card) => {
@@ -1523,7 +1568,7 @@ function renderGeneratedFileTree() {
     groups[dir].sort().forEach((f) => {
       const name = f.split("/").pop();
       const activeClass = f === wizard.selectedFile ? " active" : "";
-      html += '<div class="file-item' + activeClass + '" data-path="' + escAttr(f) + '">' + escHtml(name) + '</div>';
+      html += '<button type="button" class="file-item' + activeClass + '" data-path="' + escAttr(f) + '">' + escHtml(name) + '</button>';
     });
   }
   tree.innerHTML = html;
