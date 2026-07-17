@@ -131,4 +131,34 @@ describe("web branches (issue #19)", () => {
     expect(file.status).toBe(200);
     expect(file.body).toContain("ok");
   });
+
+  it("S1: does not leak project artifacts into a branch run", async () => {
+    const projectArtifacts = path.join(projectDir, ".petri", "artifacts");
+    fs.mkdirSync(projectArtifacts, { recursive: true });
+    fs.writeFileSync(path.join(projectArtifacts, "default-only.txt"), "default");
+
+    const branchArtifacts = path.join(
+      projectDir,
+      ".petri",
+      "branches",
+      "exp1",
+      "runs",
+      "run-001",
+      "artifacts",
+    );
+    fs.mkdirSync(branchArtifacts, { recursive: true });
+    fs.writeFileSync(path.join(branchArtifacts, "branch-only.txt"), "branch");
+
+    const res = await request(result.port, "/api/runs/001/artifacts?branch=exp1");
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body) as Array<{ path: string }>;
+    expect(data.some((a) => a.path === "branch-only.txt")).toBe(true);
+    expect(data.some((a) => a.path === "default-only.txt")).toBe(false);
+
+    const leaked = await request(
+      result.port,
+      "/api/runs/001/artifacts/default-only.txt?branch=exp1",
+    );
+    expect(leaked.status).toBe(404);
+  });
 });

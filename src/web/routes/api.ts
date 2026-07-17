@@ -514,6 +514,7 @@ function handleRunLog(res: http.ServerResponse, projectDir: string, id: string, 
 function resolveArtifactsRoots(projectDir: string, id: string, url?: URL): string[] {
   // Prefer run-scoped snapshots under the branch/project petri root, then shared working dir
   const roots: string[] = [];
+  const branch = url?.searchParams.get("branch") || undefined;
   try {
     const petriDir = url ? petriRootForRequest(projectDir, url) : path.join(projectDir, ".petri");
     roots.push(path.join(petriDir, "runs", `run-${id}`, "artifacts"));
@@ -521,8 +522,11 @@ function resolveArtifactsRoots(projectDir: string, id: string, url?: URL): strin
   } catch {
     /* invalid branch */
   }
-  // Always allow project-level shared artifacts as last resort for non-branch runs
-  roots.push(path.join(projectDir, ".petri", "artifacts"));
+  // A branch is an isolated run context. Falling through to project-level
+  // artifacts would mix identically numbered branch/default runs.
+  if (!branch) {
+    roots.push(path.join(projectDir, ".petri", "artifacts"));
+  }
   // de-dupe
   return [...new Set(roots.map((r) => path.resolve(r)))];
 }
