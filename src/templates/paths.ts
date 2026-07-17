@@ -2,33 +2,36 @@ import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+function looksLikeTemplatesRoot(dir: string): boolean {
+  if (!existsSync(dir)) return false;
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    return entries.some(
+      (e) => e.isDirectory() && existsSync(join(dir, e.name, "pipeline.yaml")),
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Resolve the preset templates directory (bundled dist or src).
+ * When code is bundled into dist/index.js, prefer dist/templates (postbuild).
  */
 export function resolveTemplatesDir(): string | null {
-  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const here = dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    // This file is under src/templates/ (dev) or dist/ next to copied templates
-    resolve(__dirname),
-    resolve(__dirname, "..", "templates"),
-    resolve(__dirname, "..", "..", "src", "templates"),
-    resolve(__dirname, "..", "src", "templates"),
+    // Bundled: dist/templates (postbuild copies code-dev etc.)
+    resolve(here, "templates"),
+    // This module under src/templates/ (dev): here is already the templates root
+    resolve(here),
+    resolve(here, "..", "templates"),
+    resolve(here, "..", "src", "templates"),
+    resolve(here, "..", "..", "src", "templates"),
   ];
 
   for (const dir of candidates) {
-    if (!existsSync(dir)) continue;
-    try {
-      const entries = readdirSync(dir, { withFileTypes: true });
-      if (
-        entries.some(
-          (e) => e.isDirectory() && existsSync(join(dir, e.name, "pipeline.yaml")),
-        )
-      ) {
-        return dir;
-      }
-    } catch {
-      /* try next */
-    }
+    if (looksLikeTemplatesRoot(dir)) return dir;
   }
   return candidates.find((d) => existsSync(d)) ?? null;
 }

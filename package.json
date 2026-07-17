@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsup",
-    "postbuild": "cp -r src/web/public dist/web/public",
+    "postbuild": "rm -rf dist/web/public dist/templates && mkdir -p dist/web/public dist/templates && cp -R src/web/public/. dist/web/public/ && for d in src/templates/*/; do name=$(basename \"$d\"); [ -f \"src/templates/$name/pipeline.yaml\" ] && cp -R \"src/templates/$name\" \"dist/templates/$name\"; done",
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx src/cli/index.ts"

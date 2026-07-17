@@ -59,14 +59,22 @@ const MIME_TYPES: Record<string, string> = {
   ".svg": "image/svg+xml",
 };
 
-function resolvePublicDir(): string {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/**
+ * Locate static UI assets. Must work for both:
+ * - dev/tests: import.meta.url under src/web/ → src/web/public
+ * - shipped bin: code bundled into dist/index.js → dist/web/public (postbuild)
+ * Prefer a directory that contains index.html (avoids empty shells / public/public nests).
+ */
+export function resolvePublicDir(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    path.resolve(__dirname, "public"),
-    path.resolve(__dirname, "..", "web", "public"),
-    path.resolve(__dirname, "..", "..", "src", "web", "public"),
+    path.resolve(here, "public"), // src/web/public (tsx / vitest)
+    path.resolve(here, "web", "public"), // dist/web/public (bundled dist/index.js)
+    path.resolve(here, "..", "web", "public"),
+    path.resolve(here, "..", "src", "web", "public"),
+    path.resolve(here, "..", "..", "src", "web", "public"),
   ];
-  const found = candidates.find((d) => fs.existsSync(d));
+  const found = candidates.find((d) => fs.existsSync(path.join(d, "index.html")));
   return found ?? candidates[0];
 }
 
