@@ -466,18 +466,31 @@ export class Engine {
 
     console.log(`  Command stage "${stage.name}": ${command}`);
     this.logger?.logStageAttempt(stage.name, 1, 1);
+    // Synthetic role so Run Trace / StageLog record the command as an execution node (issue #18)
+    const cmdTimer = this.logger?.logRoleStart(stage.name, "command", "command");
+    const startedMs = Date.now();
 
     try {
       execSync(command, { stdio: "inherit", timeout });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.log(`  Command stage "${stage.name}" FAILED: ${message}`);
+      if (cmdTimer) {
+        this.logger?.logRoleEnd(cmdTimer, {
+          gatePassed: false,
+          gateReason: `Command failed: ${message}`,
+          attempt: 1,
+          artifacts: [],
+        });
+      }
+      this.logger?.logGateResult(stage.name, false, `Command failed: ${message}`);
       return { status: "blocked", stage: stage.name, reason: `Command failed: ${message}` };
     }
 
     // Snapshot the command's output into the run directory before the gate
     // runs — a gate-rejected run still keeps its output for the lineage.
     this.snapshotCommandArtifacts(stage.name, artifactDir);
+    const durationHint = Date.now() - startedMs;
 
     // The command ran. If it declares a gate, evaluate it against the output.
     if (stage.gate) {
@@ -490,6 +503,14 @@ export class Engine {
       for (const detail of gateResult.details) {
         this.gateResults.set(detail.gateId, detail);
       }
+      if (cmdTimer) {
+        this.logger?.logRoleEnd(cmdTimer, {
+          gatePassed: gateResult.passed,
+          gateReason: gateResult.reason,
+          attempt: 1,
+          artifacts: [],
+        });
+      }
       this.logger?.logGateResult(stage.name, gateResult.passed, gateResult.reason);
       if (!gateResult.passed) {
         const detail = gateResult.details
@@ -500,9 +521,18 @@ export class Engine {
         console.log(`  Command stage "${stage.name}" gate FAILED: ${reason}`);
         return { status: "blocked", stage: stage.name, reason };
       }
+    } else if (cmdTimer) {
+      this.logger?.logRoleEnd(cmdTimer, {
+        gatePassed: true,
+        gateReason: "Command completed (no gate)",
+        attempt: 1,
+        artifacts: [],
+      });
+      this.logger?.logGateResult(stage.name, true, "Command completed (no gate)");
     }
 
     console.log(`  Command stage "${stage.name}" completed`);
+    void durationHint;
     return { status: "done" };
   }
 

@@ -276,3 +276,12 @@ describe("buildEvolutionView", () => {
     expect(view[0].attempts[1].gatePassed).toBe(true);
   });
 });
+
+
+describe("product web: command stage display (issue #18)", () => {
+  it("S1: config structure labels Command Stage", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).toMatch(/Command Stage/);
+    expect(appJs).toMatch(/kind === ["']command["']/);
+  });
+});
