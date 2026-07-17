@@ -14,9 +14,29 @@ import { startRun } from "../runner.js";
 import { listFilesRecursive, filterGeneratedFiles } from "../../util/fs.js";
 import { listPresetTemplates } from "../../templates/list.js";
 import { listProjectPipelines } from "../pipelines.js";
+import { listBranches, loadBranch, runRootForBranch } from "../../engine/branch.js";
 
 function handleListTemplates(res: http.ServerResponse): void {
   sendJson(res, 200, listPresetTemplates());
+}
+
+function petriRootForRequest(projectDir: string, url: URL): string {
+  const branch = url.searchParams.get("branch") || undefined;
+  if (branch) {
+    loadBranch(projectDir, branch); // throws if missing
+  }
+  return runRootForBranch(projectDir, branch || undefined);
+}
+
+function handleListBranches(res: http.ServerResponse, projectDir: string): void {
+  const branches = listBranches(projectDir).map((b) => ({
+    branch_id: b.branch_id,
+    status: b.status ?? "active",
+    objective: b.objective ?? null,
+    baseline: b.baseline ?? null,
+    created_at: b.created_at ?? null,
+  }));
+  sendJson(res, 200, branches);
 }
 
 function handleListPipelines(res: http.ServerResponse, projectDir: string): void {
@@ -82,7 +102,7 @@ export async function handleApiRequest(
   if (pathname === "/api/runs" && method === "POST") {
     try {
       const body = await readBody(req);
-      let parsed: { pipeline?: string; input?: string };
+      let parsed: { pipeline?: string; input?: string; branch?: string };
       try {
         parsed = JSON.parse(body);
       } catch {
@@ -96,19 +116,29 @@ export async function handleApiRequest(
       }
 
       const pipelineFile = parsed.pipeline ?? "pipeline.yaml";
+      const branchId = typeof parsed.branch === "string" && parsed.branch.trim()
+        ? parsed.branch.trim()
+        : undefined;
+      if (branchId) loadBranch(projectDir, branchId);
       const result = startRun({
         projectDir,
         pipelineFile,
         input: parsed.input,
         activeRuns,
+        branchId,
       });
 
-      sendJson(res, 200, { runId: result.runId });
+      sendJson(res, 200, { runId: result.runId, branchId: branchId ?? null });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       sendJson(res, 400, { error: message });
     }
     return;
+  }
+
+  // GET /api/branches — Petri branch list (issue #19)
+  if (pathname === "/api/branches" && method === "GET") {
+    return handleListBranches(res, projectDir);
   }
 
   // GET /api/pipelines — logical names + stage/role structure for Run + Config
@@ -118,13 +148,13 @@ export async function handleApiRequest(
 
   // GET /api/runs
   if (pathname === "/api/runs" && method === "GET") {
-    return handleListRuns(res, projectDir);
+    return handleListRuns(res, projectDir, url);
   }
 
   // GET /api/runs/:id/log
   const logMatch = pathname.match(/^\/api\/runs\/(\d+)\/log$/);
   if (logMatch && method === "GET") {
-    return handleRunLog(res, projectDir, logMatch[1]);
+    return handleRunLog(res, projectDir, logMatch[1], url);
   }
 
   // GET /api/runs/:id/artifacts/*
@@ -142,7 +172,7 @@ export async function handleApiRequest(
   // GET /api/runs/:id
   const runMatch = pathname.match(/^\/api\/runs\/(\d+)$/);
   if (runMatch && method === "GET") {
-    return handleRunDetail(res, projectDir, runMatch[1]);
+    return handleRunDetail(res, projectDir, runMatch[1], url);
   }
 
   // GET /api/config/files
@@ -429,39 +459,49 @@ function makeRunningStub(runDir: string, runId: string): object | null {
   };
 }
 
-function handleListRuns(res: http.ServerResponse, projectDir: string): void {
-  const runsDir = path.join(projectDir, ".petri", "runs");
-  const runNames = listRuns(runsDir);
-  const runs = runNames.map((name) => {
-    const runDir = path.join(runsDir, name);
-    const runId = name.replace("run-", "");
-    const log = loadRunLog(runDir);
-    if (!log) {
-      return makeRunningStub(runDir, runId) ?? { runId, status: "unknown" };
-    }
-    return log;
-  });
-  sendJson(res, 200, runs);
+function handleListRuns(res: http.ServerResponse, projectDir: string, url: URL): void {
+  const branch = url.searchParams.get("branch") || undefined;
+  try {
+    const petriDir = petriRootForRequest(projectDir, url);
+    const runsDir = path.join(petriDir, "runs");
+    const runNames = listRuns(runsDir);
+    const runs = runNames.map((name) => {
+      const runDir = path.join(runsDir, name);
+      const runId = name.replace("run-", "");
+      const log = loadRunLog(runDir);
+      if (!log) {
+        const stub = makeRunningStub(runDir, runId);
+        return stub ? { ...stub, branchId: branch ?? null } : { runId, status: "unknown", branchId: branch ?? null };
+      }
+      return { ...log, branchId: log.branchId ?? branch ?? null };
+    });
+    sendJson(res, 200, runs);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    sendJson(res, 400, { error: message });
+  }
 }
 
-function handleRunDetail(res: http.ServerResponse, projectDir: string, id: string): void {
-  const runDir = path.join(projectDir, ".petri", "runs", `run-${id}`);
+function handleRunDetail(res: http.ServerResponse, projectDir: string, id: string, url?: URL): void {
+  const petriDir = url ? petriRootForRequest(projectDir, url) : path.join(projectDir, ".petri");
+  const branch = url?.searchParams.get("branch") || undefined;
+  const runDir = path.join(petriDir, "runs", `run-${id}`);
   const log = loadRunLog(runDir);
   if (log) {
-    sendJson(res, 200, enrichRunDetail(log));
+    sendJson(res, 200, { ...enrichRunDetail(log), branchId: log.branchId ?? branch ?? null });
     return;
   }
-  // Run might be in progress (no run.json yet)
   const stub = makeRunningStub(runDir, id);
   if (stub) {
-    sendJson(res, 200, stub);
+    sendJson(res, 200, { ...stub, branchId: branch ?? null });
     return;
   }
   sendJson(res, 404, { error: "Run not found", code: "NOT_FOUND" });
 }
 
-function handleRunLog(res: http.ServerResponse, projectDir: string, id: string): void {
-  const logPath = path.join(projectDir, ".petri", "runs", `run-${id}`, "run.log");
+function handleRunLog(res: http.ServerResponse, projectDir: string, id: string, url?: URL): void {
+  const petriDir = url ? petriRootForRequest(projectDir, url) : path.join(projectDir, ".petri");
+  const logPath = path.join(petriDir, "runs", `run-${id}`, "run.log");
   if (!fs.existsSync(logPath)) {
     sendJson(res, 404, { error: "Log not found" });
     return;

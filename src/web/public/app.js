@@ -8,6 +8,7 @@ let currentRunData = null;
 let currentStageIndex = -1;
 let eventSource = null;
 let currentConfigPath = null;
+let currentBranch = ""; // empty = project default runs
 
 // Create tab wizard state
 let wizard = {
@@ -22,9 +23,16 @@ let wizard = {
 
 // ── API Helper ──
 function apiUrl(urlPath) {
-  if (!currentProject) return urlPath;
-  const sep = urlPath.includes("?") ? "&" : "?";
-  return urlPath + sep + "project=" + encodeURIComponent(currentProject);
+  let out = urlPath;
+  if (currentProject) {
+    const sep = out.includes("?") ? "&" : "?";
+    out = out + sep + "project=" + encodeURIComponent(currentProject);
+  }
+  if (currentBranch) {
+    const sep = out.includes("?") ? "&" : "?";
+    out = out + sep + "branch=" + encodeURIComponent(currentBranch);
+  }
+  return out;
 }
 
 async function api(urlPath, opts = {}) {
@@ -386,7 +394,56 @@ function openRunDetail(runId) {
   loadRun(runId);
 }
 
+async function loadBranches() {
+  const sel = $("#run-branch");
+  if (!sel) return;
+  const res = await api("/api/branches");
+  const prev = currentBranch;
+  sel.innerHTML = '<option value="">(default project runs)</option>';
+  if (res.status === 200 && Array.isArray(res.data)) {
+    for (const b of res.data) {
+      const id = b.branch_id || b.id;
+      sel.innerHTML += `<option value="${escAttr(id)}">${escHtml(id)}</option>`;
+    }
+  }
+  if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  else sel.value = "";
+  currentBranch = sel.value || "";
+  updateBranchMeta();
+  if (!sel.dataset.bound) {
+    sel.dataset.bound = "1";
+    sel.addEventListener("change", () => {
+      currentBranch = sel.value || "";
+      updateBranchMeta();
+      // reload run list for this branch context
+      if (!currentRunId) loadRunsTab();
+    });
+  }
+}
+
+function updateBranchMeta() {
+  const meta = $("#run-branch-meta");
+  if (!meta) return;
+  if (!currentBranch) {
+    meta.textContent = "Runs use project .petri/runs (no branch).";
+    return;
+  }
+  // Fetch branches again for meta - cache from options only
+  meta.textContent = "Branch: " + currentBranch + " · runs under .petri/branches/" + currentBranch + "/runs";
+  api("/api/branches").then((res) => {
+    if (res.status !== 200 || !Array.isArray(res.data)) return;
+    const b = res.data.find((x) => x.branch_id === currentBranch);
+    if (!b) return;
+    const parts = [`Branch: ${b.branch_id}`];
+    if (b.objective) parts.push("objective: " + b.objective);
+    if (b.baseline) parts.push("baseline: " + b.baseline);
+    meta.textContent = parts.join(" · ");
+  });
+}
+
 async function loadRunsTab() {
+  await loadBranches();
+
   // Make sure we're on list view
   if (currentRunId) return; // detail view is showing, don't overwrite
 
@@ -459,6 +516,7 @@ async function startNewRun() {
 
   const body = { input };
   if (pipeline) body.pipeline = pipeline;
+  if (currentBranch) body.branch = currentBranch;
 
   const res = await api("/api/runs", {
     method: "POST",
@@ -591,6 +649,7 @@ function renderRunSummary() {
       : "";
   $("#run-summary").innerHTML = `
     <div><span class="label">Pipeline:</span> ${escHtml(r.pipeline)}</div>
+    ${r.branchId ? `<div><span class="label">Branch:</span> ${escHtml(r.branchId)}</div>` : ""}
     <div><span class="label">Status:</span> <span class="${statusClass}">${escHtml(r.status)}</span></div>
     <div><span class="label">Started:</span> ${formatDate(r.startedAt)}</div>
     <div><span class="label">Duration:</span> ${formatDuration(r.durationMs)}</div>
