@@ -172,12 +172,31 @@
       </div>
     </section>
 
-    <!-- Config Tab -->
+    <!-- Config Tab: pipeline-centric navigation (#12) -->
     <section id="tab-config" class="tab-content">
       <div class="config-layout">
-        <aside class="file-tree-panel">
-          <h3>Files</h3>
-          <div id="file-tree" class="file-tree"></div>
+        <aside class="file-tree-panel config-nav-panel">
+          <div class="config-nav-section">
+            <h3>Project</h3>
+            <button type="button" class="config-nav-item" id="config-project-settings" data-path="petri.yaml">
+              Project settings
+              <span class="config-nav-sub">petri.yaml</span>
+            </button>
+          </div>
+          <div class="config-nav-section">
+            <h3>Pipelines</h3>
+            <div id="config-pipeline-list" class="config-pipeline-list">
+              <p class="empty-state" id="config-pipelines-empty">No pipelines found.</p>
+            </div>
+          </div>
+          <div class="config-nav-section" id="config-structure-section" style="display:none;">
+            <h3 id="config-structure-title">Structure</h3>
+            <div id="config-structure-tree" class="config-structure-tree"></div>
+          </div>
+          <details class="config-all-files">
+            <summary>All files</summary>
+            <div id="file-tree" class="file-tree"></div>
+          </details>
         </aside>
         <div class="editor-panel">
           <div class="editor-header">
@@ -187,7 +206,7 @@
           </div>
           <div id="config-validate-result" class="config-validate-result"></div>
           <div id="editor-status" class="editor-status"></div>
-          <textarea id="editor-content" class="editor-textarea" disabled placeholder="Select a file to edit..."></textarea>
+          <textarea id="editor-content" class="editor-textarea" disabled placeholder="Select a pipeline or file to edit..."></textarea>
         </div>
       </div>
     </section>

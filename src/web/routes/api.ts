@@ -13,9 +13,14 @@ import { sendJson, readBody } from "../server.js";
 import { startRun } from "../runner.js";
 import { listFilesRecursive, filterGeneratedFiles } from "../../util/fs.js";
 import { listPresetTemplates } from "../../templates/list.js";
+import { listProjectPipelines } from "../pipelines.js";
 
 function handleListTemplates(res: http.ServerResponse): void {
   sendJson(res, 200, listPresetTemplates());
+}
+
+function handleListPipelines(res: http.ServerResponse, projectDir: string): void {
+  sendJson(res, 200, listProjectPipelines(projectDir));
 }
 
 /** Group stage logs into evolution-friendly stage → attempts shape. */
@@ -104,6 +109,11 @@ export async function handleApiRequest(
       sendJson(res, 400, { error: message });
     }
     return;
+  }
+
+  // GET /api/pipelines — logical names + stage/role structure for Run + Config
+  if (pathname === "/api/pipelines" && method === "GET") {
+    return handleListPipelines(res, projectDir);
   }
 
   // GET /api/runs

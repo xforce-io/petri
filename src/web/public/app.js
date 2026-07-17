@@ -390,20 +390,25 @@ async function loadRunsTab() {
   // Make sure we're on list view
   if (currentRunId) return; // detail view is showing, don't overwrite
 
-  // Populate pipeline dropdown
-  const configRes = await api("/api/config/files");
+  // Populate pipeline dropdown from GET /api/pipelines:
+  // value = file path (engine), label = logical name (YAML name:)
   const pipelineSelect = $("#run-pipeline");
-  if (configRes.status === 200 && Array.isArray(configRes.data)) {
-    const pipelineFiles = configRes.data.filter((f) =>
-      typeof f === "string" ? f.match(/pipeline.*\.yaml$/i) : (f.path || "").match(/pipeline.*\.yaml$/i)
-    );
-    pipelineSelect.innerHTML = pipelineFiles.map((f) => {
-      const p = typeof f === "string" ? f : f.path;
-      return `<option value="${escAttr(p)}">${escHtml(p)}</option>`;
-    }).join("");
-    if (pipelineFiles.length === 0) {
-      pipelineSelect.innerHTML = '<option value="">No pipelines found</option>';
-    }
+  const pipesRes = await api("/api/pipelines");
+  if (pipesRes.status === 200 && Array.isArray(pipesRes.data) && pipesRes.data.length > 0) {
+    const pipes = pipesRes.data;
+    const nameCount = {};
+    for (const p of pipes) nameCount[p.name] = (nameCount[p.name] || 0) + 1;
+    pipelineSelect.innerHTML = pipes
+      .map((pipe) => {
+        let label = pipe.name || pipe.file;
+        if (nameCount[pipe.name] > 1 && pipe.name !== pipe.file) {
+          label = `${pipe.name} (${pipe.file})`;
+        }
+        return `<option value="${escAttr(pipe.file)}">${escHtml(label)}</option>`;
+      })
+      .join("");
+  } else {
+    pipelineSelect.innerHTML = '<option value="">No pipelines found</option>';
   }
 
   // Load run history
@@ -783,12 +788,138 @@ function formatSSEEvent(data) {
 }
 
 // ══════════════════════════════════════
-// ── Config Tab
+// ── Config Tab (pipeline-centric, #12)
 // ══════════════════════════════════════
 
+let configPipelines = [];
+let selectedConfigPipelineFile = null;
+
 async function loadConfigTab() {
+  // Project settings always available
+  const projBtn = $("#config-project-settings");
+  if (projBtn && !projBtn.dataset.bound) {
+    projBtn.dataset.bound = "1";
+    projBtn.addEventListener("click", () => {
+      clearConfigNavActive();
+      projBtn.classList.add("active");
+      selectedConfigPipelineFile = null;
+      $("#config-structure-section").style.display = "none";
+      loadConfigFile("petri.yaml");
+    });
+  }
+
+  // Pipeline list by logical name
+  const listEl = $("#config-pipeline-list");
+  const emptyEl = $("#config-pipelines-empty");
+  const pipesRes = await api("/api/pipelines");
+  if (pipesRes.status !== 200 || !Array.isArray(pipesRes.data)) {
+    if (listEl) {
+      listEl.innerHTML =
+        '<p class="empty-state">Failed to load pipelines. Check project selection or restart petri web.</p>';
+    }
+    configPipelines = [];
+  } else {
+    configPipelines = pipesRes.data;
+    if (configPipelines.length === 0) {
+      if (emptyEl) {
+        emptyEl.style.display = "";
+        emptyEl.textContent =
+          "No pipelines found. Add a pipeline.yaml or create a project from a template on Home.";
+      }
+      if (listEl) listEl.innerHTML = emptyEl ? emptyEl.outerHTML : "";
+    } else {
+      if (emptyEl) emptyEl.style.display = "none";
+      const nameCount = {};
+      for (const p of configPipelines) nameCount[p.name] = (nameCount[p.name] || 0) + 1;
+      listEl.innerHTML = configPipelines
+        .map((p) => {
+          let label = p.name || p.file;
+          if (nameCount[p.name] > 1 && p.name !== p.file) {
+            label = `${p.name} (${p.file})`;
+          }
+          const active =
+            selectedConfigPipelineFile === p.file ? " active" : "";
+          return `<button type="button" class="config-nav-item config-pipeline-item${active}" data-file="${escAttr(p.file)}">
+            <span class="config-nav-title">${escHtml(label)}</span>
+            <span class="config-nav-sub">${escHtml(p.file)}</span>
+          </button>`;
+        })
+        .join("");
+      listEl.querySelectorAll(".config-pipeline-item").forEach((el) => {
+        el.addEventListener("click", () => selectConfigPipeline(el.dataset.file));
+      });
+    }
+  }
+
+  // Optional full file tree under "All files"
+  await loadConfigAllFilesTree();
+
+  // Restore selection
+  if (selectedConfigPipelineFile) {
+    selectConfigPipeline(selectedConfigPipelineFile);
+  } else if (currentConfigPath) {
+    loadConfigFile(currentConfigPath);
+  }
+}
+
+function clearConfigNavActive() {
+  $$(".config-nav-item").forEach((el) => el.classList.remove("active"));
+  $$(".config-structure-item").forEach((el) => el.classList.remove("active"));
+}
+
+function selectConfigPipeline(file) {
+  selectedConfigPipelineFile = file;
+  const pipe = configPipelines.find((p) => p.file === file);
+  clearConfigNavActive();
+  $$(".config-pipeline-item").forEach((el) => {
+    el.classList.toggle("active", el.dataset.file === file);
+  });
+
+  const section = $("#config-structure-section");
+  const tree = $("#config-structure-tree");
+  const title = $("#config-structure-title");
+  if (!pipe) {
+    if (section) section.style.display = "none";
+    return;
+  }
+  if (section) section.style.display = "";
+  if (title) title.textContent = pipe.name || file;
+
+  let html = "";
+  html += `<button type="button" class="config-structure-item" data-path="${escAttr(pipe.file)}">
+    <strong>Pipeline definition</strong>
+    <span class="config-nav-sub">${escHtml(pipe.file)}</span>
+  </button>`;
+
+  for (const stage of pipe.stages || []) {
+    html += `<div class="config-stage-label">Stage: ${escHtml(stage.name)}</div>`;
+    for (const role of stage.roles || []) {
+      const rolePrefix = `roles/${role}`;
+      html += `<div class="config-role-block">
+        <div class="config-role-name">${escHtml(role)}</div>
+        <button type="button" class="config-structure-item" data-path="${escAttr(rolePrefix + "/role.yaml")}">role.yaml</button>
+        <button type="button" class="config-structure-item" data-path="${escAttr(rolePrefix + "/soul.md")}">soul.md</button>
+        <button type="button" class="config-structure-item" data-path="${escAttr(rolePrefix + "/gate.yaml")}">gate.yaml</button>
+      </div>`;
+    }
+  }
+  tree.innerHTML = html;
+  tree.querySelectorAll(".config-structure-item").forEach((el) => {
+    el.addEventListener("click", () => {
+      tree.querySelectorAll(".config-structure-item").forEach((e) => e.classList.remove("active"));
+      el.classList.add("active");
+      loadConfigFile(el.dataset.path);
+    });
+  });
+
+  // Open pipeline file by default
+  loadConfigFile(pipe.file);
+}
+
+async function loadConfigAllFilesTree() {
   const res = await api("/api/config/files");
   const tree = $("#file-tree");
+  if (!tree) return;
 
   if (res.status !== 200 || !Array.isArray(res.data)) {
     tree.innerHTML = '<p class="empty-state">Failed to load files.</p>';
@@ -850,7 +981,12 @@ async function loadConfigFile(filePath) {
     editor.disabled = false;
     saveBtn.disabled = false;
   } else {
-    editor.value = "Failed to load file.";
+    const err =
+      (res.data && res.data.error) ||
+      (res.status === 404 ? "File not found." : "Failed to load file.");
+    editor.value = err;
+    statusEl.textContent = err;
+    statusEl.className = "editor-status error";
   }
 }
 
