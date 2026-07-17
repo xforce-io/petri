@@ -157,8 +157,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.target.closest("#io-prompt-toggle")) {
       const el = $("#io-prompt");
       el.classList.toggle("collapsed");
-      const toggle = e.target.closest("#io-prompt-toggle").querySelector(".io-toggle");
-      if (toggle) toggle.textContent = el.classList.contains("collapsed") ? "\u25B6" : "\u25BC";
+      const btn = e.target.closest("#io-prompt-toggle");
+      const toggle = btn.querySelector(".io-toggle");
+      const collapsed = el.classList.contains("collapsed");
+      if (toggle) toggle.textContent = collapsed ? "\u25B6" : "\u25BC";
+      if (btn && btn.setAttribute) btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
     }
   });
 
@@ -723,10 +726,10 @@ async function loadStageArtifacts() {
   }
 
   container.innerHTML = artifacts.map((a) => `
-    <div class="artifact-item" data-path="${escAttr(a.path)}">
+    <button type="button" class="artifact-item" data-path="${escAttr(a.path)}">
       <span>${escHtml(a.path)}</span>
       <span class="artifact-size">${formatSize(a.size)}</span>
-    </div>
+    </button>
   `).join("");
 
   container.querySelectorAll(".artifact-item").forEach((el) => {

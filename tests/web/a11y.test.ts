@@ -85,4 +85,14 @@ describe("web a11y native semantics (issue #22)", () => {
     expect(appJs).toMatch(/tabIndex\s*=\s*0/);
     expect(appJs).toMatch(/key === "Enter"/);
   });
+
+  it("S1: prompt toggle, artifact rows, and wizard steps are buttons", () => {
+    const html = fs.readFileSync(path.join(process.cwd(), "src/web/public/index.html"), "utf-8");
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(html).toMatch(/<button type="button"[^>]*id="io-prompt-toggle"/);
+    expect(html).not.toMatch(/<div class="io-header" id="io-prompt-toggle"/);
+    expect(html).toMatch(/<button type="button" class="step-item/);
+    expect(appJs).toMatch(/button type="button" class="artifact-item/);
+    expect(appJs).not.toMatch(/<div class="artifact-item"/);
+  });
 });
