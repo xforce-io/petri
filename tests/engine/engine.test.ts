@@ -446,6 +446,113 @@ describe("Engine", () => {
     expect(result.reason).toMatch(/timed out|timeout|Stagnation/i);
   }, 10_000);
 
+  it("settles a timed-out attempt within grace so the next attempt does not wait on the loser", async () => {
+    const gate = makeGate("{stage}/{role}/output.json", {
+      field: "approved",
+      equals: true,
+    });
+    const roles: Record<string, LoadedRole> = {
+      worker: makeRole("worker", gate),
+    };
+
+    let settledAfterAbort = false;
+    let abortAt = 0;
+    let settleAt = 0;
+    // Provider that ignores abort for 30s (simulates stuck claude-code) — engine
+    // must not wait on that full duration before ending the attempt.
+    const slowAbortProvider: AgentProvider = {
+      createAgent(): PetriAgent {
+        return {
+          run(signal?: AbortSignal): Promise<AgentResult> {
+            return new Promise((_resolve, reject) => {
+              signal?.addEventListener(
+                "abort",
+                () => {
+                  abortAt = Date.now();
+                  setTimeout(() => {
+                    settleAt = Date.now();
+                    settledAfterAbort = true;
+                    reject(new Error("late provider settle after abort"));
+                  }, 30_000);
+                },
+                { once: true },
+              );
+            });
+          },
+        };
+      },
+    };
+
+    const pipeline: PipelineConfig = {
+      name: "test-pipeline",
+      stages: [{ name: "work", roles: ["worker"], max_retries: 0, timeout: 80 }],
+    };
+
+    const engine = new Engine({
+      provider: slowAbortProvider,
+      roles,
+      artifactBaseDir: tmpDir,
+    });
+
+    const t0 = Date.now();
+    const result = await engine.run(pipeline, "Do work");
+    const elapsed = Date.now() - t0;
+
+    expect(result.status).toBe("blocked");
+    expect(result.reason).toMatch(/timed out|timeout|Max retries|budget|Stagnation/i);
+    // Attempt must finish well under the provider's 30s post-abort hang.
+    expect(elapsed).toBeLessThan(8_000);
+    expect(abortAt).toBeGreaterThan(0);
+    // Engine may finish before the late settle; that is the point of grace settle.
+    if (settledAfterAbort) {
+      expect(settleAt - abortAt).toBeLessThan(30_000);
+    }
+  }, 15_000);
+
+  it("enforces a hard stage wall-clock budget so hanging providers cannot stall for hours", async () => {
+    const gate = makeGate("{stage}/{role}/output.json", {
+      field: "approved",
+      equals: true,
+    });
+    const roles: Record<string, LoadedRole> = {
+      worker: makeRole("worker", gate),
+    };
+
+    // Provider that never honors abort and never resolves — only the stage
+    // wall-clock budget can bound the run (issue #6 criterion 3).
+    const immortalProvider: AgentProvider = {
+      createAgent(): PetriAgent {
+        return {
+          run(): Promise<AgentResult> {
+            return new Promise(() => {});
+          },
+        };
+      },
+    };
+
+    const pipeline: PipelineConfig = {
+      name: "test-pipeline",
+      // 2 attempts × 100ms timeout — wall-clock must stay on the order of
+      // (max_retries+1)*(timeout+settleGrace), not multi-minute.
+      stages: [{ name: "work", roles: ["worker"], max_retries: 1, timeout: 100 }],
+    };
+
+    const engine = new Engine({
+      provider: immortalProvider,
+      roles,
+      artifactBaseDir: tmpDir,
+    });
+
+    const t0 = Date.now();
+    const result = await engine.run(pipeline, "Do work");
+    const elapsed = Date.now() - t0;
+
+    expect(result.status).toBe("blocked");
+    expect(result.reason).toMatch(/timed out|timeout|Stagnation|budget|wall-clock/i);
+    // With timeout=100 and max_retries=1, budget is a few seconds max.
+    expect(elapsed).toBeLessThan(6_000);
+  }, 15_000);
+
   it("runs nested repeat blocks", async () => {
     const innerGate: GateConfig = {
       id: "inner-done",
