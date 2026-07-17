@@ -3,13 +3,30 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 describe("preset vs AI create terminology (issue #25)", () => {
-  it("S1: distinct names and cost/result notes for preset vs AI", () => {
-    const html = fs.readFileSync(path.join(process.cwd(), "src/web/public/index.html"), "utf-8");
-    const app = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
-    expect(html + app).toMatch(/preset/i);
-    expect(html).toMatch(/AI|model|cost/i);
-    expect(html).not.toMatch(/Preferred path: Home → New from template/);
-    // AI path mentions cost or model
-    expect(html).toMatch(/cost|model/i);
+  const html = () =>
+    fs.readFileSync(path.join(process.cwd(), "src/web/public/index.html"), "utf-8");
+
+  it("S1: preset entry uses distinct name from AI generator", () => {
+    const h = html();
+    expect(h).toMatch(/New project from preset/);
+    expect(h).toMatch(/id="ai-create-banner"/);
+    expect(h).toMatch(/AI Pipeline generator/);
+    expect(h).not.toMatch(/Preferred path: Home → New from template/);
+  });
+
+  it("S1: AI path explains cost and result before execution", () => {
+    const h = html();
+    // Specific AI cost wording — not the Runs table "Cost" column
+    expect(h).toMatch(/may incur API cost/);
+    expect(h).toMatch(/id="ai-create-preexec-note"/);
+    expect(h).toMatch(/AI generation/);
+    expect(h).toMatch(/does not copy a preset project|not a deterministic project copy/);
+    expect(h).toMatch(/id="ai-generate-progress"/);
+    expect(h).toMatch(/model call in progress/);
+  });
+
+  it("S1: AI style hints are not labeled as project presets", () => {
+    const h = html();
+    expect(h).toMatch(/Optional AI style hints \(not project presets\)/);
   });
 });

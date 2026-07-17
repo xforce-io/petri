@@ -213,7 +213,11 @@
 
     <!-- Create Tab (experimental — not #9 acceptance path; use Home template create) -->
     <section id="tab-create" class="tab-content">
-      <p class="experimental-banner">Experimental NL pipeline generator. Preferred path: Home → New project from preset.</p>
+      <p class="experimental-banner" id="ai-create-banner">
+        <strong>AI Pipeline generator</strong> — calls a language model and <strong>may incur API cost</strong>.
+        Result: a newly generated pipeline under review (not a deterministic project copy).
+        For a free, deterministic project copy from a preset, use Home → <em>New project from preset</em>.
+      </p>
       <!-- Step Indicator Bar -->
       <div class="step-bar">
         <div class="step-item active" data-step="1">
@@ -242,14 +246,19 @@
         <div class="choose-layout">
           <div class="choose-left">
             <h3>What do you want to build?</h3>
-            <p class="create-hint">Describe your pipeline or start with a template.</p>
+            <p class="create-hint" id="ai-create-preexec-note">
+              You are about to use <strong>AI generation</strong> (not preset copy).
+              Next step will call a model — expect latency and possible provider cost.
+              Output is a draft pipeline to review; it does not copy a preset project into the workspace.
+            </p>
+            <p class="create-hint">Describe the pipeline you want generated, or pick an optional style hint below.</p>
             <textarea id="create-description" rows="8" placeholder="Example: Build a code review pipeline with three stages — a designer creates the architecture, a developer implements it, then a reviewer checks code quality and test coverage..."></textarea>
             <div class="create-actions">
               <button id="wizard-next-1" class="btn-primary" disabled>Next</button>
             </div>
           </div>
           <div class="choose-right">
-            <h3>Browse templates</h3>
+            <h3>Optional AI style hints (not project presets)</h3>
             <div id="template-grid" class="template-grid">
               <div class="template-card blank-card" data-template-id="">
                 <div class="template-name">Blank</div>
@@ -264,7 +273,7 @@
       <div id="wizard-step-2" class="wizard-step">
         <div class="generate-view">
           <div class="spinner"></div>
-          <span class="generate-msg">Generating pipeline... This may take 10-30 seconds.</span>
+          <span class="generate-msg" id="ai-generate-progress">AI is generating a pipeline (model call in progress — may incur cost). This may take 10–30 seconds.</span>
           <div id="generate-error" class="generate-error" style="display:none;">
             <span id="generate-error-msg"></span>
             <div class="generate-error-actions">
