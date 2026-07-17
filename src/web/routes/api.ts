@@ -3,6 +3,7 @@
 import * as http from "node:http";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import { parse as parseYaml } from "yaml";
 import { listRuns, loadRunLog, loadRunTrace, buildTraceFromStages, type RunLog, type RunLogger, type StageLog, type RunTrace } from "../../engine/logger.js";
 import { generatePipeline } from "../../engine/generator.js";
@@ -167,11 +168,9 @@ export async function handleApiRequest(
     return handleConfigFileWrite(req, res, url, projectDir);
   }
 
-  // POST /api/config/validate — validate current project instance config
+  // POST /api/config/validate — validate project, optionally with unsaved drafts
   if (pathname === "/api/config/validate" && method === "POST") {
-    const result = validateProject(projectDir);
-    sendJson(res, result.valid ? 200 : 400, result);
-    return;
+    return handleConfigValidate(req, res, projectDir);
   }
 
   // POST /api/generate
@@ -530,6 +529,110 @@ function handleArtifactFile(
   const content = fs.readFileSync(absPath, "utf-8");
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
   res.end(content);
+}
+
+
+/**
+ * Validate project config. Optional body: { drafts?: Record<path, content> }
+ * Drafts overlay unsaved editor content without writing the real project dir.
+ */
+async function handleConfigValidate(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  projectDir: string,
+): Promise<void> {
+  let drafts: Record<string, string> = {};
+  try {
+    const raw = await readBody(req);
+    if (raw && raw.trim()) {
+      const parsed = JSON.parse(raw) as { drafts?: Record<string, string>; path?: string; content?: string };
+      if (parsed.drafts && typeof parsed.drafts === "object" && !Array.isArray(parsed.drafts)) {
+        for (const [k, v] of Object.entries(parsed.drafts)) {
+          if (typeof k === "string" && typeof v === "string") drafts[k] = v;
+        }
+      } else if (typeof parsed.path === "string" && typeof parsed.content === "string") {
+        drafts[parsed.path] = parsed.content;
+      }
+    }
+  } catch {
+    sendJson(res, 400, { valid: false, errors: ["Invalid JSON body"] });
+    return;
+  }
+
+  for (const rel of Object.keys(drafts)) {
+    if (!isPathSafe(projectDir, rel)) {
+      sendJson(res, 403, { valid: false, errors: [`Forbidden draft path: ${rel}`] });
+      return;
+    }
+  }
+
+  if (Object.keys(drafts).length === 0) {
+    const result = validateProject(projectDir);
+    sendJson(res, result.valid ? 200 : 400, result);
+    return;
+  }
+
+  const result = validateProjectWithDrafts(projectDir, drafts);
+  sendJson(res, result.valid ? 200 : 400, result);
+}
+
+function copyConfigTree(srcDir: string, destDir: string): void {
+  // Copy petri.yaml + every pipeline*.yaml so non-default pipelines can be validated
+  try {
+    for (const name of fs.readdirSync(srcDir)) {
+      if (name === "petri.yaml" || /^pipeline.*\.ya?ml$/i.test(name)) {
+        const src = path.join(srcDir, name);
+        if (fs.statSync(src).isFile()) {
+          fs.copyFileSync(src, path.join(destDir, name));
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  const rolesSrc = path.join(srcDir, "roles");
+  if (fs.existsSync(rolesSrc) && fs.statSync(rolesSrc).isDirectory()) {
+    fs.cpSync(rolesSrc, path.join(destDir, "roles"), { recursive: true });
+  }
+}
+
+/** Overlay drafts onto a temp config tree and run validateProject (does not touch projectDir). */
+export function validateProjectWithDrafts(
+  projectDir: string,
+  drafts: Record<string, string>,
+): { valid: boolean; errors: string[] } {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "petri-validate-draft-"));
+  try {
+    copyConfigTree(projectDir, tmp);
+    // Syntax-check every YAML draft first so illegal drafts never report success
+    const yamlErrors: string[] = [];
+    for (const [rel, content] of Object.entries(drafts)) {
+      if (!isPathSafe(tmp, rel)) {
+        return { valid: false, errors: [`Forbidden draft path: ${rel}`] };
+      }
+      if (rel.endsWith(".yaml") || rel.endsWith(".yml")) {
+        try {
+          parseYaml(content);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Invalid YAML";
+          yamlErrors.push(`${rel}: YAML syntax error: ${message}`);
+        }
+      }
+      const abs = path.resolve(tmp, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content, "utf-8");
+    }
+    if (yamlErrors.length > 0) {
+      return { valid: false, errors: yamlErrors };
+    }
+    // Prefer validating the pipeline file present in drafts (non-default pipelines)
+    const draftPipe =
+      Object.keys(drafts).find((p) => /^pipeline.*\.ya?ml$/i.test(path.basename(p))) ??
+      "pipeline.yaml";
+    return validateProject(tmp, draftPipe);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 function handleConfigFiles(res: http.ServerResponse, projectDir: string): void {
