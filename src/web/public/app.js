@@ -320,11 +320,14 @@ async function loadDashboard() {
       <div class="stat-value">${formatCost(totalCost)}</div>
       <div class="stat-label">Total Cost</div>
     </div>
-    <div class="stat-card stat-card-action" onclick="switchToTab('runs');">
+    <button type="button" class="stat-card stat-card-action" id="home-start-run-btn">
       <div class="stat-value">▶</div>
       <div class="stat-label">Start a Run</div>
-    </div>
+    </button>
   `;
+  const startRunBtn = $("#home-start-run-btn");
+  if (startRunBtn) startRunBtn.addEventListener("click", () => switchToTab("runs"));
+
 
   const sorted = runs.slice().sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
   const recent = sorted.slice(0, 10);
@@ -336,7 +339,17 @@ async function loadDashboard() {
     $("#overview-runs-table").style.display = "table";
     tbody.innerHTML = recent.map((r) => renderRunRow(r)).join("");
     tbody.querySelectorAll("tr").forEach((row) => {
-      row.addEventListener("click", () => openRunDetail(row.dataset.runid));
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-label", "Open run " + row.dataset.runid);
+      const open = () => openRunDetail(row.dataset.runid);
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          open();
+        }
+      });
     });
   } else {
     emptyMsg.style.display = "";
@@ -422,7 +435,17 @@ async function loadRunsTab() {
     $("#runs-table").style.display = "table";
     tbody.innerHTML = runs.map((r) => renderRunRow(r)).join("");
     tbody.querySelectorAll("tr").forEach((row) => {
-      row.addEventListener("click", () => openRunDetail(row.dataset.runid));
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-label", "Open run " + row.dataset.runid);
+      const open = () => openRunDetail(row.dataset.runid);
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          open();
+        }
+      });
     });
   } else {
     emptyMsg.style.display = "block";
@@ -536,7 +559,7 @@ function renderStageList() {
       const dotClass = s.gatePassed === true ? "passed" : s.gatePassed === false ? "failed" : "pending";
       const attemptStr = s.attempt ? ` · attempt ${s.attempt}` : "";
       return `
-      <div class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
+      <button type="button" class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
@@ -566,13 +589,13 @@ function renderStageList() {
     const modelStr = s.model ? ` · ${s.model}` : "";
     const attemptStr = s.attempt ? ` · attempt ${s.attempt}` : "";
     return `
-      <div class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
+      <button type="button" class="stage-item${i === currentStageIndex ? " active" : ""}" data-index="${i}">
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
           <div class="stage-meta">${escHtml(s.role || "")}${modelStr} · ${formatDuration(s.durationMs)}${costStr}</div>
         </div>
-      </div>
+      </button>
     `;
   }).join("");
 
@@ -1040,13 +1063,13 @@ async function loadTemplates() {
 
 function renderTemplateGrid() {
   const grid = $("#template-grid");
-  let html = '<div class="template-card blank-card' + (wizard.templateId === null ? " selected" : "") + '" data-template-id="">' +
+  let html = '<div class="template-card" role="button" tabindex="0 blank-card' + (wizard.templateId === null ? " selected" : "") + '" data-template-id="">' +
     '<div class="template-name">Blank</div>' +
     '<div class="template-desc">Start from scratch with a custom description.</div>' +
     '</div>';
   for (const t of wizard.templates) {
     const sel = wizard.templateId === t.id ? " selected" : "";
-    html += '<div class="template-card' + sel + '" data-template-id="' + escAttr(t.id) + '">' +
+    html += '<div class="template-card" role="button" tabindex="0' + sel + '" data-template-id="' + escAttr(t.id) + '">' +
       '<div class="template-name">' + escHtml(t.name) + '</div>' +
       '<div class="template-desc">' + escHtml(t.description) + '</div>' +
       '<div class="template-meta">' + t.stages.length + ' stages · ' + escHtml(t.roles.join(", ")) + '</div>' +

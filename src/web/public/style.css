@@ -1511,3 +1511,26 @@ main {
   flex: 1;
   overflow: hidden;
 }
+
+
+/* a11y focus (issue #22) */
+:focus-visible {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: 2px;
+}
+button.stage-item,
+button.stat-card {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+}
+button.stat-card-action {
+  border: 1px solid var(--border, #333);
+  background: inherit;
+  border-radius: inherit;
+}
+tr[role="button"] {
+  cursor: pointer;
+}
