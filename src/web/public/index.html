@@ -15,7 +15,7 @@
       <button class="tab active" data-tab="dashboard">Home</button>
       <button class="tab" data-tab="runs">Runs</button>
       <button class="tab" data-tab="config">Config</button>
-      <button class="tab tab-secondary" data-tab="create" title="Experimental">Create ⋯</button>
+      <button class="tab tab-secondary" data-tab="create" title="AI Pipeline generator — may incur model cost">AI Generate</button>
     </nav>
     <div id="project-selector" class="project-selector" style="display:none;">
       <label for="project-select" class="project-label">Project</label>
@@ -37,7 +37,7 @@
         </p>
         <div class="onboarding-actions">
           <div class="onboarding-card" id="onboarding-create-card">
-            <h3>1. New from template</h3>
+            <h3>1. New project from preset</h3>
             <p>Copy a preset pipeline into this workspace.</p>
             <label for="new-project-name">Project name</label>
             <input id="new-project-name" type="text" placeholder="my-project" maxlength="64" />
@@ -218,12 +218,16 @@
 
     <!-- Create Tab (experimental — not #9 acceptance path; use Home template create) -->
     <section id="tab-create" class="tab-content">
-      <p class="experimental-banner">Experimental NL pipeline generator. Preferred path: Home → New from template.</p>
+      <p class="experimental-banner" id="ai-create-banner">
+        <strong>AI Pipeline generator</strong> — calls a language model and <strong>may incur API cost</strong>.
+        Result: a newly generated pipeline under review (not a deterministic project copy).
+        For a free, deterministic project copy from a preset, use Home → <em>New project from preset</em>.
+      </p>
       <!-- Step Indicator Bar -->
       <div class="step-bar">
         <button type="button" class="step-item active" data-step="1">
           <div class="step-number">1</div>
-          <div class="step-label">Choose</div>
+          <div class="step-label">Describe / AI generate</div>
         </button>
         <div class="step-line"></div>
         <button type="button" class="step-item" data-step="2">
@@ -247,14 +251,19 @@
         <div class="choose-layout">
           <div class="choose-left">
             <h3>What do you want to build?</h3>
-            <p class="create-hint">Describe your pipeline or start with a template.</p>
+            <p class="create-hint" id="ai-create-preexec-note">
+              You are about to use <strong>AI generation</strong> (not preset copy).
+              Next step will call a model — expect latency and possible provider cost.
+              Output is a draft pipeline to review; it does not copy a preset project into the workspace.
+            </p>
+            <p class="create-hint">Describe the pipeline you want generated, or pick an optional style hint below.</p>
             <textarea id="create-description" rows="8" placeholder="Example: Build a code review pipeline with three stages — a designer creates the architecture, a developer implements it, then a reviewer checks code quality and test coverage..."></textarea>
             <div class="create-actions">
               <button id="wizard-next-1" class="btn-primary" disabled>Next</button>
             </div>
           </div>
           <div class="choose-right">
-            <h3>Browse templates</h3>
+            <h3>Optional AI style hints (not project presets)</h3>
             <div id="template-grid" class="template-grid">
               <div class="template-card blank-card" data-template-id="">
                 <div class="template-name">Blank</div>
@@ -269,7 +278,7 @@
       <div id="wizard-step-2" class="wizard-step">
         <div class="generate-view">
           <div class="spinner"></div>
-          <span class="generate-msg">Generating pipeline... This may take 10-30 seconds.</span>
+          <span class="generate-msg" id="ai-generate-progress">AI is generating a pipeline (model call in progress — may incur cost). This may take 10–30 seconds.</span>
           <div id="generate-error" class="generate-error" style="display:none;">
             <span id="generate-error-msg"></span>
             <div class="generate-error-actions">
