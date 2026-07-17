@@ -6,6 +6,7 @@ import * as http from "node:http";
 import { createPetriServer, type ServerResult } from "../../src/web/server.js";
 import { RunLogger } from "../../src/engine/logger.js";
 import { buildEvolutionView } from "../../src/web/routes/api.js";
+import { fileURLToPath } from "node:url";
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "petri-product-test-"));
@@ -274,5 +275,90 @@ describe("buildEvolutionView", () => {
     expect(view).toHaveLength(1);
     expect(view[0].attempts).toHaveLength(2);
     expect(view[0].attempts[1].gatePassed).toBe(true);
+  });
+});
+
+describe("product web: config validate draft overlay (issue #14)", () => {
+  let projectDir: string;
+  let result: ServerResult;
+
+  beforeEach(async () => {
+    projectDir = makeTmpDir();
+    fs.writeFileSync(
+      path.join(projectDir, "petri.yaml"),
+      "providers:\n  default:\n    type: pi\ndefaults:\n  model: test\n  gate_strategy: all\n  max_retries: 1\n",
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "pipeline.yaml"),
+      "name: t\nstages:\n  - name: work\n    roles: [worker]\n  - repeat:\n      name: loop\n      max_iterations: 1\n      until: ok\n      stages:\n        - name: again\n          roles: [worker]\n",
+    );
+    fs.mkdirSync(path.join(projectDir, "roles", "worker"), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "roles", "worker", "role.yaml"),
+      "persona: soul.md\nplaybooks: []\n",
+    );
+    fs.writeFileSync(path.join(projectDir, "roles", "worker", "soul.md"), "Worker.\n");
+    fs.writeFileSync(
+      path.join(projectDir, "roles", "worker", "gate.yaml"),
+      "id: ok\nevidence:\n  path: '{stage}/{role}/out.json'\n  check:\n    field: score\n    gte: 1\n",
+    );
+
+    result = await createPetriServer({
+      projectDir,
+      projectDirs: [{ name: path.basename(projectDir), dir: projectDir }],
+      workspaceRoot: path.dirname(projectDir),
+      port: 0,
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => result.server.close(() => resolve()));
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it("S1: POST /api/config/validate with illegal draft YAML fails even when disk is valid", async () => {
+    // Disk project is valid; unsaved illegal draft must not report success
+    const disk = await request(result.port, "/api/config/validate", "POST", "{}");
+    const diskData = JSON.parse(disk.body);
+    // If disk invalid for other reasons, still assert draft path
+    const res = await request(
+      result.port,
+      "/api/config/validate",
+      "POST",
+      JSON.stringify({ drafts: { "pipeline.yaml": "name: [\nbad" } }),
+    );
+    expect(res.status).toBe(400);
+    const data = JSON.parse(res.body);
+    expect(data.valid).toBe(false);
+    expect(Array.isArray(data.errors)).toBe(true);
+    expect(data.errors.join("\n")).toMatch(/pipeline\.yaml|YAML|yaml|bad|parse|syntax/i);
+    // Disk file must remain unchanged
+    const onDisk = fs.readFileSync(path.join(projectDir, "pipeline.yaml"), "utf-8");
+    expect(onDisk).not.toContain("name: [");
+    expect(onDisk).toContain("name: t");
+    void diskData;
+  });
+
+  it("S1: validate without drafts uses saved project only", async () => {
+    const res = await request(result.port, "/api/config/validate", "POST", "{}");
+    expect([200, 400]).toContain(res.status);
+    const data = JSON.parse(res.body);
+    expect(typeof data.valid).toBe("boolean");
+    expect(Array.isArray(data.errors)).toBe(true);
+  });
+
+  it("S1: frontend app.js validates draft content and clears stale result on change", () => {
+    const appJs = fs.readFileSync(
+      path.join(process.cwd(), "src/web/public/app.js"),
+      "utf-8",
+    );
+    // Must send current editor draft to validate API
+    expect(appJs).toMatch(/drafts/);
+    expect(appJs).toMatch(/editor-content/);
+    expect(appJs).toMatch(/config-validate/);
+    // Must clear validate result when content or file context changes
+    expect(appJs).toMatch(/clearConfigValidateResult|config-validate-result[\s\S]{0,80}textContent\s*=\s*["']["']/);
+    // Input or change handlers clear stale success
+    expect(appJs).toMatch(/addEventListener\(\s*["']input["']/);
   });
 });

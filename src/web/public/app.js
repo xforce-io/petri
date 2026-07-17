@@ -166,22 +166,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const newBtn = $("#new-project-btn");
   if (newBtn) newBtn.addEventListener("click", createProjectFromTemplate);
 
-  // Config validate
+  // Config validate — include unsaved editor draft so illegal YAML cannot show success
   const validateBtn = $("#config-validate-btn");
   if (validateBtn) {
-    validateBtn.addEventListener("click", async () => {
-      const res = await api("/api/config/validate", { method: "POST", body: "{}" });
-      const box = $("#config-validate-result");
-      if (!box) return;
-      if (res.status === 200 && res.data?.valid) {
-        box.className = "validate-ok";
-        box.textContent = "Configuration is valid.";
-      } else {
-        box.className = "validate-err";
-        const errs = res.data?.errors || [res.data?.error || "Validation failed"];
-        box.textContent = Array.isArray(errs) ? errs.join("\n") : String(errs);
-      }
-    });
+    validateBtn.addEventListener("click", validateConfigDraft);
+  }
+  const editorEl = $("#editor-content");
+  if (editorEl) {
+    editorEl.addEventListener("input", clearConfigValidateResult);
   }
 
   // Load projects then dashboard
@@ -962,6 +954,36 @@ async function loadConfigAllFilesTree() {
   });
 }
 
+
+function clearConfigValidateResult() {
+  const box = $("#config-validate-result");
+  if (!box) return;
+  box.textContent = "";
+  box.className = "config-validate-result";
+}
+
+async function validateConfigDraft() {
+  const box = $("#config-validate-result");
+  if (!box) return;
+  const payload = {};
+  if (currentConfigPath) {
+    const editor = $("#editor-content");
+    payload.drafts = { [currentConfigPath]: editor ? editor.value : "" };
+  }
+  const res = await api("/api/config/validate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 200 && res.data?.valid) {
+    box.className = "validate-ok";
+    box.textContent = "Configuration is valid.";
+  } else {
+    box.className = "validate-err";
+    const errs = res.data?.errors || [res.data?.error || "Validation failed"];
+    box.textContent = Array.isArray(errs) ? errs.join("\n") : String(errs);
+  }
+}
+
 async function loadConfigFile(filePath) {
   currentConfigPath = filePath;
   const editor = $("#editor-content");
@@ -969,6 +991,7 @@ async function loadConfigFile(filePath) {
   const saveBtn = $("#editor-save-btn");
   const statusEl = $("#editor-status");
 
+  clearConfigValidateResult();
   filenameEl.textContent = filePath;
   statusEl.textContent = "";
   statusEl.className = "editor-status";
