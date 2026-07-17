@@ -614,6 +614,22 @@ function currentStageEntry() {
   return currentRunData?.stages?.[currentStageIndex];
 }
 
+/** Prefer snapshot paths recorded on the selected attempt (issue #16). */
+function resolveAttemptIoPrefix(stage) {
+  const arts = stage.artifacts || [];
+  for (const raw of arts) {
+    const p = String(raw).replace(/\\/g, "/");
+    const idx = p.lastIndexOf("/artifacts/");
+    const rel = idx >= 0 ? p.slice(idx + "/artifacts/".length) : p;
+    if (/^\d+-/.test(rel) || rel.includes("/")) {
+      const parts = rel.split("/").filter(Boolean);
+      if (parts.length >= 2) return parts.slice(0, 2).join("/");
+      if (parts.length === 1) return parts[0];
+    }
+  }
+  return stage.stage + "/" + (stage.role || "");
+}
+
 async function loadStageIO() {
   const promptEl = $("#io-prompt");
   const resultEl = $("#io-result");
@@ -625,25 +641,66 @@ async function loadStageIO() {
     return;
   }
 
-  const prefix = stage.stage + "/" + (stage.role || "");
+  const prefix = resolveAttemptIoPrefix(stage);
 
-  // Load prompt (_prompt.md)
+  // Load prompt (_prompt.md) from attempt snapshot when available
   const promptRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_prompt.md");
   if (promptRes.status === 200 && promptRes.data) {
     promptEl.innerHTML = DOMPurify.sanitize(marked.parse(promptRes.data));
     promptEl.classList.add("collapsed");
   } else {
-    promptEl.textContent = "(No prompt saved for this stage — available in future runs)";
+    promptEl.textContent = "(No prompt saved for this attempt — available when snapshot includes _prompt.md)";
     promptEl.classList.remove("collapsed");
   }
 
-  // Load result (_result.md)
   const resultRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_result.md");
   if (resultRes.status === 200 && resultRes.data) {
     resultEl.innerHTML = DOMPurify.sanitize(marked.parse(resultRes.data));
   } else {
-    resultEl.textContent = "(No result saved for this stage — available in future runs)";
+    resultEl.textContent = "(No result saved for this attempt — available when snapshot includes _result.md)";
   }
+}
+
+/** Filter run.log to the selected stage attempt only (issue #16). */
+function filterLogForAttempt(logText, stage) {
+  const lines = logText.split("\n");
+  const filtered = [];
+  let inAttempt = false;
+  const stageHeader = `Stage "${stage.stage}"`;
+  const attemptMarker =
+    stage.attempt != null && stage.attempt > 0
+      ? `Stage "${stage.stage}" attempt ${stage.attempt}/`
+      : null;
+  const stagePrefix = `  ${stage.stage}/`;
+
+  for (const line of lines) {
+    if (line.includes(stageHeader) && line.includes(" attempt ")) {
+      inAttempt = attemptMarker ? line.includes(attemptMarker) : true;
+      if (inAttempt) filtered.push(line);
+      continue;
+    }
+    if (line.includes(stageHeader) && !attemptMarker) {
+      inAttempt = true;
+      filtered.push(line);
+      continue;
+    }
+    if (inAttempt) {
+      if (line.match(/\] Stage "/)) {
+        inAttempt = false;
+        if (line.includes(stageHeader) && attemptMarker && line.includes(attemptMarker)) {
+          inAttempt = true;
+          filtered.push(line);
+        }
+        continue;
+      }
+      if (line.includes(stagePrefix) || line.includes("  Gate [") || line.includes("  artifacts:")) {
+        filtered.push(line);
+      }
+    }
+  }
+  return filtered.length > 0
+    ? filtered.join("\n")
+    : `No log entries for stage "${stage.stage}"${stage.attempt ? ` attempt ${stage.attempt}` : ""}.`;
 }
 
 async function loadRunLog() {
@@ -659,25 +716,48 @@ async function loadRunLog() {
     return;
   }
 
-  // Filter log lines relevant to the selected stage
-  const lines = res.data.split("\n");
-  const filtered = [];
-  let inStage = false;
-  const stageHeader = `Stage "${stage.stage}"`;
-  const stagePrefix = `  ${stage.stage}/`;
+  $("#log-output").textContent = filterLogForAttempt(res.data, stage);
+}
 
-  for (const line of lines) {
-    if (line.includes(stageHeader)) {
-      inStage = true;
-      filtered.push(line);
-    } else if (inStage && (line.includes(stagePrefix) || line.includes("  Gate [") || line.includes("  artifacts:"))) {
-      filtered.push(line);
-    } else if (inStage && line.match(/\] Stage "/) && !line.includes(stageHeader)) {
-      inStage = false;
-    }
+/** Filter artifact list to the selected attempt using snapshot metadata (issue #16). */
+function filterArtifactsForAttempt(artifacts, stage) {
+  if (!stage) return artifacts;
+  const attempt = stage.attempt;
+  const role = stage.role;
+  // Prefer explicit attempt metadata from run snapshots
+  if (attempt != null && attempt > 0) {
+    const exact = artifacts.filter(
+      (a) => a.stage === stage.stage && a.attempt === attempt && (!role || !a.role || a.role === role),
+    );
+    if (exact.length > 0) return exact;
   }
-
-  $("#log-output").textContent = filtered.length > 0 ? filtered.join("\n") : `No log entries for stage "${stage.stage}".`;
+  // Prefer paths recorded on the StageLog entry for this attempt
+  if (Array.isArray(stage.artifacts) && stage.artifacts.length > 0) {
+    const norms = stage.artifacts.map((p) => String(p).replace(/\\/g, "/"));
+    const matched = artifacts.filter((a) => {
+      const ap = a.path.replace(/\\/g, "/");
+      return norms.some((n) => n.endsWith(ap) || n.includes(ap) || ap.includes(n.split("/artifacts/").pop() || "___"));
+    });
+    if (matched.length > 0) return matched;
+  }
+  // Path fallback: {seq}-{stage}/{role}/
+  const pathMatched = artifacts.filter((a) => {
+    const p = a.path.replace(/\\/g, "/");
+    if (a.stage && a.stage !== stage.stage) return false;
+    if (a.attempt != null && attempt != null && attempt > 0 && a.attempt !== attempt) return false;
+    const m = p.match(/^(\d+)-([^/]+)\/([^/]+)\//);
+    if (m) {
+      if (m[2] !== stage.stage) return false;
+      if (role && m[3] !== role) return false;
+      return true;
+    }
+    if (p.startsWith(stage.stage + "/")) {
+      if (role && !p.startsWith(stage.stage + "/" + role)) return false;
+      return true;
+    }
+    return false;
+  });
+  return pathMatched.length > 0 ? pathMatched : [];
 }
 
 async function loadStageArtifacts() {
@@ -691,11 +771,11 @@ async function loadStageArtifacts() {
   }
 
   const stage = currentStageEntry();
-  let artifacts = res.data;
-  if (stage) {
-    const prefix = stage.stage + "/" + (stage.role || "");
-    const filtered = artifacts.filter((a) => a.path.startsWith(prefix));
-    if (filtered.length > 0) artifacts = filtered;
+  const artifacts = filterArtifactsForAttempt(res.data, stage);
+
+  if (artifacts.length === 0) {
+    container.innerHTML = '<p class="empty-state">No artifacts for this attempt.</p>';
+    return;
   }
 
   container.innerHTML = artifacts.map((a) => `
