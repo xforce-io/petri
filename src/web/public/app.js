@@ -20,6 +20,37 @@ let wizard = {
   templates: [],
 };
 
+// ── Execution vs quality status (issue #17) ──
+function computeRunStatuses(run) {
+  const st = run && run.status;
+  let executionStatus = "unknown";
+  if (st === "running") executionStatus = "running";
+  else if (st === "done" || st === "blocked") executionStatus = "completed";
+
+  let qualityStatus = "unknown";
+  if (st === "running") qualityStatus = "pending";
+  else if (st === "blocked") qualityStatus = "failed";
+  else if (st === "done") {
+    const reqs = run.requirements;
+    if (Array.isArray(reqs) && reqs.length > 0) {
+      qualityStatus = reqs.every((r) => r.met) ? "passed" : "failed";
+    } else {
+      qualityStatus = "passed";
+    }
+  }
+  return {
+    executionStatus,
+    qualityStatus,
+    qualityPassed: qualityStatus === "passed",
+  };
+}
+
+function computeSuccessRate(runs) {
+  if (!runs.length) return 0;
+  const passed = runs.filter((r) => computeRunStatuses(r).qualityPassed).length;
+  return Math.round((passed / runs.length) * 100);
+}
+
 // ── API Helper ──
 function apiUrl(urlPath) {
   if (!currentProject) return urlPath;
@@ -298,10 +329,10 @@ async function loadDashboard() {
   const runs = (res.status === 200 && Array.isArray(res.data)) ? res.data : [];
 
   const total = runs.length;
-  const done = runs.filter((r) => r.status === "done").length;
   const running = runs.filter((r) => r.status === "running").length;
   const totalCost = runs.reduce((sum, r) => sum + (r.totalUsage?.costUsd || 0), 0);
-  const successRate = total > 0 ? Math.round((done / total) * 100) : 0;
+  const successRate = computeSuccessRate(runs);
+  const completed = runs.filter((r) => computeRunStatuses(r).executionStatus === "completed").length;
 
   $("#stats-cards").innerHTML = `
     <div class="stat-card">
@@ -311,6 +342,7 @@ async function loadDashboard() {
     <div class="stat-card">
       <div class="stat-value stat-success">${successRate}%</div>
       <div class="stat-label">Success Rate</div>
+      <div class="stat-sub">Quality passed · ${completed} completed</div>
     </div>
     <div class="stat-card">
       <div class="stat-value">${running}</div>
@@ -584,18 +616,29 @@ function renderStageList() {
 function renderRunSummary() {
   const r = currentRunData;
   const usage = r.totalUsage || {};
-  const statusClass = r.status === "done" ? "stat-success" : r.status === "blocked" ? "stat-danger" : "";
+  const { executionStatus, qualityStatus } = computeRunStatuses(r);
+  const execClass = executionStatus === "completed" ? "" : executionStatus === "running" ? "stat-pending" : "";
+  const qualityClass =
+    qualityStatus === "passed" ? "stat-success" : qualityStatus === "failed" ? "stat-danger" : "";
   const blockedHtml =
     r.status === "blocked" && (r.blockedReason || r.blockedStage)
       ? `<div class="blocked-banner"><span class="label">Blocked:</span> ${escHtml(r.blockedStage || "")}${r.blockedStage && r.blockedReason ? " — " : ""}${escHtml(r.blockedReason || "unknown reason")}</div>`
       : "";
+  const reqs = Array.isArray(r.requirements) ? r.requirements : [];
+  const reqHtml = reqs.length
+    ? `<div class="requirements-summary"><span class="label">Requirements:</span> ${
+        reqs.map((x) => `<span class="${x.met ? "stat-success" : "stat-danger"}">${escHtml(x.id || "?")}: ${x.met ? "met" : "unmet"}</span>`).join(" · ")
+      }</div>`
+    : "";
   $("#run-summary").innerHTML = `
     <div><span class="label">Pipeline:</span> ${escHtml(r.pipeline)}</div>
-    <div><span class="label">Status:</span> <span class="${statusClass}">${escHtml(r.status)}</span></div>
+    <div><span class="label">Execution:</span> <span class="${execClass}">${escHtml(executionStatus)}</span> <span class="stage-meta">(${escHtml(r.status || "")})</span></div>
+    <div><span class="label">Quality:</span> <span class="${qualityClass}">${escHtml(qualityStatus)}</span></div>
     <div><span class="label">Started:</span> ${formatDate(r.startedAt)}</div>
     <div><span class="label">Duration:</span> ${formatDuration(r.durationMs)}</div>
     <div><span class="label">Tokens:</span> ${(usage.inputTokens || 0) + (usage.outputTokens || 0)}</div>
     <div><span class="label">Cost:</span> ${formatCost(usage.costUsd)}</div>
+    ${reqHtml}
     ${blockedHtml}
   `;
 }
