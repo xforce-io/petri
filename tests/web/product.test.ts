@@ -278,6 +278,16 @@ describe("buildEvolutionView", () => {
   });
 });
 
+describe("product web: quality success rate (issue #17)", () => {
+  it("S1: app.js uses quality-based success rate helpers", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).toMatch(/computeSuccessRate/);
+    expect(appJs).toMatch(/computeRunStatuses/);
+    expect(appJs).toMatch(/Quality:/);
+    expect(appJs).toMatch(/Execution:/);
+  });
+});
+
 describe("product web: config validate draft overlay (issue #14)", () => {
   let projectDir: string;
   let result: ServerResult;
