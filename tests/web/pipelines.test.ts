@@ -56,7 +56,7 @@ describe("listProjectPipelines", () => {
     expect(list[0].file).toBe("pipeline.yaml");
     expect(list[0].name).toBe("code-dev");
     expect(list[0].description).toBe("hello");
-    expect(list[0].stages[0]).toEqual({ name: "design", roles: ["designer"] });
+    expect(list[0].stages[0]).toMatchObject({ name: "design", roles: ["designer"], kind: "agent" });
     expect(pipelineDisplayLabel(list[0], list)).toBe("code-dev");
     expect(pipelineDisplayLabel(list[0], list)).not.toBe("pipeline.yaml");
   });
@@ -172,5 +172,44 @@ describe("product UI source uses pipeline name API for Run + Config", () => {
     expect(html).toMatch(/config-structure-tree|Structure/);
     expect(src).toMatch(/selectConfigPipeline/);
     expect(src).toMatch(/config-pipeline-item/);
+  });
+});
+
+describe("listProjectPipelines command stages (issue #18)", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = makeTmp();
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("S1: extracts command stages with kind and command text", () => {
+    fs.writeFileSync(
+      path.join(dir, "pipeline.yaml"),
+      `name: with-cmd
+stages:
+  - name: measure
+    command: "echo hi"
+    gate:
+      id: ok
+      evidence:
+        path: "{stage}/out.json"
+        check:
+          field: ok
+          equals: true
+  - name: design
+    roles: [designer]
+`,
+    );
+    const list = listProjectPipelines(dir);
+    expect(list[0].stages).toHaveLength(2);
+    const cmd = list[0].stages.find((s) => s.name === "measure");
+    expect(cmd?.kind).toBe("command");
+    expect(cmd?.command).toContain("echo");
+    expect(cmd?.hasGate).toBe(true);
+    expect(cmd?.roles).toEqual([]);
+    const agent = list[0].stages.find((s) => s.name === "design");
+    expect(agent?.kind).toBe("agent");
   });
 });
