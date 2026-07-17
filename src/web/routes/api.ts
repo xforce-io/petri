@@ -160,13 +160,13 @@ export async function handleApiRequest(
   // GET /api/runs/:id/artifacts/*
   const artifactFileMatch = pathname.match(/^\/api\/runs\/(\d+)\/artifacts\/(.+)$/);
   if (artifactFileMatch && method === "GET") {
-    return handleArtifactFile(res, projectDir, artifactFileMatch[1], artifactFileMatch[2]);
+    return handleArtifactFile(res, projectDir, artifactFileMatch[1], artifactFileMatch[2], url);
   }
 
   // GET /api/runs/:id/artifacts
   const artifactsMatch = pathname.match(/^\/api\/runs\/(\d+)\/artifacts$/);
   if (artifactsMatch && method === "GET") {
-    return handleArtifacts(res, projectDir, artifactsMatch[1]);
+    return handleArtifacts(res, projectDir, artifactsMatch[1], url);
   }
 
   // GET /api/runs/:id
@@ -511,14 +511,26 @@ function handleRunLog(res: http.ServerResponse, projectDir: string, id: string, 
   res.end(content);
 }
 
-function handleArtifacts(res: http.ServerResponse, projectDir: string, id: string): void {
-  const artifactsDir = path.join(projectDir, ".petri", "artifacts");
-  if (!fs.existsSync(artifactsDir)) {
-    sendJson(res, 200, []);
-    return;
+function resolveArtifactsRoots(projectDir: string, id: string, url?: URL): string[] {
+  // Prefer run-scoped snapshots under the branch/project petri root, then shared working dir
+  const roots: string[] = [];
+  try {
+    const petriDir = url ? petriRootForRequest(projectDir, url) : path.join(projectDir, ".petri");
+    roots.push(path.join(petriDir, "runs", `run-${id}`, "artifacts"));
+    roots.push(path.join(petriDir, "artifacts"));
+  } catch {
+    /* invalid branch */
   }
+  // Always allow project-level shared artifacts as last resort for non-branch runs
+  roots.push(path.join(projectDir, ".petri", "artifacts"));
+  // de-dupe
+  return [...new Set(roots.map((r) => path.resolve(r)))];
+}
 
+function handleArtifacts(res: http.ServerResponse, projectDir: string, id: string, url?: URL): void {
+  const roots = resolveArtifactsRoots(projectDir, id, url);
   const files: Array<{ path: string; size: number }> = [];
+  const seen = new Set<string>();
 
   function walk(dir: string, rel: string): void {
     if (!fs.existsSync(dir)) return;
@@ -528,39 +540,41 @@ function handleArtifacts(res: http.ServerResponse, projectDir: string, id: strin
       if (entry.isDirectory()) {
         walk(entryAbs, entryRel);
       } else {
+        if (seen.has(entryRel)) continue;
+        seen.add(entryRel);
         const stat = fs.statSync(entryAbs);
         files.push({ path: entryRel, size: stat.size });
       }
     }
   }
 
-  walk(artifactsDir, "");
+  for (const root of roots) {
+    if (fs.existsSync(root)) walk(root, "");
+  }
   sendJson(res, 200, files);
 }
 
 function handleArtifactFile(
   res: http.ServerResponse,
   projectDir: string,
-  _id: string,
+  id: string,
   filePath: string,
+  url?: URL,
 ): void {
-  const artifactsDir = path.join(projectDir, ".petri", "artifacts");
-  const absPath = path.resolve(artifactsDir, filePath);
-
-  // Path traversal protection
-  if (!absPath.startsWith(artifactsDir)) {
-    sendJson(res, 403, { error: "Forbidden" });
-    return;
+  const cleaned = filePath.replace(/^artifacts\//, "");
+  const roots = resolveArtifactsRoots(projectDir, id, url);
+  for (const root of roots) {
+    for (const candidate of [path.resolve(root, cleaned), path.resolve(root, filePath)]) {
+      if (!candidate.startsWith(path.resolve(root))) continue;
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        const content = fs.readFileSync(candidate, "utf-8");
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(content);
+        return;
+      }
+    }
   }
-
-  if (!fs.existsSync(absPath) || fs.statSync(absPath).isDirectory()) {
-    sendJson(res, 404, { error: "Artifact not found" });
-    return;
-  }
-
-  const content = fs.readFileSync(absPath, "utf-8");
-  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end(content);
+  sendJson(res, 404, { error: "Artifact not found" });
 }
 
 function handleConfigFiles(res: http.ServerResponse, projectDir: string): void {

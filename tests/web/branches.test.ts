@@ -115,4 +115,20 @@ describe("web branches (issue #19)", () => {
     expect(app).toMatch(/loadBranches/);
     expect(app).toMatch(/body\.branch/);
   });
+
+  it("S1: lists artifacts from branch run directory not only project root", async () => {
+    const runDir = path.join(projectDir, ".petri", "branches", "exp1", "runs", "run-001");
+    const artDir = path.join(runDir, "artifacts", "001-work", "worker");
+    fs.mkdirSync(artDir, { recursive: true });
+    fs.writeFileSync(path.join(artDir, "out.json"), '{"ok":true}');
+    // project-level empty-ish should not hide branch artifacts
+    const res = await request(result.port, "/api/runs/001/artifacts?branch=exp1");
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body) as Array<{ path: string }>;
+    expect(data.some((a) => a.path.includes("out.json"))).toBe(true);
+
+    const file = await request(result.port, "/api/runs/001/artifacts/001-work/worker/out.json?branch=exp1");
+    expect(file.status).toBe(200);
+    expect(file.body).toContain("ok");
+  });
 });
