@@ -11,6 +11,9 @@ describe("preset vs AI create terminology (issue #25)", () => {
     expect(h).toMatch(/New project from preset/);
     expect(h).toMatch(/id="ai-create-banner"/);
     expect(h).toMatch(/AI Pipeline generator/);
+    // Top-level nav uses a distinct name from preset create
+    expect(h).toMatch(/>AI Generate</);
+    expect(h).not.toMatch(/>Create ⋯</);
     expect(h).not.toMatch(/Preferred path: Home → New from template/);
   });
 
