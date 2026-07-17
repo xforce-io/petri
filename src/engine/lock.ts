@@ -7,7 +7,12 @@ interface LockData {
   startedAt: string;
 }
 
-function isProcessAlive(pid: number): boolean {
+/**
+ * True if the OS reports the pid as signalable (process exists).
+ * Exported for tests and for providers that need post-kill assertions.
+ */
+export function isProcessAlive(pid: number): boolean {
+  if (!Number.isFinite(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -17,23 +22,71 @@ function isProcessAlive(pid: number): boolean {
 }
 
 /**
- * Recursively kill a process and all its descendants (leaf-first).
- * Uses pgrep to discover children — available on macOS and Linux.
+ * Collect every descendant PID of `rootPid` via repeated `pgrep -P` (BFS).
+ * Order is breadth-first discovery order (parents before children within a level).
  */
-export function killProcessTree(pid: number): void {
-  // First, recursively kill all children
-  try {
-    const out = execSync(`pgrep -P ${pid}`, { encoding: "utf-8", timeout: 5000 });
-    const children = out.trim().split("\n").filter(Boolean).map(Number);
-    for (const child of children) {
-      killProcessTree(child);
+export function collectDescendantPids(rootPid: number): number[] {
+  const found: number[] = [];
+  const seen = new Set<number>();
+  const queue = [rootPid];
+  while (queue.length > 0) {
+    const pid = queue.shift()!;
+    let children: number[] = [];
+    try {
+      const out = execSync(`pgrep -P ${pid}`, { encoding: "utf-8", timeout: 5000 });
+      children = out
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map(Number)
+        .filter((n) => Number.isFinite(n) && n > 0);
+    } catch {
+      // No children or pgrep failed
     }
-  } catch {
-    // No children or pgrep failed — that's fine
+    for (const child of children) {
+      if (!seen.has(child)) {
+        seen.add(child);
+        found.push(child);
+        queue.push(child);
+      }
+    }
   }
-  // Then kill the process itself
+  return found;
+}
+
+/**
+ * Recursively kill a process and all its descendants (leaf-first), then the root.
+ *
+ * Uses PPID tree discovery (`pgrep -P`) so descendants that left the process
+ * group (e.g. `detached: true` / new session while still parented) are still
+ * targeted — group SIGKILL alone is insufficient (issue #6).
+ *
+ * Default signal is SIGKILL because SIGTERM is often ignored by long-running
+ * agent subprocesses (observed with claude-code grandchildren).
+ */
+export function killProcessTree(pid: number, signal: NodeJS.Signals = "SIGKILL"): void {
+  if (!Number.isFinite(pid) || pid <= 0) return;
+
+  const descendants = collectDescendantPids(pid);
+  // Leaf-first: reverse BFS order so children die before parents.
+  for (const child of descendants.slice().reverse()) {
+    try {
+      process.kill(child, signal);
+    } catch {
+      // Already dead
+    }
+  }
+
+  // If the root is a process-group leader, also clear its group (covers peers
+  // not visible as PPID children in some edge cases).
   try {
-    process.kill(pid, "SIGTERM");
+    process.kill(-pid, signal);
+  } catch {
+    // Not a group leader or group already gone
+  }
+
+  try {
+    process.kill(pid, signal);
   } catch {
     // Already dead
   }

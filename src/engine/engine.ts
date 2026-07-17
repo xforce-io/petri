@@ -198,11 +198,29 @@ export class Engine {
   ): Promise<RunResult> {
     const maxRetries = stage.max_retries ?? this.defaultMaxRetries;
     const strategy = stage.gate_strategy ?? this.defaultGateStrategy;
+    const attemptTimeout = stage.timeout ?? this.defaultTimeout;
+    // After abort, wait this long for providers to kill subprocesses and settle
+    // their promises before starting the next attempt (issue #6).
+    const settleGraceMs = Math.min(5_000, Math.max(50, attemptTimeout));
+    // Hard wall-clock for the whole stage: all attempts + settle windows.
+    // Independent of whether individual agent.run() promises ever resolve.
+    const stageBudgetMs = (maxRetries + 1) * (attemptTimeout + settleGraceMs);
+    const stageDeadline = Date.now() + stageBudgetMs;
     const attemptHistory: AttemptRecord[] = [];
     let failureContext = "";
     let lastFailureHash = "";
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const remainingBudget = stageDeadline - Date.now();
+      if (remainingBudget <= 0) {
+        console.log(`  Stage "${stage.name}" wall-clock budget exhausted (${stageBudgetMs}ms)`);
+        return {
+          status: "blocked",
+          stage: stage.name,
+          reason: `Stage wall-clock budget exhausted after ${stageBudgetMs}ms`,
+        };
+      }
+
       console.log(`  Stage "${stage.name}" attempt ${attempt + 1}/${maxRetries + 1}...`);
       this.logger?.logStageAttempt(stage.name, attempt + 1, maxRetries + 1);
 
@@ -213,6 +231,12 @@ export class Engine {
       let agentTimedOut = false;
       let timeoutMessage = "";
       const attemptAbort = new AbortController();
+      // Track in-flight runs so we can await a bounded settle after abort.
+      const inflightRuns: Array<Promise<unknown>> = [];
+
+      // Cap this attempt by remaining stage budget so the last attempt cannot
+      // overrun the hard wall-clock cap.
+      const effectiveTimeout = Math.min(attemptTimeout, remainingBudget);
 
       try {
         const roleResults = await Promise.allSettled(
@@ -242,24 +266,25 @@ export class Engine {
                 context,
                 artifactDir,
                 model,
-              timeout: stage.timeout ?? this.defaultTimeout,
+              timeout: effectiveTimeout,
             });
 
-            const agentTimeout = stage.timeout ?? this.defaultTimeout;
             let timeoutId: NodeJS.Timeout | undefined;
             const timeoutPromise = new Promise<never>((_, reject) => {
               timeoutId = setTimeout(
                 () => {
-                  attemptAbort.abort(new Error(`Agent timed out after ${agentTimeout}ms`));
-                  reject(new Error(`Agent timed out after ${agentTimeout}ms`));
+                  const err = new Error(`Agent timed out after ${effectiveTimeout}ms`);
+                  attemptAbort.abort(err);
+                  reject(err);
                 },
-                agentTimeout,
+                effectiveTimeout,
               );
               // Allow the Node process to exit even if the timer is still pending
               timeoutId.unref();
             });
 
             const runPromise = agent.run(attemptAbort.signal);
+            inflightRuns.push(runPromise.catch(() => {}));
             runPromise.catch(() => {
               // The race below owns the error path. This prevents late provider
               // rejection from surfacing as an unhandled rejection after timeout.
@@ -299,7 +324,7 @@ export class Engine {
         const message = err instanceof Error ? err.message : String(err);
         if (attemptAbort.signal.aborted || message.includes("Agent timed out") || message.includes("TIMEOUT")) {
           if (!attemptAbort.signal.aborted) {
-            attemptAbort.abort(err);
+            attemptAbort.abort(err instanceof Error ? err : new Error(message));
           }
           agentTimedOut = true;
           timeoutMessage = message;
@@ -307,6 +332,21 @@ export class Engine {
         } else {
           throw err;  // re-throw non-timeout errors
         }
+      }
+
+      // After timeout/abort: give providers a bounded window to kill subprocess
+      // trees and settle promises before the next attempt starts (issue #6).
+      // Promise.race alone does not cancel the loser — without this, hung
+      // agent.run() calls keep running while retries spawn more work.
+      if (agentTimedOut && inflightRuns.length > 0) {
+        const grace = Math.min(settleGraceMs, Math.max(0, stageDeadline - Date.now()));
+        await Promise.race([
+          Promise.all(inflightRuns),
+          new Promise<void>((resolve) => {
+            const t = setTimeout(resolve, grace);
+            t.unref?.();
+          }),
+        ]);
       }
 
       // If agent timed out, treat as a failed attempt

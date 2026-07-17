@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, unlinkS
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AgentProvider, PetriAgent, AgentConfig, AgentResult } from "./interface.js";
+import { killProcessTree } from "../engine/lock.js";
 
 export class ClaudeCodeProvider implements AgentProvider {
   constructor(private defaultModel: string = "haiku") {}
@@ -55,15 +56,18 @@ export class ClaudeCodeProvider implements AgentProvider {
           stdio: ["ignore", "ignore", "inherit"],
           detached: true, // new process group
         });
-        const killChildGroup = () => {
+        // Walk the full descendant tree (PPID) + group kill. Group-only
+        // SIGKILL misses grandchildren that detached into a new pgid while
+        // still parented — the #6 dogfood failure mode.
+        const killChildTree = () => {
           if (child.pid !== undefined) {
-            try { process.kill(-child.pid, "SIGKILL"); } catch { /* group gone */ }
+            killProcessTree(child.pid);
           }
           try { child.kill("SIGKILL"); } catch { /* already dead */ }
         };
         const onAbort = () => {
           timedOut = true;
-          killChildGroup();
+          killChildTree();
         };
         if (signal?.aborted) {
           onAbort();
@@ -72,18 +76,30 @@ export class ClaudeCodeProvider implements AgentProvider {
         }
         const timer = setTimeout(() => {
           timedOut = true;
-          // Kill the entire process group (negative PID). SIGKILL because
-          // SIGTERM is what we tried before and claude subprocesses ignored.
-          killChildGroup();
+          killChildTree();
         }, agentTimeout);
+        // If exit never fires after kill (rare), force-settle so agent.run()
+        // cannot hang forever past the engine's timeout + grace.
+        const forceSettle = setTimeout(() => {
+          if (exitCode === null && !exitErr) {
+            timedOut = true;
+            killChildTree();
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+          }
+        }, agentTimeout + 5_000);
+        forceSettle.unref?.();
         child.once("exit", (code) => {
           clearTimeout(timer);
+          clearTimeout(forceSettle);
           signal?.removeEventListener("abort", onAbort);
           exitCode = code;
           resolve();
         });
         child.once("error", (err) => {
           clearTimeout(timer);
+          clearTimeout(forceSettle);
           signal?.removeEventListener("abort", onAbort);
           exitErr = err;
           reject(err);
