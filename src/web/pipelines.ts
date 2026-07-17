@@ -5,6 +5,10 @@ import { parse as parseYaml } from "yaml";
 export interface PipelineStageMeta {
   name: string;
   roles: string[];
+  /** agent | command — command stages have no roles */
+  kind?: "agent" | "command";
+  command?: string;
+  hasGate?: boolean;
 }
 
 export interface ProjectPipelineInfo {
@@ -16,6 +20,26 @@ export interface ProjectPipelineInfo {
   stages: PipelineStageMeta[];
 }
 
+function stageMetaFromEntry(entry: Record<string, unknown>): PipelineStageMeta | null {
+  if (typeof entry.name !== "string" || !entry.name) return null;
+  if ("command" in entry && typeof entry.command === "string") {
+    return {
+      name: entry.name,
+      roles: [],
+      kind: "command",
+      command: entry.command,
+      hasGate: entry.gate != null && typeof entry.gate === "object",
+    };
+  }
+  return {
+    name: entry.name,
+    roles: Array.isArray(entry.roles)
+      ? entry.roles.filter((r): r is string => typeof r === "string")
+      : [],
+    kind: "agent",
+  };
+}
+
 function extractStages(rawStages: unknown): PipelineStageMeta[] {
   if (!Array.isArray(rawStages)) return [];
   const out: PipelineStageMeta[] = [];
@@ -24,32 +48,20 @@ function extractStages(rawStages: unknown): PipelineStageMeta[] {
     const e = entry as {
       name?: string;
       roles?: unknown;
+      command?: string;
+      gate?: unknown;
       repeat?: { name?: string; stages?: unknown };
     };
     if (e.repeat && Array.isArray(e.repeat.stages)) {
-      // Surface nested stages; optional synthetic label via repeat.name is not a stage file
       for (const nested of e.repeat.stages) {
         if (!nested || typeof nested !== "object") continue;
-        const n = nested as { name?: string; roles?: unknown };
-        if (typeof n.name === "string" && n.name) {
-          out.push({
-            name: n.name,
-            roles: Array.isArray(n.roles)
-              ? n.roles.filter((r): r is string => typeof r === "string")
-              : [],
-          });
-        }
+        const meta = stageMetaFromEntry(nested as Record<string, unknown>);
+        if (meta) out.push(meta);
       }
       continue;
     }
-    if (typeof e.name === "string" && e.name && !e.repeat) {
-      out.push({
-        name: e.name,
-        roles: Array.isArray(e.roles)
-          ? e.roles.filter((r): r is string => typeof r === "string")
-          : [],
-      });
-    }
+    const meta = stageMetaFromEntry(e as Record<string, unknown>);
+    if (meta) out.push(meta);
   }
   return out;
 }

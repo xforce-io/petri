@@ -214,6 +214,7 @@ export class Engine {
       const remainingBudget = stageDeadline - Date.now();
       if (remainingBudget <= 0) {
         console.log(`  Stage "${stage.name}" wall-clock budget exhausted (${stageBudgetMs}ms)`);
+        this.logger?.endStageAttempt("blocked");
         return {
           status: "blocked",
           stage: stage.name,
@@ -361,6 +362,7 @@ export class Engine {
           .digest("hex");
 
         if (lastFailureHash === failureHash && attempt > 0) {
+          this.logger?.endStageAttempt("blocked");
           return {
             status: "blocked",
             stage: stage.name,
@@ -375,6 +377,7 @@ export class Engine {
           failureReason,
           failureHash,
         });
+        this.logger?.endStageAttempt("failed");
         continue;
       }
 
@@ -410,7 +413,16 @@ export class Engine {
           artifacts: rt.artifacts,
         });
       }
-      this.logger?.logGateResult(stage.name, gateResult.passed, gateResult.reason);
+      this.logger?.logGateResult(stage.name, gateResult.passed, gateResult.reason, {
+        strategy,
+        roleResults: gateResult.details.map((d) => ({
+          role: d.roleName,
+          gateId: d.gateId,
+          passed: d.passed,
+          reason: d.reason,
+        })),
+      });
+      this.logger?.endStageAttempt(gateResult.passed ? "done" : "failed");
 
       if (gateResult.passed) {
         console.log(`  Stage "${stage.name}" PASSED`);
@@ -451,6 +463,7 @@ export class Engine {
       });
     }
 
+    this.logger?.endStageAttempt("blocked");
     return {
       status: "blocked",
       stage: stage.name,
@@ -466,18 +479,31 @@ export class Engine {
 
     console.log(`  Command stage "${stage.name}": ${command}`);
     this.logger?.logStageAttempt(stage.name, 1, 1);
+    // Synthetic role so Run Trace / StageLog record the command as an execution node (issue #18)
+    const cmdTimer = this.logger?.logRoleStart(stage.name, "command", "command");
+    const startedMs = Date.now();
 
     try {
       execSync(command, { stdio: "inherit", timeout });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.log(`  Command stage "${stage.name}" FAILED: ${message}`);
+      if (cmdTimer) {
+        this.logger?.logRoleEnd(cmdTimer, {
+          gatePassed: false,
+          gateReason: `Command failed: ${message}`,
+          attempt: 1,
+          artifacts: [],
+        });
+      }
+      this.logger?.logGateResult(stage.name, false, `Command failed: ${message}`);
       return { status: "blocked", stage: stage.name, reason: `Command failed: ${message}` };
     }
 
     // Snapshot the command's output into the run directory before the gate
     // runs — a gate-rejected run still keeps its output for the lineage.
-    this.snapshotCommandArtifacts(stage.name, artifactDir);
+    const cmdArtifacts = this.snapshotCommandArtifacts(stage.name, artifactDir);
+    const durationHint = Date.now() - startedMs;
 
     // The command ran. If it declares a gate, evaluate it against the output.
     if (stage.gate) {
@@ -490,6 +516,14 @@ export class Engine {
       for (const detail of gateResult.details) {
         this.gateResults.set(detail.gateId, detail);
       }
+      if (cmdTimer) {
+        this.logger?.logRoleEnd(cmdTimer, {
+          gatePassed: gateResult.passed,
+          gateReason: gateResult.reason,
+          attempt: 1,
+          artifacts: cmdArtifacts,
+        });
+      }
       this.logger?.logGateResult(stage.name, gateResult.passed, gateResult.reason);
       if (!gateResult.passed) {
         const detail = gateResult.details
@@ -500,9 +534,18 @@ export class Engine {
         console.log(`  Command stage "${stage.name}" gate FAILED: ${reason}`);
         return { status: "blocked", stage: stage.name, reason };
       }
+    } else if (cmdTimer) {
+      this.logger?.logRoleEnd(cmdTimer, {
+        gatePassed: true,
+        gateReason: "Command completed (no gate)",
+        attempt: 1,
+        artifacts: cmdArtifacts,
+      });
+      this.logger?.logGateResult(stage.name, true, "Command completed (no gate)");
     }
 
     console.log(`  Command stage "${stage.name}" completed`);
+    void durationHint;
     return { status: "done" };
   }
 
@@ -517,6 +560,7 @@ export class Engine {
 
     for (let iteration = 0; iteration < block.max_iterations; iteration++) {
       console.log(`  Repeat "${block.name}" iteration ${iteration + 1}/${block.max_iterations}...`);
+      this.logger?.beginRepeatIteration(block.name, iteration + 1, block.max_iterations);
 
       let untilGateNotMet = false;
 
@@ -553,6 +597,7 @@ export class Engine {
               lastProgressSignature,
             );
             if (stagnation.blocked) {
+              this.logger?.endRepeatIteration("blocked");
               return {
                 status: "blocked",
                 stage: block.name,
@@ -563,6 +608,7 @@ export class Engine {
             untilGateNotMet = true;
             break;
           }
+          this.logger?.endRepeatIteration("blocked");
           return result;
         }
       }
@@ -571,11 +617,13 @@ export class Engine {
       skippingInner = false;
 
       if (untilGateNotMet) {
+        this.logger?.endRepeatIteration("failed");
         continue;
       }
 
       const gateDetail = this.gateResults.get(block.until);
       if (gateDetail?.passed) {
+        this.logger?.endRepeatIteration("done");
         return { status: "done" };
       }
 
@@ -585,6 +633,7 @@ export class Engine {
         lastProgressSignature,
       );
       if (stagnation.blocked) {
+        this.logger?.endRepeatIteration("blocked");
         return {
           status: "blocked",
           stage: block.name,
@@ -592,6 +641,7 @@ export class Engine {
         };
       }
       lastProgressSignature = stagnation.signature;
+      this.logger?.endRepeatIteration("failed");
     }
 
     return {
@@ -730,11 +780,11 @@ export class Engine {
    * Command stages have no role dimension, so the snapshot directory is
    * just artifacts/{seq}-{stage}/. Mirrors snapshotRoleArtifacts.
    */
-  private snapshotCommandArtifacts(stageName: string, artifactDir: string): void {
-    if (!this.logger) return;
+  private snapshotCommandArtifacts(stageName: string, artifactDir: string): string[] {
+    if (!this.logger) return [];
 
     const files = resolveArtifactFiles(artifactDir, []);
-    if (files.length === 0) return;
+    if (files.length === 0) return [];
 
     const seq = String(++this.artifactSnapshotSeq).padStart(3, "0");
     const snapshotDir = join(
@@ -758,12 +808,15 @@ export class Engine {
     writeFileSync(join(snapshotDir, "_snapshot.json"), JSON.stringify({
       sequence: Number(seq),
       stage: stageName,
+      role: "command",
+      attempt: 1,
       kind: "command",
       source_artifact_dir: artifactDir,
       source_files: files,
       copied_files: copied,
       created_at: new Date().toISOString(),
     }, null, 2), "utf-8");
+    return copied;
   }
 }
 
