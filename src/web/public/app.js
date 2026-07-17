@@ -111,6 +111,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Run button
   $("#run-start-btn").addEventListener("click", startNewRun);
+  const runInput = $("#run-input");
+  if (runInput && !runInput.dataset.errorClearBound) {
+    runInput.dataset.errorClearBound = "1";
+    runInput.addEventListener("input", syncRunInputError);
+  }
 
   // Save button
   $("#editor-save-btn").addEventListener("click", saveConfigFile);
@@ -387,6 +392,8 @@ function openRunDetail(runId) {
 }
 
 async function loadRunsTab() {
+  clearRunFormErrorsOnEnter();
+
   // Make sure we're on list view
   if (currentRunId) return; // detail view is showing, don't overwrite
 
@@ -443,6 +450,30 @@ function renderRunRow(r) {
       <td>${formatCost(usage.costUsd)}</td>
     </tr>
   `;
+}
+
+function syncRunInputError() {
+  const errorEl = $("#run-error");
+  const inputEl = $("#run-input");
+  if (!errorEl || !inputEl) return;
+  const val = inputEl.value.trim();
+  // Clear stale required error once input is non-empty (issue #20)
+  if (val && errorEl.textContent.includes("required")) {
+    errorEl.textContent = "";
+  }
+  // When empty, do not show error until user submits — keep consistent re-entry
+  if (!val && errorEl.textContent.includes("required")) {
+    // leave until submit; re-entry clears below
+  }
+}
+
+function clearRunFormErrorsOnEnter() {
+  const errorEl = $("#run-error");
+  const inputEl = $("#run-input");
+  if (!errorEl || !inputEl) return;
+  // Re-entering Runs: error must match current value
+  if (inputEl.value.trim()) errorEl.textContent = "";
+  else errorEl.textContent = ""; // never keep stale error from prior visit
 }
 
 async function startNewRun() {
