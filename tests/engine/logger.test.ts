@@ -201,7 +201,9 @@ describe("RunLogger EventEmitter", () => {
     logger.logStageAttempt("design", 2, 5);
 
     expect(handler).toHaveBeenCalledOnce();
-    expect(handler).toHaveBeenCalledWith({ stage: "design", attempt: 2, max: 5 });
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: "design", attempt: 2, max: 5 }),
+    );
   });
 
   it("emits 'role-start' from logRoleStart", () => {
@@ -211,7 +213,9 @@ describe("RunLogger EventEmitter", () => {
     logger.logRoleStart("design", "designer", "sonnet");
 
     expect(handler).toHaveBeenCalledOnce();
-    expect(handler).toHaveBeenCalledWith({ stage: "design", role: "designer", model: "sonnet" });
+    expect(handler).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: "design", role: "designer", model: "sonnet" }),
+    );
   });
 
   it("emits 'role-end' from logRoleEnd with correct payload", () => {
@@ -247,7 +251,7 @@ describe("RunLogger EventEmitter", () => {
     logger.logGateResult("design", true, "all criteria met");
 
     expect(handler).toHaveBeenCalledOnce();
-    expect(handler).toHaveBeenCalledWith({ stage: "design", passed: true, reason: "all criteria met" });
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ stage: "design", passed: true, reason: "all criteria met" }));
   });
 
   it("emits 'gate-result' with passed=false", () => {
@@ -318,3 +322,161 @@ describe("loadRunLog", () => {
     expect(loaded!.blockedReason).toBe("gate failed");
   });
 });
+
+describe("RunLogger hierarchical trace (issue #15)", () => {
+  let tmpDir: string;
+  let petriDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    petriDir = path.join(tmpDir, ".petri");
+    fs.mkdirSync(petriDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("S1: records distinct repeat iteration and stage attempt ids", () => {
+    const logger = new RunLogger(petriDir, "pipe", "input");
+    logger.beginRepeatIteration("loop", 1, 3);
+    logger.logStageAttempt("work", 1, 2);
+    const t1 = logger.logRoleStart("work", "worker", "m");
+    logger.logRoleEnd(t1, {
+      gatePassed: false,
+      gateReason: "fail",
+      attempt: 1,
+      artifacts: [],
+    });
+    logger.logGateResult("work", false, "role failed", {
+      strategy: "all",
+      roleResults: [{ role: "worker", gateId: "g1", passed: false, reason: "fail" }],
+    });
+    logger.endStageAttempt("failed");
+    logger.endRepeatIteration("failed");
+
+    logger.beginRepeatIteration("loop", 2, 3);
+    logger.logStageAttempt("work", 1, 2);
+    const t2 = logger.logRoleStart("work", "worker", "m");
+    logger.logRoleEnd(t2, {
+      gatePassed: true,
+      gateReason: "ok",
+      attempt: 1,
+      artifacts: ["out.json"],
+    });
+    logger.logGateResult("work", true, "ok", {
+      strategy: "all",
+      roleResults: [{ role: "worker", gateId: "g1", passed: true, reason: "ok" }],
+    });
+    logger.endStageAttempt("done");
+    logger.endRepeatIteration("done");
+    logger.finish("done");
+
+    const trace = logger.getTrace();
+    expect(trace.version).toBe(1);
+    expect(trace.root).toHaveLength(2);
+    expect(trace.root[0].kind).toBe("repeat_iteration");
+    expect(trace.root[0].id).toBe("rep:loop:i1");
+    expect(trace.root[1].id).toBe("rep:loop:i2");
+    if (trace.root[0].kind === "repeat_iteration") {
+      expect(trace.root[0].children).toHaveLength(1);
+      const att = trace.root[0].children[0];
+      expect(att.kind).toBe("stage_attempt");
+      expect(att.id).toMatch(/^att:work:rloop:i1:a1$/);
+      expect(att.iteration).toBe(1);
+      expect(att.attempt).toBe(1);
+    }
+    if (trace.root[1].kind === "repeat_iteration") {
+      const att = trace.root[1].children[0];
+      expect(att.id).toMatch(/^att:work:rloop:i2:a1$/);
+      expect(att.iteration).toBe(2);
+      // S1: iteration id differs from attempt identity
+      expect(trace.root[0].id).not.toBe(trace.root[1].id);
+      expect(att.id).not.toBe(
+        (trace.root[0].kind === "repeat_iteration" && trace.root[0].children[0].id) || "",
+      );
+    }
+
+    const onDisk = JSON.parse(
+      fs.readFileSync(path.join(logger.runDir, "trace.json"), "utf-8"),
+    );
+    expect(onDisk.root[0].id).toBe("rep:loop:i1");
+  });
+
+  it("S2: multi-role stage keeps role gates and stage gate decision separate", () => {
+    const logger = new RunLogger(petriDir, "pipe", "input");
+    logger.logStageAttempt("review", 1, 1);
+    const a = logger.logRoleStart("review", "author", "m");
+    const r = logger.logRoleStart("review", "reviewer", "m");
+    logger.logRoleEnd(a, {
+      gatePassed: true,
+      gateReason: "author ok",
+      attempt: 1,
+      artifacts: [],
+    });
+    logger.logRoleEnd(r, {
+      gatePassed: false,
+      gateReason: "reviewer fail",
+      attempt: 1,
+      artifacts: [],
+    });
+    logger.logGateResult("review", false, "majority not met", {
+      strategy: "majority",
+      roleResults: [
+        { role: "author", gateId: "ga", passed: true, reason: "author ok" },
+        { role: "reviewer", gateId: "gr", passed: false, reason: "reviewer fail" },
+      ],
+    });
+    logger.endStageAttempt("failed");
+    logger.finish("blocked", "review", "majority not met");
+
+    const att = logger.getTrace().root[0];
+    expect(att.kind).toBe("stage_attempt");
+    if (att.kind !== "stage_attempt") return;
+    expect(att.roles).toHaveLength(2);
+    expect(att.roles.map((x) => x.role).sort()).toEqual(["author", "reviewer"]);
+    expect(att.stageGate).toBeDefined();
+    expect(att.stageGate!.strategy).toBe("majority");
+    expect(att.stageGate!.passed).toBe(false);
+    expect(att.stageGate!.roleResults).toHaveLength(2);
+    // Role-level pass/fail differs from aggregate
+    expect(att.roles.find((x) => x.role === "author")!.gatePassed).toBe(true);
+    expect(att.roles.find((x) => x.role === "reviewer")!.gatePassed).toBe(false);
+    expect(att.stageGate!.passed).toBe(false);
+  });
+
+  it("S3: node ids stable from mid-run trace.json to after finish", () => {
+    const logger = new RunLogger(petriDir, "pipe", "input");
+    logger.beginRepeatIteration("loop", 1, 2);
+    logger.logStageAttempt("work", 1, 1);
+    const mid = JSON.parse(
+      fs.readFileSync(path.join(logger.runDir, "trace.json"), "utf-8"),
+    );
+    const midIds = collectIds(mid.root);
+    expect(midIds).toContain("rep:loop:i1");
+    expect(midIds.some((id: string) => id.startsWith("att:work:"))).toBe(true);
+
+    const t = logger.logRoleStart("work", "worker", "m");
+    logger.logRoleEnd(t, { gatePassed: true, gateReason: "ok", attempt: 1, artifacts: [] });
+    logger.logGateResult("work", true, "ok");
+    logger.endStageAttempt("done");
+    logger.endRepeatIteration("done");
+    logger.finish("done");
+
+    const end = logger.getTrace();
+    const endIds = collectIds(end.root);
+    for (const id of midIds) {
+      expect(endIds).toContain(id);
+    }
+  });
+});
+
+function collectIds(nodes: any[]): string[] {
+  const ids: string[] = [];
+  for (const n of nodes) {
+    ids.push(n.id);
+    if (n.children) ids.push(...collectIds(n.children));
+    if (n.roles) for (const r of n.roles) ids.push(r.id);
+  }
+  return ids;
+}

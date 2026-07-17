@@ -4,7 +4,7 @@ import * as http from "node:http";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { listRuns, loadRunLog, type RunLog, type RunLogger, type StageLog } from "../../engine/logger.js";
+import { listRuns, loadRunLog, loadRunTrace, buildTraceFromStages, type RunLog, type RunLogger, type StageLog, type RunTrace } from "../../engine/logger.js";
 import { generatePipeline } from "../../engine/generator.js";
 import { promoteGenerated } from "../../engine/promote.js";
 import { validateProject } from "../../engine/validate.js";
@@ -59,12 +59,19 @@ export function buildEvolutionView(stages: StageLog[]): Array<{
   }));
 }
 
-function enrichRunDetail(log: RunLog): Record<string, unknown> {
+function resolveTrace(runDir: string, stages: StageLog[]): RunTrace {
+  return loadRunTrace(runDir) ?? buildTraceFromStages(stages ?? []);
+}
+
+function enrichRunDetail(log: RunLog, runDir?: string): Record<string, unknown> {
+  const stages = log.stages ?? [];
+  const trace = runDir ? resolveTrace(runDir, stages) : buildTraceFromStages(stages);
   return {
     ...log,
     blockedReason: log.blockedReason ?? null,
     blockedStage: log.blockedStage ?? null,
-    evolution: buildEvolutionView(log.stages ?? []),
+    evolution: buildEvolutionView(stages),
+    trace,
   };
 }
 
@@ -415,6 +422,7 @@ function makeRunningStub(runDir: string, runId: string): object | null {
     if (match) match.attempt = boundary.attempt;
   }
 
+  const liveTrace = loadRunTrace(runDir);
   return {
     runId,
     pipeline: pipelineMatch?.[1] ?? "unknown",
@@ -425,6 +433,7 @@ function makeRunningStub(runDir: string, runId: string): object | null {
     blockedReason,
     blockedStage: null,
     evolution: buildEvolutionView(stageLogs),
+    trace: liveTrace ?? buildTraceFromStages(stageLogs),
     totalUsage: { inputTokens: totalIn, outputTokens: totalOut, costUsd: totalCost },
   };
 }
@@ -448,7 +457,7 @@ function handleRunDetail(res: http.ServerResponse, projectDir: string, id: strin
   const runDir = path.join(projectDir, ".petri", "runs", `run-${id}`);
   const log = loadRunLog(runDir);
   if (log) {
-    sendJson(res, 200, enrichRunDetail(log));
+    sendJson(res, 200, enrichRunDetail(log, runDir));
     return;
   }
   // Run might be in progress (no run.json yet)

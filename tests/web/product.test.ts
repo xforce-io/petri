@@ -276,3 +276,79 @@ describe("buildEvolutionView", () => {
     expect(view[0].attempts[1].gatePassed).toBe(true);
   });
 });
+
+
+describe("product web: run detail structured trace (issue #15)", () => {
+  let projectDir: string;
+  let result: ServerResult;
+
+  beforeEach(async () => {
+    projectDir = makeTmpDir();
+    fs.writeFileSync(
+      path.join(projectDir, "petri.yaml"),
+      "providers:\n  default:\n    type: pi\ndefaults:\n  model: test\n  gate_strategy: all\n  max_retries: 1\n",
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "pipeline.yaml"),
+      "name: t\nstages:\n  - name: work\n    roles: [worker]\n",
+    );
+    fs.mkdirSync(path.join(projectDir, "roles", "worker"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "roles", "worker", "role.yaml"), "persona: soul.md\nplaybooks: []\n");
+    fs.writeFileSync(path.join(projectDir, "roles", "worker", "soul.md"), "Worker.\n");
+    fs.writeFileSync(
+      path.join(projectDir, "roles", "worker", "gate.yaml"),
+      "id: ok\nevidence:\n  path: \'{stage}/{role}/out.json\'\n  check:\n    field: score\n    gte: 1\n",
+    );
+    result = await createPetriServer({
+      projectDir,
+      projectDirs: [{ name: path.basename(projectDir), dir: projectDir }],
+      workspaceRoot: path.dirname(projectDir),
+      port: 0,
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => result.server.close(() => resolve()));
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it("GET /api/runs/:id includes hierarchical trace with stable ids", async () => {
+    const petriDir = path.join(projectDir, ".petri");
+    const logger = new RunLogger(petriDir, "t", "input");
+    logger.beginRepeatIteration("loop", 1, 2);
+    logger.logStageAttempt("work", 1, 2);
+    const timer = logger.logRoleStart("work", "worker", "test");
+    logger.logRoleEnd(timer, {
+      gatePassed: true,
+      gateReason: "ok",
+      attempt: 1,
+      artifacts: [],
+    });
+    logger.logGateResult("work", true, "ok", {
+      strategy: "all",
+      roleResults: [{ role: "worker", gateId: "ok", passed: true, reason: "ok" }],
+    });
+    logger.endStageAttempt("done");
+    logger.endRepeatIteration("done");
+    logger.finish("done");
+
+    const res = await request(result.port, `/api/runs/${logger.runId}`);
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.trace).toBeDefined();
+    expect(data.trace.version).toBe(1);
+    expect(Array.isArray(data.trace.root)).toBe(true);
+    expect(data.trace.root[0].kind).toBe("repeat_iteration");
+    expect(data.trace.root[0].id).toBe("rep:loop:i1");
+    expect(data.trace.root[0].children[0].id).toMatch(/att:work:/);
+    expect(data.trace.root[0].children[0].roles[0].id).toMatch(/role:work:/);
+    expect(data.trace.root[0].children[0].stageGate.strategy).toBe("all");
+  });
+
+  it("frontend app.js renders hierarchical trace", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).toMatch(/renderTraceTimeline/);
+    expect(appJs).toMatch(/repeat_iteration|trace\.root/);
+    expect(appJs).toMatch(/stageGate|stage_gate|Stage gate/);
+  });
+});

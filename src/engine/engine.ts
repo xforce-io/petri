@@ -214,6 +214,7 @@ export class Engine {
       const remainingBudget = stageDeadline - Date.now();
       if (remainingBudget <= 0) {
         console.log(`  Stage "${stage.name}" wall-clock budget exhausted (${stageBudgetMs}ms)`);
+        this.logger?.endStageAttempt("blocked");
         return {
           status: "blocked",
           stage: stage.name,
@@ -361,6 +362,7 @@ export class Engine {
           .digest("hex");
 
         if (lastFailureHash === failureHash && attempt > 0) {
+          this.logger?.endStageAttempt("blocked");
           return {
             status: "blocked",
             stage: stage.name,
@@ -375,6 +377,7 @@ export class Engine {
           failureReason,
           failureHash,
         });
+        this.logger?.endStageAttempt("failed");
         continue;
       }
 
@@ -410,7 +413,16 @@ export class Engine {
           artifacts: rt.artifacts,
         });
       }
-      this.logger?.logGateResult(stage.name, gateResult.passed, gateResult.reason);
+      this.logger?.logGateResult(stage.name, gateResult.passed, gateResult.reason, {
+        strategy,
+        roleResults: gateResult.details.map((d) => ({
+          role: d.roleName,
+          gateId: d.gateId,
+          passed: d.passed,
+          reason: d.reason,
+        })),
+      });
+      this.logger?.endStageAttempt(gateResult.passed ? "done" : "failed");
 
       if (gateResult.passed) {
         console.log(`  Stage "${stage.name}" PASSED`);
@@ -451,6 +463,7 @@ export class Engine {
       });
     }
 
+    this.logger?.endStageAttempt("blocked");
     return {
       status: "blocked",
       stage: stage.name,
@@ -517,6 +530,7 @@ export class Engine {
 
     for (let iteration = 0; iteration < block.max_iterations; iteration++) {
       console.log(`  Repeat "${block.name}" iteration ${iteration + 1}/${block.max_iterations}...`);
+      this.logger?.beginRepeatIteration(block.name, iteration + 1, block.max_iterations);
 
       let untilGateNotMet = false;
 
@@ -553,6 +567,7 @@ export class Engine {
               lastProgressSignature,
             );
             if (stagnation.blocked) {
+              this.logger?.endRepeatIteration("blocked");
               return {
                 status: "blocked",
                 stage: block.name,
@@ -563,6 +578,7 @@ export class Engine {
             untilGateNotMet = true;
             break;
           }
+          this.logger?.endRepeatIteration("blocked");
           return result;
         }
       }
@@ -571,11 +587,13 @@ export class Engine {
       skippingInner = false;
 
       if (untilGateNotMet) {
+        this.logger?.endRepeatIteration("failed");
         continue;
       }
 
       const gateDetail = this.gateResults.get(block.until);
       if (gateDetail?.passed) {
+        this.logger?.endRepeatIteration("done");
         return { status: "done" };
       }
 
@@ -585,6 +603,7 @@ export class Engine {
         lastProgressSignature,
       );
       if (stagnation.blocked) {
+        this.logger?.endRepeatIteration("blocked");
         return {
           status: "blocked",
           stage: block.name,
@@ -592,6 +611,7 @@ export class Engine {
         };
       }
       lastProgressSignature = stagnation.signature;
+      this.logger?.endRepeatIteration("failed");
     }
 
     return {
