@@ -217,6 +217,15 @@ document.addEventListener("DOMContentLoaded", () => {
   // New project from preset template
   const newBtn = $("#new-project-btn");
   if (newBtn) newBtn.addEventListener("click", createProjectFromTemplate);
+  const headerNewBtn = $("#header-new-project-btn");
+  if (headerNewBtn) headerNewBtn.addEventListener("click", openGlobalNewProjectPanel);
+  const globalSubmit = $("#global-new-project-submit");
+  if (globalSubmit) globalSubmit.addEventListener("click", createProjectFromGlobalPanel);
+  const globalCancel = $("#global-new-project-cancel");
+  if (globalCancel) globalCancel.addEventListener("click", () => {
+    const p = $("#global-new-project-panel");
+    if (p) p.style.display = "none";
+  });
 
   // Config validate — include unsaved editor draft so illegal YAML cannot show success
   const validateBtn = $("#config-validate-btn");
@@ -277,6 +286,55 @@ function showBanner(msg, kind) {
   el.style.display = msg ? "" : "none";
   el.className = "global-banner" + (kind ? " banner-" + kind : "");
   el.textContent = msg || "";
+}
+
+async function openGlobalNewProjectPanel() {
+  const panel = $("#global-new-project-panel");
+  if (!panel) return;
+  panel.style.display = "";
+  // Populate presets
+  const sel = $("#global-new-project-template");
+  if (sel && sel.options.length === 0) {
+    const res = await api("/api/templates");
+    if (res.status === 200 && Array.isArray(res.data)) {
+      sel.innerHTML = res.data
+        .map((t) => {
+          const id = typeof t === "string" ? t : t.id || t.name;
+          const label = typeof t === "string" ? t : t.name || t.id;
+          return `<option value="${escAttr(id)}">${escHtml(label)}</option>`;
+        })
+        .join("");
+    }
+  }
+  $("#global-new-project-name")?.focus();
+}
+
+async function createProjectFromGlobalPanel() {
+  const name = ($("#global-new-project-name")?.value || "").trim();
+  const template = $("#global-new-project-template")?.value || "code-dev";
+  const errEl = $("#global-new-project-error");
+  if (errEl) errEl.textContent = "";
+  if (!name) {
+    if (errEl) errEl.textContent = "Project name is required.";
+    return;
+  }
+  const res = await fetch("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, template }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status !== 201) {
+    // Keep panel open and show error on the global form (issue #26)
+    if (errEl) errEl.textContent = data.error || "Failed to create project";
+    return;
+  }
+  const panel = $("#global-new-project-panel");
+  if (panel) panel.style.display = "none";
+  currentProject = data.name;
+  await loadProjects();
+  switchToTab("runs");
+  loadRunsTab();
 }
 
 async function createProjectFromTemplate() {
