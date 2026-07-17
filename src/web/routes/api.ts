@@ -4,7 +4,7 @@ import * as http from "node:http";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { listRuns, loadRunLog, type RunLogger } from "../../engine/logger.js";
+import { listRuns, loadRunLog, type RunLog, type RunLogger, type StageLog } from "../../engine/logger.js";
 import { generatePipeline } from "../../engine/generator.js";
 import { promoteGenerated } from "../../engine/promote.js";
 import { validateProject } from "../../engine/validate.js";
@@ -12,73 +12,55 @@ import { createProviderFromConfig } from "../../util/provider.js";
 import { sendJson, readBody } from "../server.js";
 import { startRun } from "../runner.js";
 import { listFilesRecursive, filterGeneratedFiles } from "../../util/fs.js";
-
-interface TemplateInfo {
-  id: string;
-  name: string;
-  description: string;
-  stages: string[];
-  roles: string[];
-}
+import { listPresetTemplates } from "../../templates/list.js";
 
 function handleListTemplates(res: http.ServerResponse): void {
-  const templatesDir = path.resolve(import.meta.dirname, "../../templates");
-  if (!fs.existsSync(templatesDir)) {
-    sendJson(res, 200, []);
-    return;
+  sendJson(res, 200, listPresetTemplates());
+}
+
+/** Group stage logs into evolution-friendly stage → attempts shape. */
+export function buildEvolutionView(stages: StageLog[]): Array<{
+  stage: string;
+  attempts: Array<{
+    attempt: number;
+    role: string;
+    model: string;
+    gatePassed: boolean;
+    gateReason: string;
+    durationMs: number;
+    artifacts: string[];
+  }>;
+}> {
+  const order: string[] = [];
+  const byStage = new Map<string, StageLog[]>();
+  for (const s of stages) {
+    if (!byStage.has(s.stage)) {
+      byStage.set(s.stage, []);
+      order.push(s.stage);
+    }
+    byStage.get(s.stage)!.push(s);
   }
+  return order.map((stage) => ({
+    stage,
+    attempts: (byStage.get(stage) ?? []).map((s) => ({
+      attempt: s.attempt,
+      role: s.role,
+      model: s.model,
+      gatePassed: s.gatePassed,
+      gateReason: s.gateReason,
+      durationMs: s.durationMs,
+      artifacts: s.artifacts,
+    })),
+  }));
+}
 
-  const templates: TemplateInfo[] = [];
-  for (const entry of fs.readdirSync(templatesDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const pipelinePath = path.join(templatesDir, entry.name, "pipeline.yaml");
-    if (!fs.existsSync(pipelinePath)) continue;
-
-    try {
-      const content = fs.readFileSync(pipelinePath, "utf-8");
-      type RawStage = { name?: string; roles?: string[] };
-      type RawEntry = RawStage & { repeat?: { stages?: RawStage[] } };
-      const parsed = parseYaml(content) as {
-        name?: string;
-        description?: string;
-        stages?: RawEntry[];
-      };
-
-      const stageNames: string[] = [];
-      const rolesSet = new Set<string>();
-      if (Array.isArray(parsed.stages)) {
-        for (const stage of parsed.stages) {
-          // Handle repeat blocks: extract nested stages
-          if (stage.repeat && Array.isArray(stage.repeat.stages)) {
-            for (const nestedStage of stage.repeat.stages) {
-              if (nestedStage.name) stageNames.push(nestedStage.name);
-              if (Array.isArray(nestedStage.roles)) {
-                for (const role of nestedStage.roles) rolesSet.add(role);
-              }
-            }
-          }
-
-          // Handle regular stages
-          if (!stage.repeat && stage.name) {
-            stageNames.push(stage.name);
-            if (Array.isArray(stage.roles)) {
-              for (const role of stage.roles) rolesSet.add(role);
-            }
-          }
-        }
-      }
-
-      templates.push({
-        id: entry.name,
-        name: parsed.name ?? entry.name,
-        description: parsed.description ?? "",
-        stages: stageNames,
-        roles: Array.from(rolesSet),
-      });
-    } catch { /* skip malformed templates */ }
-  }
-
-  sendJson(res, 200, templates);
+function enrichRunDetail(log: RunLog): Record<string, unknown> {
+  return {
+    ...log,
+    blockedReason: log.blockedReason ?? null,
+    blockedStage: log.blockedStage ?? null,
+    evolution: buildEvolutionView(log.stages ?? []),
+  };
 }
 
 export async function handleApiRequest(
@@ -166,6 +148,13 @@ export async function handleApiRequest(
   // PUT /api/config/file
   if (pathname === "/api/config/file" && method === "PUT") {
     return handleConfigFileWrite(req, res, url, projectDir);
+  }
+
+  // POST /api/config/validate — validate current project instance config
+  if (pathname === "/api/config/validate" && method === "POST") {
+    const result = validateProject(projectDir);
+    sendJson(res, result.valid ? 200 : 400, result);
+    return;
   }
 
   // POST /api/generate
@@ -357,6 +346,20 @@ function parseStagesFromLog(logText: string): Array<{
   return stages;
 }
 
+function parseAttemptsFromLog(logText: string): Array<{ stage: string; attempt: number; max: number }> {
+  const attempts: Array<{ stage: string; attempt: number; max: number }> = [];
+  const re = /Stage "([^"]+)" attempt (\d+)\/(\d+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(logText)) !== null) {
+    attempts.push({
+      stage: m[1],
+      attempt: parseInt(m[2], 10),
+      max: parseInt(m[3], 10),
+    });
+  }
+  return attempts;
+}
+
 function makeRunningStub(runDir: string, runId: string): object | null {
   const logPath = path.join(runDir, "run.log");
   if (!fs.existsSync(logPath)) return null;
@@ -365,6 +368,14 @@ function makeRunningStub(runDir: string, runId: string): object | null {
   const startMatch = logText.match(/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/m);
 
   const stages = parseStagesFromLog(logText);
+  const attemptBoundaries = parseAttemptsFromLog(logText);
+  let blockedReason: string | null = null;
+  const timeoutMatch = logText.match(/agent TIMED OUT: (.+)/i)
+    ?? logText.match(/TIMEOUT: (.+)/i)
+    ?? logText.match(/Stagnation detected: (.+)/i);
+  if (timeoutMatch) {
+    blockedReason = timeoutMatch[0].trim();
+  }
   let totalIn = 0, totalOut = 0, totalCost = 0;
   for (const s of stages) {
     if (s.usage) {
@@ -374,12 +385,36 @@ function makeRunningStub(runDir: string, runId: string): object | null {
     }
   }
 
+  // Map role completions into StageLog-shaped entries for evolution view
+  const stageLogs: StageLog[] = stages.map((s) => ({
+    stage: s.stage,
+    role: s.role,
+    attempt: 0,
+    model: s.model,
+    startedAt: "",
+    finishedAt: "",
+    durationMs: s.durationMs,
+    gatePassed: s.gatePassed,
+    gateReason: s.gateReason,
+    usage: s.usage,
+    artifacts: s.artifacts,
+  }));
+  // Fill attempt numbers from boundaries when possible
+  for (const boundary of attemptBoundaries) {
+    const match = stageLogs.find((s) => s.stage === boundary.stage && s.attempt === 0);
+    if (match) match.attempt = boundary.attempt;
+  }
+
   return {
     runId,
     pipeline: pipelineMatch?.[1] ?? "unknown",
     status: "running",
     startedAt: startMatch?.[1] ?? new Date().toISOString(),
-    stages,
+    stages: stageLogs,
+    attemptBoundaries,
+    blockedReason,
+    blockedStage: null,
+    evolution: buildEvolutionView(stageLogs),
     totalUsage: { inputTokens: totalIn, outputTokens: totalOut, costUsd: totalCost },
   };
 }
@@ -403,7 +438,7 @@ function handleRunDetail(res: http.ServerResponse, projectDir: string, id: strin
   const runDir = path.join(projectDir, ".petri", "runs", `run-${id}`);
   const log = loadRunLog(runDir);
   if (log) {
-    sendJson(res, 200, log);
+    sendJson(res, 200, enrichRunDetail(log));
     return;
   }
   // Run might be in progress (no run.json yet)
@@ -412,7 +447,7 @@ function handleRunDetail(res: http.ServerResponse, projectDir: string, id: strin
     sendJson(res, 200, stub);
     return;
   }
-  sendJson(res, 404, { error: "Run not found" });
+  sendJson(res, 404, { error: "Run not found", code: "NOT_FOUND" });
 }
 
 function handleRunLog(res: http.ServerResponse, projectDir: string, id: string): void {

@@ -1,7 +1,7 @@
 # 【web】产品级单用户 Web 体验
 
 - Issue: #9
-- 状态: Draft
+- 状态: Approved
 - 最后更新: 2026-07-17
 - 分支: `feat/9-product-web-ui`
 
