@@ -1534,3 +1534,21 @@ button.stat-card-action {
 tr[role="button"] {
   cursor: pointer;
 }
+
+button.file-item,
+button.template-card {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  display: block;
+  width: 100%;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+}
+button.template-card {
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+}

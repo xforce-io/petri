@@ -566,7 +566,7 @@ function renderStageList() {
           <div class="stage-meta">${escHtml(s.role || "")}${s.model ? " · " + escHtml(s.model) : ""} · ${formatDuration(s.durationMs)}</div>
           ${s.gatePassed === false && s.gateReason ? `<div class="stage-fail-reason">${escHtml(s.gateReason)}</div>` : ""}
         </div>
-      </div>`;
+      </button>`;
     }).join("");
     list.querySelectorAll(".stage-item").forEach((el) => {
       el.addEventListener("click", () => selectStage(parseInt(el.dataset.index, 10)));
@@ -971,7 +971,7 @@ async function loadConfigAllFilesTree() {
     groups[dir].sort().forEach((f) => {
       const name = f.split("/").pop();
       const activeClass = f === currentConfigPath ? " active" : "";
-      html += `<div class="file-item${activeClass}" data-path="${escAttr(f)}">${escHtml(name)}</div>`;
+      html += `<button type="button" class="file-item${activeClass}" data-path="${escAttr(f)}">${escHtml(name)}</button>`;
     });
   }
 
@@ -1063,17 +1063,36 @@ async function loadTemplates() {
 
 function renderTemplateGrid() {
   const grid = $("#template-grid");
-  let html = '<div class="template-card" role="button" tabindex="0 blank-card' + (wizard.templateId === null ? " selected" : "") + '" data-template-id="">' +
+  const blankSel = wizard.templateId === null ? " selected" : "";
+  let html =
+    '<button type="button" class="template-card blank-card' +
+    blankSel +
+    '" data-template-id="" aria-label="Blank template">' +
     '<div class="template-name">Blank</div>' +
     '<div class="template-desc">Start from scratch with a custom description.</div>' +
-    '</div>';
+    "</button>";
   for (const t of wizard.templates) {
     const sel = wizard.templateId === t.id ? " selected" : "";
-    html += '<div class="template-card" role="button" tabindex="0' + sel + '" data-template-id="' + escAttr(t.id) + '">' +
-      '<div class="template-name">' + escHtml(t.name) + '</div>' +
-      '<div class="template-desc">' + escHtml(t.description) + '</div>' +
-      '<div class="template-meta">' + t.stages.length + ' stages · ' + escHtml(t.roles.join(", ")) + '</div>' +
-      '</div>';
+    html +=
+      '<button type="button" class="template-card' +
+      sel +
+      '" data-template-id="' +
+      escAttr(t.id) +
+      '" aria-label="' +
+      escAttr(t.name) +
+      '">' +
+      '<div class="template-name">' +
+      escHtml(t.name) +
+      "</div>" +
+      '<div class="template-desc">' +
+      escHtml(t.description) +
+      "</div>" +
+      '<div class="template-meta">' +
+      t.stages.length +
+      " stages · " +
+      escHtml(t.roles.join(", ")) +
+      "</div>" +
+      "</button>";
   }
   grid.innerHTML = html;
   grid.querySelectorAll(".template-card").forEach((card) => {
@@ -1191,7 +1210,7 @@ function renderGeneratedFileTree() {
     groups[dir].sort().forEach((f) => {
       const name = f.split("/").pop();
       const activeClass = f === wizard.selectedFile ? " active" : "";
-      html += '<div class="file-item' + activeClass + '" data-path="' + escAttr(f) + '">' + escHtml(name) + '</div>';
+      html += '<button type="button" class="file-item' + activeClass + '" data-path="' + escAttr(f) + '">' + escHtml(name) + '</button>';
     });
   }
   tree.innerHTML = html;
