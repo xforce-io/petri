@@ -420,6 +420,11 @@ async function loadRunsTab() {
   } else {
     pipelineSelect.innerHTML = '<option value="">No pipelines found</option>';
   }
+  updateRunInputHint();
+  if (!pipelineSelect.dataset.hintBound) {
+    pipelineSelect.dataset.hintBound = "1";
+    pipelineSelect.addEventListener("change", updateRunInputHint);
+  }
 
   // Load run history
   const runsRes = await api("/api/runs");

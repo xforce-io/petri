@@ -281,7 +281,9 @@ describe("buildEvolutionView", () => {
 describe("product web: run input contract (issue #23)", () => {
   it("S1/S2: app shows goal/input/requirements and resolves input priority", () => {
     const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
-    expect(appJs).toMatch(/updateRunInputHint/);
+    expect(appJs).toMatch(/function updateRunInputHint/);
+    expect(appJs).toMatch(/updateRunInputHint\(\)/);
+    expect(appJs).toMatch(/addEventListener\(\s*["']change["']\s*,\s*updateRunInputHint/);
     expect(appJs).toMatch(/Goal:/);
     expect(appJs).toMatch(/Requirements:/);
     expect(appJs).toMatch(/run-input-preview|r\.input/);
