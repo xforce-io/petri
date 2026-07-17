@@ -6,8 +6,9 @@ export interface ValidationResult {
   errors: string[];
 }
 
-export function validateProject(projectDir: string): ValidationResult {
+export function validateProject(projectDir: string, pipelineFile: string = "pipeline.yaml"): ValidationResult {
   const errors: string[] = [];
+  const pipeLabel = pipelineFile || "pipeline.yaml";
 
   // 1. Load petri.yaml
   let defaultModel = "default";
@@ -23,14 +24,14 @@ export function validateProject(projectDir: string): ValidationResult {
   const repeatBlocks: { name: string; until: string }[] = [];
   let commandStageCount = 0;
   try {
-    const pipelineConfig = loadPipelineConfig(projectDir);
+    const pipelineConfig = loadPipelineConfig(projectDir, pipelineFile);
     function walk(stages: StageEntry[]): void {
       for (const entry of stages) {
         if (isRepeatBlock(entry)) {
           const r = entry.repeat as Partial<typeof entry.repeat>;
           const labeledName = typeof r.name === "string" && r.name.length > 0 ? r.name : "(unnamed)";
           if (typeof r.name !== "string" || r.name.length === 0) {
-            errors.push(`pipeline.yaml: repeat block missing required "name" field (string)`);
+            errors.push(`${pipeLabel}: repeat block missing required "name" field (string)`);
           }
           if (
             typeof r.max_iterations !== "number"
@@ -38,40 +39,40 @@ export function validateProject(projectDir: string): ValidationResult {
             || r.max_iterations < 1
           ) {
             errors.push(
-              `pipeline.yaml: repeat block "${labeledName}" missing or invalid "max_iterations" (must be positive integer ≥ 1)`,
+              `${pipeLabel}: repeat block "${labeledName}" missing or invalid "max_iterations" (must be positive integer ≥ 1)`,
             );
           }
           if (typeof r.until !== "string" || r.until.length === 0) {
-            errors.push(`pipeline.yaml: repeat block "${labeledName}" missing required "until" field (gate id string)`);
+            errors.push(`${pipeLabel}: repeat block "${labeledName}" missing required "until" field (gate id string)`);
           }
           repeatBlocks.push({ name: labeledName, until: typeof r.until === "string" ? r.until : "" });
           walk(Array.isArray(r.stages) ? r.stages : []);
         } else if (isCommandStage(entry)) {
           const cmdName = typeof entry.name === "string" && entry.name.length > 0 ? entry.name : "(unnamed)";
           if (typeof entry.name !== "string" || entry.name.length === 0) {
-            errors.push(`pipeline.yaml: command stage missing required "name" field (string)`);
+            errors.push(`${pipeLabel}: command stage missing required "name" field (string)`);
           }
           if (typeof entry.command !== "string" || entry.command.length === 0) {
-            errors.push(`pipeline.yaml: command stage "${cmdName}" missing required "command" field (non-empty string)`);
+            errors.push(`${pipeLabel}: command stage "${cmdName}" missing required "command" field (non-empty string)`);
           }
           if (entry.gate !== undefined) {
             const g = entry.gate as Partial<GateConfig>;
             if (!g || typeof g !== "object" || typeof g.id !== "string" || g.id.length === 0) {
-              errors.push(`pipeline.yaml: command stage "${cmdName}" gate must have a non-empty string "id"`);
+              errors.push(`${pipeLabel}: command stage "${cmdName}" gate must have a non-empty string "id"`);
             }
             if (!g || typeof g !== "object" || !g.evidence || typeof g.evidence !== "object" || typeof g.evidence.path !== "string" || g.evidence.path.length === 0) {
-              errors.push(`pipeline.yaml: command stage "${cmdName}" gate must have "evidence.path" (string)`);
+              errors.push(`${pipeLabel}: command stage "${cmdName}" gate must have "evidence.path" (string)`);
             }
           }
           commandStageCount++;
         } else {
           const stageName = typeof entry.name === "string" && entry.name.length > 0 ? entry.name : "(unnamed)";
           if (typeof entry.name !== "string" || entry.name.length === 0) {
-            errors.push(`pipeline.yaml: stage missing required "name" field (string)`);
+            errors.push(`${pipeLabel}: stage missing required "name" field (string)`);
           }
           if (!Array.isArray(entry.roles) || entry.roles.length === 0) {
             errors.push(
-              `pipeline.yaml: stage "${stageName}" missing required "roles" field (non-empty list of role names, e.g. roles: [<name>] — note plural "roles", not "role")`,
+              `${pipeLabel}: stage "${stageName}" missing required "roles" field (non-empty list of role names, e.g. roles: [<name>] — note plural "roles", not "role")`,
             );
             continue;
           }
@@ -83,18 +84,18 @@ export function validateProject(projectDir: string): ValidationResult {
     }
     if (!Array.isArray(pipelineConfig.stages) || pipelineConfig.stages.length === 0) {
       errors.push(
-        `pipeline.yaml: top-level "stages" must be a non-empty list of stages and/or repeat blocks. If you placed "repeat:" at the top level, wrap it: stages: [- repeat: {...}]`,
+        `${pipeLabel}: top-level "stages" must be a non-empty list of stages and/or repeat blocks. If you placed "repeat:" at the top level, wrap it: stages: [- repeat: {...}]`,
       );
     } else {
       walk(pipelineConfig.stages);
       if (repeatBlocks.length === 0 && commandStageCount === 0) {
         errors.push(
-          "pipeline.yaml: pipeline must contain at least one repeat: block or command stage (no feedback loop and no deterministic step = empty workflow)",
+          `${pipeLabel}: pipeline must contain at least one repeat: block or command stage (no feedback loop and no deterministic step = empty workflow)`,
         );
       }
     }
   } catch (err: unknown) {
-    errors.push(`pipeline.yaml: ${err instanceof Error ? err.message : String(err)}`);
+    errors.push(`${pipeLabel}: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // 3. Load each role; remember loaded roles for gate lookup in step 4
@@ -130,7 +131,7 @@ export function validateProject(projectDir: string): ValidationResult {
     const check = role.gate.evidence.check;
     if (check && !hasRealSignal(check)) {
       errors.push(
-        `pipeline.yaml: repeat block "${block.name}" exits only on self-report boolean checks (gate "${block.until}", fields: ${renderFields(check)}) — loop has no real signal, exits after first iteration`,
+        `${pipeLabel}: repeat block "${block.name}" exits only on self-report boolean checks (gate "${block.until}", fields: ${renderFields(check)}) — loop has no real signal, exits after first iteration`,
       );
     }
   }
