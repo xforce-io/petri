@@ -3,21 +3,45 @@
 import * as http from "node:http";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import { parse as parseYaml } from "yaml";
-import { listRuns, loadRunLog, type RunLog, type RunLogger, type StageLog } from "../../engine/logger.js";
+import { listRuns, loadRunLog, loadRunTrace, buildTraceFromStages, type RunLog, type RunLogger, type StageLog, type RunTrace } from "../../engine/logger.js";
 import { generatePipeline } from "../../engine/generator.js";
 import { promoteGenerated } from "../../engine/promote.js";
 import { validateProject } from "../../engine/validate.js";
 import { createProviderFromConfig } from "../../util/provider.js";
 import { sendJson, readBody } from "../server.js";
 import { startRun } from "../runner.js";
+import { resolveRunInput } from "../run-input.js";
+import { loadPipelineConfig } from "../../config/loader.js";
 import { listFilesRecursive, filterGeneratedFiles } from "../../util/fs.js";
 import { listPresetTemplates } from "../../templates/list.js";
 import { listProjectPipelines } from "../pipelines.js";
 import { buildPipelinePreviewTree } from "../pipeline-preview.js";
+import { listBranches, loadBranch, runRootForBranch } from "../../engine/branch.js";
+import type { ArtifactListItem } from "../attempt-artifacts.js";
 
 function handleListTemplates(res: http.ServerResponse): void {
   sendJson(res, 200, listPresetTemplates());
+}
+
+function petriRootForRequest(projectDir: string, url: URL): string {
+  const branch = url.searchParams.get("branch") || undefined;
+  if (branch) {
+    loadBranch(projectDir, branch); // throws if missing
+  }
+  return runRootForBranch(projectDir, branch || undefined);
+}
+
+function handleListBranches(res: http.ServerResponse, projectDir: string): void {
+  const branches = listBranches(projectDir).map((b) => ({
+    branch_id: b.branch_id,
+    status: b.status ?? "active",
+    objective: b.objective ?? null,
+    baseline: b.baseline ?? null,
+    created_at: b.created_at ?? null,
+  }));
+  sendJson(res, 200, branches);
 }
 
 function handleListPipelines(res: http.ServerResponse, projectDir: string): void {
@@ -60,12 +84,19 @@ export function buildEvolutionView(stages: StageLog[]): Array<{
   }));
 }
 
-function enrichRunDetail(log: RunLog): Record<string, unknown> {
+function resolveTrace(runDir: string, stages: StageLog[]): RunTrace {
+  return loadRunTrace(runDir) ?? buildTraceFromStages(stages ?? []);
+}
+
+function enrichRunDetail(log: RunLog, runDir?: string): Record<string, unknown> {
+  const stages = log.stages ?? [];
+  const trace = runDir ? resolveTrace(runDir, stages) : buildTraceFromStages(stages);
   return {
     ...log,
     blockedReason: log.blockedReason ?? null,
     blockedStage: log.blockedStage ?? null,
-    evolution: buildEvolutionView(log.stages ?? []),
+    evolution: buildEvolutionView(stages),
+    trace,
   };
 }
 
@@ -83,7 +114,7 @@ export async function handleApiRequest(
   if (pathname === "/api/runs" && method === "POST") {
     try {
       const body = await readBody(req);
-      let parsed: { pipeline?: string; input?: string };
+      let parsed: { pipeline?: string; input?: string; branch?: string };
       try {
         parsed = JSON.parse(body);
       } catch {
@@ -91,25 +122,56 @@ export async function handleApiRequest(
         return;
       }
 
-      if (!parsed.input || typeof parsed.input !== "string") {
-        sendJson(res, 400, { error: "Missing required field: input" });
+      const pipelineFile = parsed.pipeline ?? "pipeline.yaml";
+      let pipelineGoal: string | undefined;
+      let inputDescription: string | undefined;
+      try {
+        const pc = loadPipelineConfig(projectDir, pipelineFile);
+        pipelineGoal = pc.goal;
+        inputDescription = pc.input?.description;
+      } catch {
+        /* validate on startRun */
+      }
+      const explicit =
+        typeof parsed.input === "string" ? parsed.input : "";
+      const resolved = resolveRunInput({
+        projectDir,
+        explicitInput: explicit,
+        pipelineGoal,
+      });
+      if ("error" in resolved) {
+        sendJson(res, 400, { error: resolved.error, inputDescription, pipelineGoal: pipelineGoal ?? null });
         return;
       }
 
-      const pipelineFile = parsed.pipeline ?? "pipeline.yaml";
+      const branchId = typeof parsed.branch === "string" && parsed.branch.trim()
+        ? parsed.branch.trim()
+        : undefined;
+      if (branchId) loadBranch(projectDir, branchId);
       const result = startRun({
         projectDir,
         pipelineFile,
-        input: parsed.input,
+        input: resolved.input,
         activeRuns,
+        branchId,
       });
 
-      sendJson(res, 200, { runId: result.runId });
+      sendJson(res, 200, {
+        runId: result.runId,
+        inputSource: resolved.source,
+        goal: pipelineGoal ?? null,
+        branchId: branchId ?? null,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       sendJson(res, 400, { error: message });
     }
     return;
+  }
+
+  // GET /api/branches — Petri branch list (issue #19)
+  if (pathname === "/api/branches" && method === "GET") {
+    return handleListBranches(res, projectDir);
   }
 
   // GET /api/pipelines — logical names + stage/role structure for Run + Config
@@ -119,31 +181,31 @@ export async function handleApiRequest(
 
   // GET /api/runs
   if (pathname === "/api/runs" && method === "GET") {
-    return handleListRuns(res, projectDir);
+    return handleListRuns(res, projectDir, url);
   }
 
   // GET /api/runs/:id/log
   const logMatch = pathname.match(/^\/api\/runs\/(\d+)\/log$/);
   if (logMatch && method === "GET") {
-    return handleRunLog(res, projectDir, logMatch[1]);
+    return handleRunLog(res, projectDir, logMatch[1], url);
   }
 
   // GET /api/runs/:id/artifacts/*
   const artifactFileMatch = pathname.match(/^\/api\/runs\/(\d+)\/artifacts\/(.+)$/);
   if (artifactFileMatch && method === "GET") {
-    return handleArtifactFile(res, projectDir, artifactFileMatch[1], artifactFileMatch[2]);
+    return handleArtifactFile(res, projectDir, artifactFileMatch[1], artifactFileMatch[2], url);
   }
 
   // GET /api/runs/:id/artifacts
   const artifactsMatch = pathname.match(/^\/api\/runs\/(\d+)\/artifacts$/);
   if (artifactsMatch && method === "GET") {
-    return handleArtifacts(res, projectDir, artifactsMatch[1]);
+    return handleArtifacts(res, projectDir, artifactsMatch[1], url);
   }
 
   // GET /api/runs/:id
   const runMatch = pathname.match(/^\/api\/runs\/(\d+)$/);
   if (runMatch && method === "GET") {
-    return handleRunDetail(res, projectDir, runMatch[1]);
+    return handleRunDetail(res, projectDir, runMatch[1], url);
   }
 
   // GET /api/config/files
@@ -161,11 +223,9 @@ export async function handleApiRequest(
     return handleConfigFileWrite(req, res, url, projectDir);
   }
 
-  // POST /api/config/validate — validate current project instance config
+  // POST /api/config/validate — validate project, optionally with unsaved drafts
   if (pathname === "/api/config/validate" && method === "POST") {
-    const result = validateProject(projectDir);
-    sendJson(res, result.valid ? 200 : 400, result);
-    return;
+    return handleConfigValidate(req, res, projectDir);
   }
 
   // POST /api/generate
@@ -433,6 +493,7 @@ function makeRunningStub(runDir: string, runId: string): object | null {
     if (match) match.attempt = boundary.attempt;
   }
 
+  const liveTrace = loadRunTrace(runDir);
   return {
     runId,
     pipeline: pipelineMatch?.[1] ?? "unknown",
@@ -443,43 +504,57 @@ function makeRunningStub(runDir: string, runId: string): object | null {
     blockedReason,
     blockedStage: null,
     evolution: buildEvolutionView(stageLogs),
+    trace: liveTrace ?? buildTraceFromStages(stageLogs),
     totalUsage: { inputTokens: totalIn, outputTokens: totalOut, costUsd: totalCost },
   };
 }
 
-function handleListRuns(res: http.ServerResponse, projectDir: string): void {
-  const runsDir = path.join(projectDir, ".petri", "runs");
-  const runNames = listRuns(runsDir);
-  const runs = runNames.map((name) => {
-    const runDir = path.join(runsDir, name);
-    const runId = name.replace("run-", "");
-    const log = loadRunLog(runDir);
-    if (!log) {
-      return makeRunningStub(runDir, runId) ?? { runId, status: "unknown" };
-    }
-    return log;
-  });
-  sendJson(res, 200, runs);
+function handleListRuns(res: http.ServerResponse, projectDir: string, url: URL): void {
+  const branch = url.searchParams.get("branch") || undefined;
+  try {
+    const petriDir = petriRootForRequest(projectDir, url);
+    const runsDir = path.join(petriDir, "runs");
+    const runNames = listRuns(runsDir);
+    const runs = runNames.map((name) => {
+      const runDir = path.join(runsDir, name);
+      const runId = name.replace("run-", "");
+      const log = loadRunLog(runDir);
+      if (!log) {
+        const stub = makeRunningStub(runDir, runId);
+        return stub ? { ...stub, branchId: branch ?? null } : { runId, status: "unknown", branchId: branch ?? null };
+      }
+      return { ...log, branchId: log.branchId ?? branch ?? null };
+    });
+    sendJson(res, 200, runs);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    sendJson(res, 400, { error: message });
+  }
 }
 
-function handleRunDetail(res: http.ServerResponse, projectDir: string, id: string): void {
-  const runDir = path.join(projectDir, ".petri", "runs", `run-${id}`);
+function handleRunDetail(res: http.ServerResponse, projectDir: string, id: string, url?: URL): void {
+  const petriDir = url ? petriRootForRequest(projectDir, url) : path.join(projectDir, ".petri");
+  const branch = url?.searchParams.get("branch") || undefined;
+  const runDir = path.join(petriDir, "runs", `run-${id}`);
   const log = loadRunLog(runDir);
   if (log) {
-    sendJson(res, 200, enrichRunDetail(log));
+    sendJson(res, 200, {
+      ...enrichRunDetail(log, runDir),
+      branchId: log.branchId ?? branch ?? null,
+    });
     return;
   }
-  // Run might be in progress (no run.json yet)
   const stub = makeRunningStub(runDir, id);
   if (stub) {
-    sendJson(res, 200, stub);
+    sendJson(res, 200, { ...stub, branchId: branch ?? null });
     return;
   }
   sendJson(res, 404, { error: "Run not found", code: "NOT_FOUND" });
 }
 
-function handleRunLog(res: http.ServerResponse, projectDir: string, id: string): void {
-  const logPath = path.join(projectDir, ".petri", "runs", `run-${id}`, "run.log");
+function handleRunLog(res: http.ServerResponse, projectDir: string, id: string, url?: URL): void {
+  const petriDir = url ? petriRootForRequest(projectDir, url) : path.join(projectDir, ".petri");
+  const logPath = path.join(petriDir, "runs", `run-${id}`, "run.log");
   if (!fs.existsSync(logPath)) {
     sendJson(res, 404, { error: "Log not found" });
     return;
@@ -489,15 +564,54 @@ function handleRunLog(res: http.ServerResponse, projectDir: string, id: string):
   res.end(content);
 }
 
-function handleArtifacts(res: http.ServerResponse, projectDir: string, id: string): void {
-  const artifactsDir = path.join(projectDir, ".petri", "artifacts");
-  if (!fs.existsSync(artifactsDir)) {
-    sendJson(res, 200, []);
-    return;
+function resolveArtifactsRoots(projectDir: string, id: string, url?: URL): string[] {
+  // Prefer run-scoped snapshots under the branch/project petri root, then shared working dir
+  const roots: string[] = [];
+  const branch = url?.searchParams.get("branch") || undefined;
+  try {
+    const petriDir = url ? petriRootForRequest(projectDir, url) : path.join(projectDir, ".petri");
+    roots.push(path.join(petriDir, "runs", `run-${id}`, "artifacts"));
+    roots.push(path.join(petriDir, "artifacts"));
+  } catch {
+    /* invalid branch */
   }
+  // A branch is an isolated run context. Falling through to project-level
+  // artifacts would mix identically numbered branch/default runs.
+  if (!branch) {
+    roots.push(path.join(projectDir, ".petri", "artifacts"));
+  }
+  // de-dupe
+  return [...new Set(roots.map((r) => path.resolve(r)))];
+}
 
-  const files: Array<{ path: string; size: number }> = [];
+function readSnapshotMeta(
+  snapshotDir: string,
+): { stage?: string; role?: string; attempt?: number; sequence?: number } {
+  const metaPath = path.join(snapshotDir, "_snapshot.json");
+  if (!fs.existsSync(metaPath)) return {};
+  try {
+    const j = JSON.parse(fs.readFileSync(metaPath, "utf-8")) as {
+      stage?: string;
+      role?: string;
+      attempt?: number;
+      sequence?: number;
+    };
+    return {
+      stage: j.stage,
+      role: j.role,
+      attempt: j.attempt,
+      sequence: j.sequence,
+    };
+  } catch {
+    return {};
+  }
+}
 
+function walkArtifactFiles(
+  rootDir: string,
+  relBase: string,
+): ArtifactListItem[] {
+  const files: ArtifactListItem[] = [];
   function walk(dir: string, rel: string): void {
     if (!fs.existsSync(dir)) return;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -507,38 +621,169 @@ function handleArtifacts(res: http.ServerResponse, projectDir: string, id: strin
         walk(entryAbs, entryRel);
       } else {
         const stat = fs.statSync(entryAbs);
-        files.push({ path: entryRel, size: stat.size });
+        // Attach snapshot meta from nearest seq-stage(/role) directory
+        let meta: { stage?: string; role?: string; attempt?: number; sequence?: number } = {};
+        const parts = entryRel.split("/");
+        if (parts.length >= 2) {
+          const snapDir = path.join(rootDir, parts[0], parts[1]);
+          if (fs.existsSync(path.join(snapDir, "_snapshot.json"))) {
+            meta = readSnapshotMeta(snapDir);
+          } else {
+            const snapDir1 = path.join(rootDir, parts[0]);
+            if (fs.existsSync(path.join(snapDir1, "_snapshot.json"))) {
+              meta = readSnapshotMeta(snapDir1);
+            }
+          }
+        }
+        const pathOut = relBase ? `${relBase}/${entryRel}` : entryRel;
+        files.push({ path: pathOut, size: stat.size, ...meta });
       }
     }
   }
+  walk(rootDir, "");
+  return files;
+}
 
-  walk(artifactsDir, "");
+function handleArtifacts(res: http.ServerResponse, projectDir: string, id: string, url?: URL): void {
+  const roots = resolveArtifactsRoots(projectDir, id, url);
+  const files: ArtifactListItem[] = [];
+  const seen = new Set<string>();
+
+  for (const root of roots) {
+    for (const file of walkArtifactFiles(root, "")) {
+      if (seen.has(file.path)) continue;
+      seen.add(file.path);
+      files.push(file);
+    }
+  }
   sendJson(res, 200, files);
 }
 
 function handleArtifactFile(
   res: http.ServerResponse,
   projectDir: string,
-  _id: string,
+  id: string,
   filePath: string,
+  url?: URL,
 ): void {
-  const artifactsDir = path.join(projectDir, ".petri", "artifacts");
-  const absPath = path.resolve(artifactsDir, filePath);
+  const cleaned = filePath.replace(/^artifacts\//, "");
+  const roots = resolveArtifactsRoots(projectDir, id, url);
+  for (const root of roots) {
+    for (const candidate of [path.resolve(root, cleaned), path.resolve(root, filePath)]) {
+      if (!candidate.startsWith(path.resolve(root))) continue;
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+        const content = fs.readFileSync(candidate, "utf-8");
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(content);
+        return;
+      }
+    }
+  }
+  sendJson(res, 404, { error: "Artifact not found" });
+}
 
-  // Path traversal protection
-  if (!absPath.startsWith(artifactsDir)) {
-    sendJson(res, 403, { error: "Forbidden" });
+
+/**
+ * Validate project config. Optional body: { drafts?: Record<path, content> }
+ * Drafts overlay unsaved editor content without writing the real project dir.
+ */
+async function handleConfigValidate(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  projectDir: string,
+): Promise<void> {
+  let drafts: Record<string, string> = {};
+  try {
+    const raw = await readBody(req);
+    if (raw && raw.trim()) {
+      const parsed = JSON.parse(raw) as { drafts?: Record<string, string>; path?: string; content?: string };
+      if (parsed.drafts && typeof parsed.drafts === "object" && !Array.isArray(parsed.drafts)) {
+        for (const [k, v] of Object.entries(parsed.drafts)) {
+          if (typeof k === "string" && typeof v === "string") drafts[k] = v;
+        }
+      } else if (typeof parsed.path === "string" && typeof parsed.content === "string") {
+        drafts[parsed.path] = parsed.content;
+      }
+    }
+  } catch {
+    sendJson(res, 400, { valid: false, errors: ["Invalid JSON body"] });
     return;
   }
 
-  if (!fs.existsSync(absPath) || fs.statSync(absPath).isDirectory()) {
-    sendJson(res, 404, { error: "Artifact not found" });
+  for (const rel of Object.keys(drafts)) {
+    if (!isPathSafe(projectDir, rel)) {
+      sendJson(res, 403, { valid: false, errors: [`Forbidden draft path: ${rel}`] });
+      return;
+    }
+  }
+
+  if (Object.keys(drafts).length === 0) {
+    const result = validateProject(projectDir);
+    sendJson(res, result.valid ? 200 : 400, result);
     return;
   }
 
-  const content = fs.readFileSync(absPath, "utf-8");
-  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end(content);
+  const result = validateProjectWithDrafts(projectDir, drafts);
+  sendJson(res, result.valid ? 200 : 400, result);
+}
+
+function copyConfigTree(srcDir: string, destDir: string): void {
+  // Copy petri.yaml + every pipeline*.yaml so non-default pipelines can be validated
+  try {
+    for (const name of fs.readdirSync(srcDir)) {
+      if (name === "petri.yaml" || /^pipeline.*\.ya?ml$/i.test(name)) {
+        const src = path.join(srcDir, name);
+        if (fs.statSync(src).isFile()) {
+          fs.copyFileSync(src, path.join(destDir, name));
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  const rolesSrc = path.join(srcDir, "roles");
+  if (fs.existsSync(rolesSrc) && fs.statSync(rolesSrc).isDirectory()) {
+    fs.cpSync(rolesSrc, path.join(destDir, "roles"), { recursive: true });
+  }
+}
+
+/** Overlay drafts onto a temp config tree and run validateProject (does not touch projectDir). */
+export function validateProjectWithDrafts(
+  projectDir: string,
+  drafts: Record<string, string>,
+): { valid: boolean; errors: string[] } {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "petri-validate-draft-"));
+  try {
+    copyConfigTree(projectDir, tmp);
+    // Syntax-check every YAML draft first so illegal drafts never report success
+    const yamlErrors: string[] = [];
+    for (const [rel, content] of Object.entries(drafts)) {
+      if (!isPathSafe(tmp, rel)) {
+        return { valid: false, errors: [`Forbidden draft path: ${rel}`] };
+      }
+      if (rel.endsWith(".yaml") || rel.endsWith(".yml")) {
+        try {
+          parseYaml(content);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Invalid YAML";
+          yamlErrors.push(`${rel}: YAML syntax error: ${message}`);
+        }
+      }
+      const abs = path.resolve(tmp, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content, "utf-8");
+    }
+    if (yamlErrors.length > 0) {
+      return { valid: false, errors: yamlErrors };
+    }
+    // Prefer validating the pipeline file present in drafts (non-default pipelines)
+    const draftPipe =
+      Object.keys(drafts).find((p) => /^pipeline.*\.ya?ml$/i.test(path.basename(p))) ??
+      "pipeline.yaml";
+    return validateProject(tmp, draftPipe);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 function handleConfigFiles(res: http.ServerResponse, projectDir: string): void {

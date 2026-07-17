@@ -5,6 +5,10 @@ import { parse as parseYaml } from "yaml";
 export interface PipelineStageMeta {
   name: string;
   roles: string[];
+  /** agent | command — command stages have no roles */
+  kind?: "agent" | "command";
+  command?: string;
+  hasGate?: boolean;
 }
 
 export interface ProjectPipelineInfo {
@@ -13,7 +17,30 @@ export interface ProjectPipelineInfo {
   /** YAML top-level name, or file stem fallback */
   name: string;
   description: string;
+  goal?: string;
+  inputDescription?: string;
+  requirements?: string[];
   stages: PipelineStageMeta[];
+}
+
+function stageMetaFromEntry(entry: Record<string, unknown>): PipelineStageMeta | null {
+  if (typeof entry.name !== "string" || !entry.name) return null;
+  if ("command" in entry && typeof entry.command === "string") {
+    return {
+      name: entry.name,
+      roles: [],
+      kind: "command",
+      command: entry.command,
+      hasGate: entry.gate != null && typeof entry.gate === "object",
+    };
+  }
+  return {
+    name: entry.name,
+    roles: Array.isArray(entry.roles)
+      ? entry.roles.filter((r): r is string => typeof r === "string")
+      : [],
+    kind: "agent",
+  };
 }
 
 function extractStages(rawStages: unknown): PipelineStageMeta[] {
@@ -24,32 +51,20 @@ function extractStages(rawStages: unknown): PipelineStageMeta[] {
     const e = entry as {
       name?: string;
       roles?: unknown;
+      command?: string;
+      gate?: unknown;
       repeat?: { name?: string; stages?: unknown };
     };
     if (e.repeat && Array.isArray(e.repeat.stages)) {
-      // Surface nested stages; optional synthetic label via repeat.name is not a stage file
       for (const nested of e.repeat.stages) {
         if (!nested || typeof nested !== "object") continue;
-        const n = nested as { name?: string; roles?: unknown };
-        if (typeof n.name === "string" && n.name) {
-          out.push({
-            name: n.name,
-            roles: Array.isArray(n.roles)
-              ? n.roles.filter((r): r is string => typeof r === "string")
-              : [],
-          });
-        }
+        const meta = stageMetaFromEntry(nested as Record<string, unknown>);
+        if (meta) out.push(meta);
       }
       continue;
     }
-    if (typeof e.name === "string" && e.name && !e.repeat) {
-      out.push({
-        name: e.name,
-        roles: Array.isArray(e.roles)
-          ? e.roles.filter((r): r is string => typeof r === "string")
-          : [],
-      });
-    }
+    const meta = stageMetaFromEntry(e as Record<string, unknown>);
+    if (meta) out.push(meta);
   }
   return out;
 }
@@ -80,12 +95,18 @@ export function listProjectPipelines(projectDir: string): ProjectPipelineInfo[] 
     const abs = join(projectDir, file);
     let name = file.replace(/\.ya?ml$/i, "");
     let description = "";
+    let goal: string | undefined;
+    let inputDescription: string | undefined;
+    let requirements: string[] | undefined;
     let stages: PipelineStageMeta[] = [];
     try {
       const content = readFileSync(abs, "utf-8");
       const parsed = parseYaml(content) as {
         name?: string;
         description?: string;
+        goal?: string;
+        input?: { description?: string };
+        requirements?: unknown;
         stages?: unknown;
       };
       if (typeof parsed?.name === "string" && parsed.name.trim()) {
@@ -94,11 +115,18 @@ export function listProjectPipelines(projectDir: string): ProjectPipelineInfo[] 
       if (typeof parsed?.description === "string") {
         description = parsed.description;
       }
+      if (typeof parsed?.goal === "string") goal = parsed.goal;
+      if (parsed?.input && typeof parsed.input.description === "string") {
+        inputDescription = parsed.input.description;
+      }
+      if (Array.isArray(parsed?.requirements)) {
+        requirements = parsed.requirements.filter((r): r is string => typeof r === "string");
+      }
       stages = extractStages(parsed?.stages);
     } catch {
       // keep fallback name = stem
     }
-    result.push({ file, name, description, stages });
+    result.push({ file, name, description, goal, inputDescription, requirements, stages });
   }
 
   return result;
