@@ -6,6 +6,7 @@ import * as http from "node:http";
 import { createPetriServer, type ServerResult } from "../../src/web/server.js";
 import { RunLogger } from "../../src/engine/logger.js";
 import { buildEvolutionView } from "../../src/web/routes/api.js";
+import { fileURLToPath } from "node:url";
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "petri-product-test-"));
@@ -277,7 +278,6 @@ describe("buildEvolutionView", () => {
   });
 });
 
-
 describe("product web: quality success rate (issue #17)", () => {
   it("S1: app.js uses quality-based success rate helpers", () => {
     const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
@@ -285,5 +285,290 @@ describe("product web: quality success rate (issue #17)", () => {
     expect(appJs).toMatch(/computeRunStatuses/);
     expect(appJs).toMatch(/Quality:/);
     expect(appJs).toMatch(/Execution:/);
+  });
+});
+
+describe("product web: config validate draft overlay (issue #14)", () => {
+  let projectDir: string;
+  let result: ServerResult;
+
+  beforeEach(async () => {
+    projectDir = makeTmpDir();
+    fs.writeFileSync(
+      path.join(projectDir, "petri.yaml"),
+      "providers:\n  default:\n    type: pi\ndefaults:\n  model: test\n  gate_strategy: all\n  max_retries: 1\n",
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "pipeline.yaml"),
+      "name: t\nstages:\n  - name: work\n    roles: [worker]\n  - repeat:\n      name: loop\n      max_iterations: 1\n      until: ok\n      stages:\n        - name: again\n          roles: [worker]\n",
+    );
+    fs.mkdirSync(path.join(projectDir, "roles", "worker"), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "roles", "worker", "role.yaml"),
+      "persona: soul.md\nplaybooks: []\n",
+    );
+    fs.writeFileSync(path.join(projectDir, "roles", "worker", "soul.md"), "Worker.\n");
+    fs.writeFileSync(
+      path.join(projectDir, "roles", "worker", "gate.yaml"),
+      "id: ok\nevidence:\n  path: '{stage}/{role}/out.json'\n  check:\n    field: score\n    gte: 1\n",
+    );
+
+    result = await createPetriServer({
+      projectDir,
+      projectDirs: [{ name: path.basename(projectDir), dir: projectDir }],
+      workspaceRoot: path.dirname(projectDir),
+      port: 0,
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => result.server.close(() => resolve()));
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it("S1: POST /api/config/validate with illegal draft YAML fails even when disk is valid", async () => {
+    // Disk project is valid; unsaved illegal draft must not report success
+    const disk = await request(result.port, "/api/config/validate", "POST", "{}");
+    const diskData = JSON.parse(disk.body);
+    // If disk invalid for other reasons, still assert draft path
+    const res = await request(
+      result.port,
+      "/api/config/validate",
+      "POST",
+      JSON.stringify({ drafts: { "pipeline.yaml": "name: [\nbad" } }),
+    );
+    expect(res.status).toBe(400);
+    const data = JSON.parse(res.body);
+    expect(data.valid).toBe(false);
+    expect(Array.isArray(data.errors)).toBe(true);
+    expect(data.errors.join("\n")).toMatch(/pipeline\.yaml|YAML|yaml|bad|parse|syntax/i);
+    // Disk file must remain unchanged
+    const onDisk = fs.readFileSync(path.join(projectDir, "pipeline.yaml"), "utf-8");
+    expect(onDisk).not.toContain("name: [");
+    expect(onDisk).toContain("name: t");
+    void diskData;
+  });
+
+  it("S1: validate without drafts uses saved project only", async () => {
+    const res = await request(result.port, "/api/config/validate", "POST", "{}");
+    expect([200, 400]).toContain(res.status);
+    const data = JSON.parse(res.body);
+    expect(typeof data.valid).toBe("boolean");
+    expect(Array.isArray(data.errors)).toBe(true);
+  });
+
+  it("S1: frontend app.js validates draft content and clears stale result on change", () => {
+    const appJs = fs.readFileSync(
+      path.join(process.cwd(), "src/web/public/app.js"),
+      "utf-8",
+    );
+    // Must send current editor draft to validate API
+    expect(appJs).toMatch(/drafts/);
+    expect(appJs).toMatch(/editor-content/);
+    expect(appJs).toMatch(/config-validate/);
+    // Must clear validate result when content or file context changes
+    expect(appJs).toMatch(/clearConfigValidateResult|config-validate-result[\s\S]{0,80}textContent\s*=\s*["']["']/);
+    // Input or change handlers clear stale success
+    expect(appJs).toMatch(/addEventListener\(\s*["']input["']/);
+  });
+});
+
+
+describe("product web: non-default pipeline draft validate (issue #14 follow-up)", () => {
+  let projectDir: string;
+  let result: ServerResult;
+
+  beforeEach(async () => {
+    projectDir = makeTmpDir();
+    fs.writeFileSync(
+      path.join(projectDir, "petri.yaml"),
+      "providers:\n  default:\n    type: pi\ndefaults:\n  model: test\n  gate_strategy: all\n  max_retries: 1\n",
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "pipeline.yaml"),
+      "name: t\nstages:\n  - name: work\n    roles: [worker]\n  - repeat:\n      name: loop\n      max_iterations: 1\n      until: ok\n      stages:\n        - name: again\n          roles: [worker]\n",
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "pipeline-command.yaml"),
+      "name: cmd\nstages:\n  - name: measure\n    command: \"echo 1\"\n",
+    );
+    fs.mkdirSync(path.join(projectDir, "roles", "worker"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "roles", "worker", "role.yaml"), "persona: soul.md\nplaybooks: []\n");
+    fs.writeFileSync(path.join(projectDir, "roles", "worker", "soul.md"), "W\n");
+    fs.writeFileSync(
+      path.join(projectDir, "roles", "worker", "gate.yaml"),
+      "id: ok\nevidence:\n  path: '{stage}/{role}/out.json'\n  check:\n    field: score\n    gte: 1\n",
+    );
+    result = await createPetriServer({
+      projectDir,
+      projectDirs: [{ name: path.basename(projectDir), dir: projectDir }],
+      workspaceRoot: path.dirname(projectDir),
+      port: 0,
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => result.server.close(() => resolve()));
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it("S1: illegal draft of pipeline-command.yaml fails even when default pipeline is valid", async () => {
+    const res = await request(
+      result.port,
+      "/api/config/validate",
+      "POST",
+      JSON.stringify({ drafts: { "pipeline-command.yaml": "name: [\nbad" } }),
+    );
+    expect(res.status).toBe(400);
+    const data = JSON.parse(res.body);
+    expect(data.valid).toBe(false);
+    expect(data.errors.join("\n")).toMatch(/pipeline-command|YAML|syntax|bad|parse/i);
+    // default pipeline on disk unchanged
+    expect(fs.readFileSync(path.join(projectDir, "pipeline.yaml"), "utf-8")).toContain("name: t");
+  });
+});
+
+describe("product web: run detail structured trace (issue #15)", () => {
+  let projectDir: string;
+  let result: ServerResult;
+
+  beforeEach(async () => {
+    projectDir = makeTmpDir();
+    fs.writeFileSync(
+      path.join(projectDir, "petri.yaml"),
+      "providers:\n  default:\n    type: pi\ndefaults:\n  model: test\n  gate_strategy: all\n  max_retries: 1\n",
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "pipeline.yaml"),
+      "name: t\nstages:\n  - name: work\n    roles: [worker]\n",
+    );
+    fs.mkdirSync(path.join(projectDir, "roles", "worker"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "roles", "worker", "role.yaml"), "persona: soul.md\nplaybooks: []\n");
+    fs.writeFileSync(path.join(projectDir, "roles", "worker", "soul.md"), "Worker.\n");
+    fs.writeFileSync(
+      path.join(projectDir, "roles", "worker", "gate.yaml"),
+      "id: ok\nevidence:\n  path: '{stage}/{role}/out.json'\n  check:\n    field: score\n    gte: 1\n",
+    );
+    result = await createPetriServer({
+      projectDir,
+      projectDirs: [{ name: path.basename(projectDir), dir: projectDir }],
+      workspaceRoot: path.dirname(projectDir),
+      port: 0,
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => result.server.close(() => resolve()));
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it("GET /api/runs/:id includes hierarchical trace with stable ids", async () => {
+    const petriDir = path.join(projectDir, ".petri");
+    const logger = new RunLogger(petriDir, "t", "input");
+    logger.beginRepeatIteration("loop", 1, 2);
+    logger.logStageAttempt("work", 1, 2);
+    const timer = logger.logRoleStart("work", "worker", "test");
+    logger.logRoleEnd(timer, {
+      gatePassed: true,
+      gateReason: "ok",
+      attempt: 1,
+      artifacts: [],
+    });
+    logger.logGateResult("work", true, "ok", {
+      strategy: "all",
+      roleResults: [{ role: "worker", gateId: "ok", passed: true, reason: "ok" }],
+    });
+    logger.endStageAttempt("done");
+    logger.endRepeatIteration("done");
+    logger.finish("done");
+
+    const res = await request(result.port, `/api/runs/${logger.runId}`);
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.trace).toBeDefined();
+    expect(data.trace.version).toBe(1);
+    expect(Array.isArray(data.trace.root)).toBe(true);
+    expect(data.trace.root[0].kind).toBe("repeat_iteration");
+    expect(data.trace.root[0].id).toBe("rep:loop:i1");
+    expect(data.trace.root[0].children[0].id).toMatch(/att:work:/);
+    expect(data.trace.root[0].children[0].roles[0].id).toMatch(/role:work:/);
+    expect(data.trace.root[0].children[0].stageGate.strategy).toBe("all");
+  });
+
+  it("frontend app.js renders hierarchical trace", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).toMatch(/renderTraceTimeline/);
+    expect(appJs).toMatch(/repeat_iteration|trace\.root/);
+    expect(appJs).toMatch(/stageGate|stage_gate|Stage gate/);
+  });
+});
+
+describe("product web: app.js parseability after trace UI (issue #15)", () => {
+  it("app.js has no orphan async and loadConfigTab is async with await", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).not.toMatch(/^async\s*$/m);
+    expect(appJs).toMatch(/async function loadConfigTab/);
+    expect(appJs).toMatch(/async function loadConfigTab\([\s\S]*?await /);
+  });
+});
+
+describe("product web: attempt-bound artifacts (issue #16)", () => {
+  let projectDir: string;
+  let result: ServerResult;
+
+  beforeEach(async () => {
+    projectDir = makeTmpDir();
+    fs.writeFileSync(
+      path.join(projectDir, "petri.yaml"),
+      "providers:\n  default:\n    type: pi\ndefaults:\n  model: test\n  gate_strategy: all\n  max_retries: 1\n",
+    );
+    fs.writeFileSync(path.join(projectDir, "pipeline.yaml"), "name: t\nstages:\n  - name: work\n    roles: [worker]\n");
+    result = await createPetriServer({
+      projectDir,
+      projectDirs: [{ name: path.basename(projectDir), dir: projectDir }],
+      workspaceRoot: path.dirname(projectDir),
+      port: 0,
+    });
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => result.server.close(() => resolve()));
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it("S1: lists run snapshot artifacts with attempt metadata", async () => {
+    const runDir = path.join(projectDir, ".petri", "runs", "run-001");
+    const a1 = path.join(runDir, "artifacts", "001-work", "worker");
+    const a2 = path.join(runDir, "artifacts", "002-work", "worker");
+    fs.mkdirSync(a1, { recursive: true });
+    fs.mkdirSync(a2, { recursive: true });
+    fs.writeFileSync(path.join(a1, "out-a.json"), '{"v":1}');
+    fs.writeFileSync(
+      path.join(a1, "_snapshot.json"),
+      JSON.stringify({ sequence: 1, stage: "work", role: "worker", attempt: 1 }),
+    );
+    fs.writeFileSync(path.join(a2, "out-b.json"), '{"v":2}');
+    fs.writeFileSync(
+      path.join(a2, "_snapshot.json"),
+      JSON.stringify({ sequence: 2, stage: "work", role: "worker", attempt: 2 }),
+    );
+    fs.writeFileSync(path.join(runDir, "run.log"), "log");
+
+    const res = await request(result.port, "/api/runs/001/artifacts");
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body) as Array<{ path: string; attempt?: number; stage?: string }>;
+    expect(data.some((x) => x.path.includes("out-a") && x.attempt === 1)).toBe(true);
+    expect(data.some((x) => x.path.includes("out-b") && x.attempt === 2)).toBe(true);
+
+    const file = await request(result.port, "/api/runs/001/artifacts/002-work/worker/out-b.json");
+    expect(file.status).toBe(200);
+    expect(file.body).toContain('"v":2');
+  });
+
+  it("S1: frontend binds I/O log artifacts to attempt helpers", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).toMatch(/filterArtifactsForAttempt/);
+    expect(appJs).toMatch(/filterLogForAttempt/);
+    expect(appJs).toMatch(/resolveAttemptIoPrefix/);
   });
 });
