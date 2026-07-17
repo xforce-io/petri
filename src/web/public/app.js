@@ -501,9 +501,19 @@ async function loadRunsTab() {
   // Populate pipeline dropdown from GET /api/pipelines:
   // value = file path (engine), label = logical name (YAML name:)
   const pipelineSelect = $("#run-pipeline");
+  // Ensure input hint container exists (issue #23)
+  let inputHint = $("#run-input-hint");
+  if (!inputHint && $("#run-input")) {
+    inputHint = document.createElement("p");
+    inputHint.id = "run-input-hint";
+    inputHint.className = "config-nav-sub";
+    $("#run-input").parentElement?.insertBefore(inputHint, $("#run-input").nextSibling);
+  }
+
   const pipesRes = await api("/api/pipelines");
   if (pipesRes.status === 200 && Array.isArray(pipesRes.data) && pipesRes.data.length > 0) {
     const pipes = pipesRes.data;
+    runPipelineMeta = pipes;
     const nameCount = {};
     for (const p of pipes) nameCount[p.name] = (nameCount[p.name] || 0) + 1;
     pipelineSelect.innerHTML = pipes
@@ -517,6 +527,11 @@ async function loadRunsTab() {
       .join("");
   } else {
     pipelineSelect.innerHTML = '<option value="">No pipelines found</option>';
+  }
+  updateRunInputHint();
+  if (!pipelineSelect.dataset.hintBound) {
+    pipelineSelect.dataset.hintBound = "1";
+    pipelineSelect.addEventListener("change", updateRunInputHint);
   }
 
   // Load run history
@@ -563,6 +578,24 @@ function renderRunRow(r) {
   `;
 }
 
+let runPipelineMeta = [];
+
+function updateRunInputHint() {
+  const hint = $("#run-input-hint");
+  const sel = $("#run-pipeline");
+  if (!hint || !sel) return;
+  const meta = runPipelineMeta.find((p) => p.file === sel.value) || runPipelineMeta[0];
+  if (!meta) {
+    hint.textContent = "Input priority: explicit Input → .petri/goal.md → pipeline.goal";
+    return;
+  }
+  const parts = [];
+  if (meta.inputDescription) parts.push("Input: " + meta.inputDescription);
+  if (meta.goal) parts.push("Pipeline goal available (used if Input empty)");
+  parts.push("Priority: explicit Input → .petri/goal.md → pipeline.goal");
+  hint.textContent = parts.join(" · ");
+}
+
 function syncRunInputError() {
   const errorEl = $("#run-error");
   const inputEl = $("#run-input");
@@ -594,12 +627,11 @@ async function startNewRun() {
   const input = $("#run-input").value.trim();
 
   errorEl.textContent = "";
-  if (!input) { errorEl.textContent = "Input is required."; return; }
-
+  // Explicit input optional when goal.md or pipeline.goal exists (issue #23)
   btn.disabled = true;
   btn.textContent = "Starting...";
 
-  const body = { input };
+  const body = { input: input || "" };
   if (pipeline) body.pipeline = pipeline;
   if (currentBranch) body.branch = currentBranch;
 
@@ -745,7 +777,7 @@ function renderRunSummary() {
   const reqs = Array.isArray(r.requirements) ? r.requirements : [];
   const reqHtml = reqs.length
     ? `<div class="requirements-summary"><span class="label">Requirements:</span> ${
-        reqs.map((x) => `<span class="${x.met ? "stat-success" : "stat-danger"}">${escHtml(x.id || "?")}: ${x.met ? "met" : "unmet"}</span>`).join(" · ")
+        reqs.map((x) => `<span class="${x.met ? "stat-success" : "stat-danger"}">${escHtml(x.id || "?")}: ${x.met ? "met" : "unmet"}${x.reason ? ` — ${escHtml(x.reason)}` : ""}</span>`).join(" · ")
       }</div>`
     : "";
   $("#run-summary").innerHTML = `
@@ -753,6 +785,8 @@ function renderRunSummary() {
     ${r.branchId ? `<div><span class="label">Branch:</span> ${escHtml(r.branchId)}</div>` : ""}
     <div><span class="label">Execution:</span> <span class="${execClass}">${escHtml(executionStatus)}</span> <span class="stage-meta">(${escHtml(r.status || "")})</span></div>
     <div><span class="label">Quality:</span> <span class="${qualityClass}">${escHtml(qualityStatus)}</span></div>
+    <div><span class="label">Goal:</span> ${escHtml(r.goal || "(none)")}</div>
+    <div><span class="label">Input:</span> <pre class="run-input-preview">${escHtml((r.input || "").slice(0, 500))}${(r.input || "").length > 500 ? "…" : ""}</pre></div>
     <div><span class="label">Started:</span> ${formatDate(r.startedAt)}</div>
     <div><span class="label">Duration:</span> ${formatDuration(r.durationMs)}</div>
     <div><span class="label">Tokens:</span> ${(usage.inputTokens || 0) + (usage.outputTokens || 0)}</div>

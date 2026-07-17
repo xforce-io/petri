@@ -12,6 +12,8 @@ import { validateProject } from "../../engine/validate.js";
 import { createProviderFromConfig } from "../../util/provider.js";
 import { sendJson, readBody } from "../server.js";
 import { startRun } from "../runner.js";
+import { resolveRunInput } from "../run-input.js";
+import { loadPipelineConfig } from "../../config/loader.js";
 import { listFilesRecursive, filterGeneratedFiles } from "../../util/fs.js";
 import { listPresetTemplates } from "../../templates/list.js";
 import { listProjectPipelines } from "../pipelines.js";
@@ -119,12 +121,28 @@ export async function handleApiRequest(
         return;
       }
 
-      if (!parsed.input || typeof parsed.input !== "string") {
-        sendJson(res, 400, { error: "Missing required field: input" });
+      const pipelineFile = parsed.pipeline ?? "pipeline.yaml";
+      let pipelineGoal: string | undefined;
+      let inputDescription: string | undefined;
+      try {
+        const pc = loadPipelineConfig(projectDir, pipelineFile);
+        pipelineGoal = pc.goal;
+        inputDescription = pc.input?.description;
+      } catch {
+        /* validate on startRun */
+      }
+      const explicit =
+        typeof parsed.input === "string" ? parsed.input : "";
+      const resolved = resolveRunInput({
+        projectDir,
+        explicitInput: explicit,
+        pipelineGoal,
+      });
+      if ("error" in resolved) {
+        sendJson(res, 400, { error: resolved.error, inputDescription, pipelineGoal: pipelineGoal ?? null });
         return;
       }
 
-      const pipelineFile = parsed.pipeline ?? "pipeline.yaml";
       const branchId = typeof parsed.branch === "string" && parsed.branch.trim()
         ? parsed.branch.trim()
         : undefined;
@@ -132,12 +150,17 @@ export async function handleApiRequest(
       const result = startRun({
         projectDir,
         pipelineFile,
-        input: parsed.input,
+        input: resolved.input,
         activeRuns,
         branchId,
       });
 
-      sendJson(res, 200, { runId: result.runId, branchId: branchId ?? null });
+      sendJson(res, 200, {
+        runId: result.runId,
+        inputSource: resolved.source,
+        goal: pipelineGoal ?? null,
+        branchId: branchId ?? null,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       sendJson(res, 400, { error: message });

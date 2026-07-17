@@ -17,6 +17,9 @@ export interface ProjectPipelineInfo {
   /** YAML top-level name, or file stem fallback */
   name: string;
   description: string;
+  goal?: string;
+  inputDescription?: string;
+  requirements?: string[];
   stages: PipelineStageMeta[];
 }
 
@@ -92,12 +95,18 @@ export function listProjectPipelines(projectDir: string): ProjectPipelineInfo[] 
     const abs = join(projectDir, file);
     let name = file.replace(/\.ya?ml$/i, "");
     let description = "";
+    let goal: string | undefined;
+    let inputDescription: string | undefined;
+    let requirements: string[] | undefined;
     let stages: PipelineStageMeta[] = [];
     try {
       const content = readFileSync(abs, "utf-8");
       const parsed = parseYaml(content) as {
         name?: string;
         description?: string;
+        goal?: string;
+        input?: { description?: string };
+        requirements?: unknown;
         stages?: unknown;
       };
       if (typeof parsed?.name === "string" && parsed.name.trim()) {
@@ -106,11 +115,18 @@ export function listProjectPipelines(projectDir: string): ProjectPipelineInfo[] 
       if (typeof parsed?.description === "string") {
         description = parsed.description;
       }
+      if (typeof parsed?.goal === "string") goal = parsed.goal;
+      if (parsed?.input && typeof parsed.input.description === "string") {
+        inputDescription = parsed.input.description;
+      }
+      if (Array.isArray(parsed?.requirements)) {
+        requirements = parsed.requirements.filter((r): r is string => typeof r === "string");
+      }
       stages = extractStages(parsed?.stages);
     } catch {
       // keep fallback name = stem
     }
-    result.push({ file, name, description, stages });
+    result.push({ file, name, description, goal, inputDescription, requirements, stages });
   }
 
   return result;
