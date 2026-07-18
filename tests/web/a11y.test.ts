@@ -95,4 +95,12 @@ describe("web a11y native semantics (issue #22)", () => {
     expect(appJs).toMatch(/button type="button" class="artifact-item/);
     expect(appJs).not.toMatch(/<div class="artifact-item"/);
   });
+
+  it("S2: trace attempts and roles are native buttons and expose lineage navigation", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).toMatch(/button type="button" class="stage-item trace-attempt/);
+    expect(appJs).toMatch(/button type="button" class="trace-role/);
+    expect(appJs).toMatch(/aria-pressed=/);
+    expect(appJs).toMatch(/renderRunLineage/);
+  });
 });

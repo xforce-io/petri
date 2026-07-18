@@ -216,6 +216,11 @@ export interface RunLog {
   status?: "done" | "blocked";
   blockedStage?: string;
   blockedReason?: string;
+  /** The prior run and stage explicitly selected when this run was resumed. */
+  resumedFrom?: {
+    runId: string;
+    stage: string;
+  };
   stages: StageLog[];
   requirements?: Array<{ id: string; met: boolean; reason: string }>;
   totalUsage: {
@@ -288,7 +293,12 @@ export class RunLogger extends EventEmitter {
     pipelineName: string,
     input: string,
     goal?: string,
-    opts: { branchId?: string; branchObjective?: string; branchBaseline?: string } = {},
+    opts: {
+      branchId?: string;
+      branchObjective?: string;
+      branchBaseline?: string;
+      resumedFrom?: { runId: string; stage: string };
+    } = {},
   ) {
     super();
     const runsDir = join(petriDir, "runs");
@@ -307,6 +317,7 @@ export class RunLogger extends EventEmitter {
       branchId: opts.branchId,
       branchObjective: opts.branchObjective,
       branchBaseline: opts.branchBaseline,
+      resumedFrom: opts.resumedFrom,
       pipeline: pipelineName,
       input,
       goal,
@@ -322,6 +333,9 @@ export class RunLogger extends EventEmitter {
       this.append(`Branch: ${opts.branchId}`);
       if (opts.branchObjective) this.append(`Branch objective: ${opts.branchObjective}`);
       if (opts.branchBaseline) this.append(`Branch baseline: ${opts.branchBaseline}`);
+    }
+    if (opts.resumedFrom) {
+      this.append(`Resumed from: run-${opts.resumedFrom.runId} at stage ${opts.resumedFrom.stage}`);
     }
     this.append(`Pipeline: ${pipelineName}`);
     if (goal) {

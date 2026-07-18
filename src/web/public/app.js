@@ -742,6 +742,7 @@ async function startNewRun() {
 
 async function loadRun(runId) {
   currentRunId = runId;
+  currentStageIndex = -1;
 
   // Update breadcrumb
   $("#breadcrumb-run").textContent = `run-${runId}`;
@@ -755,6 +756,7 @@ async function loadRun(runId) {
   currentRunData = res.data;
   renderStageList();
   renderRunSummary();
+  renderRunLineage();
 
   // Select first stage by default
   if (currentRunData.stages && currentRunData.stages.length > 0) {
@@ -883,9 +885,30 @@ function renderRunSummary() {
   `;
 }
 
+function renderRunLineage() {
+  const container = $("#run-lineage");
+  if (!container) return;
+  const lineage = Array.isArray(currentRunData?.lineage) ? currentRunData.lineage : [];
+  if (lineage.length <= 1) {
+    container.innerHTML = "";
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  container.innerHTML = `<span class="lineage-label">研发流程</span>${lineage.map((run, index) => {
+    const isCurrent = String(run.runId) === String(currentRunId);
+    const resume = run.resumedFrom ? ` · 从 run-${escHtml(run.resumedFrom.runId)} 的 ${escHtml(run.resumedFrom.stage)} 继续` : "";
+    const arrow = index === 0 ? "" : '<span class="lineage-arrow" aria-hidden="true">→</span>';
+    return `${arrow}<button type="button" class="lineage-run${isCurrent ? " active" : ""}" data-run-id="${escAttr(run.runId)}" aria-current="${isCurrent ? "step" : "false"}">run-${escHtml(run.runId)} · ${escHtml(run.status || "running")}${resume}</button>`;
+  }).join("")}`;
+  container.querySelectorAll(".lineage-run").forEach((el) => {
+    el.addEventListener("click", () => openRunDetail(el.dataset.runId));
+  });
+}
+
 function selectStage(index) {
   currentStageIndex = index;
-  $$(".stage-item").forEach((el, i) => el.classList.toggle("active", i === index));
+  renderStageList();
   loadStageIO();
   loadRunLog();
   loadStageArtifacts();
@@ -1187,20 +1210,19 @@ function renderTraceTimeline(list, trace) {
     parts.push(renderTraceNode(node, 0));
   }
   list.innerHTML = parts.join("") || '<p class="empty-state">No trace nodes yet.</p>';
-  list.querySelectorAll("[data-trace-id]").forEach((el) => {
+  list.querySelectorAll("[data-trace-stage]").forEach((el) => {
     el.addEventListener("click", () => {
-      list.querySelectorAll("[data-trace-id]").forEach((e) => e.classList.remove("active"));
-      el.classList.add("active");
-      // Select first role under stage attempt for detail panels
       const stage = el.getAttribute("data-stage");
       const attempt = el.getAttribute("data-attempt");
+      const role = el.getAttribute("data-role");
       if (stage && currentRunData && Array.isArray(currentRunData.stages)) {
         const idx = currentRunData.stages.findIndex(
-          (s) => s.stage === stage && String(s.attempt) === String(attempt || s.attempt),
+          (s) => s.stage === stage
+            && String(s.attempt) === String(attempt || s.attempt)
+            && (!role || s.role === role),
         );
         if (idx >= 0) {
-          currentStageIndex = idx;
-          renderStageDetail(currentRunData.stages[idx]);
+          selectStage(idx);
         }
       }
     });
@@ -1212,7 +1234,7 @@ function renderTraceNode(node, depth) {
   if (node.kind === "repeat_iteration") {
     const kids = (node.children || []).map((c) => renderTraceNode(c, depth + 1)).join("");
     return `<div class="trace-repeat" data-trace-id="${escAttr(node.id)}" style="margin-left:${pad}px">
-      <div class="stage-item trace-repeat-header">
+      <div class="trace-repeat-header">
         <span class="stage-dot ${node.status === "done" ? "passed" : node.status === "running" ? "pending" : "failed"}"></span>
         <div class="stage-name">Repeat ${escHtml(node.repeatName)} · iteration ${node.iteration}/${node.maxIterations}</div>
         <div class="stage-meta">${escHtml(node.id)}</div>
@@ -1223,12 +1245,15 @@ function renderTraceNode(node, depth) {
   // stage_attempt
   const roles = (node.roles || [])
     .map(
-      (r) => `<div class="trace-role" style="margin-left:${pad + 12}px">
+      (r) => {
+        const active = traceSelectionMatches(node.stage, node.attempt, r.role) ? " active" : "";
+        return `<button type="button" class="trace-role${active}" data-trace-stage data-stage="${escAttr(node.stage)}" data-attempt="${escAttr(String(node.attempt))}" data-role="${escAttr(r.role)}" aria-pressed="${active ? "true" : "false"}" style="margin-left:${pad + 12}px">
         <span class="stage-dot ${r.gatePassed === true ? "passed" : r.gatePassed === false ? "failed" : "pending"}"></span>
         <span>${escHtml(r.role)}</span>
         <span class="stage-meta">${escHtml(r.provider || "-")} · ${escHtml(r.model || "-")} · ${escHtml(r.id)}</span>
         ${r.gateReason ? `<div class="stage-fail-reason">${escHtml(r.gateReason)}</div>` : ""}
-      </div>`,
+      </button>`;
+      },
     )
     .join("");
   const gate = node.stageGate
@@ -1245,15 +1270,24 @@ function renderTraceNode(node, depth) {
       : node.iteration
         ? ` · i${node.iteration}`
         : "";
-  return `<div class="trace-attempt" data-trace-id="${escAttr(node.id)}" data-stage="${escAttr(node.stage)}" data-attempt="${escAttr(String(node.attempt))}" style="margin-left:${pad}px">
-    <div class="stage-item">
+  const active = traceSelectionMatches(node.stage, node.attempt) ? " active" : "";
+  return `<div class="trace-attempt" style="margin-left:${pad}px">
+    <button type="button" class="stage-item trace-attempt${active}" data-trace-stage data-stage="${escAttr(node.stage)}" data-attempt="${escAttr(String(node.attempt))}" aria-pressed="${active ? "true" : "false"}">
       <span class="stage-dot ${node.status === "done" ? "passed" : node.status === "running" ? "pending" : "failed"}"></span>
       <div class="stage-name">${escHtml(node.stage)} · attempt ${node.attempt}${rep}</div>
       <div class="stage-meta">${escHtml(node.id)}</div>
-    </div>
+    </button>
     ${roles}
     ${gate}
   </div>`;
+}
+
+function traceSelectionMatches(stage, attempt, role) {
+  const selected = currentStageEntry();
+  return !!selected
+    && selected.stage === stage
+    && String(selected.attempt) === String(attempt)
+    && (!role || selected.role === role);
 }
 
 async function loadConfigTab() {

@@ -103,6 +103,28 @@ function enrichRunDetail(log: RunLog, runDir?: string): Record<string, unknown> 
   };
 }
 
+/** Return the oldest-to-newest chain of explicitly resumed runs. */
+function buildRunLineage(runsDir: string, currentRun: RunLog): Array<Record<string, unknown>> {
+  const chain: RunLog[] = [];
+  const seen = new Set<string>();
+  let cursor: RunLog | null = currentRun;
+  while (cursor && !seen.has(cursor.runId)) {
+    seen.add(cursor.runId);
+    chain.unshift(cursor);
+    const sourceId = cursor.resumedFrom?.runId;
+    if (!sourceId) break;
+    cursor = loadRunLog(path.join(runsDir, `run-${sourceId}`));
+  }
+  return chain.map((run) => ({
+    runId: run.runId,
+    pipeline: run.pipeline,
+    status: run.status ?? "running",
+    startedAt: run.startedAt,
+    blockedStage: run.blockedStage ?? null,
+    resumedFrom: run.resumedFrom,
+  }));
+}
+
 export async function handleApiRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -548,6 +570,7 @@ function handleRunDetail(res: http.ServerResponse, projectDir: string, id: strin
     sendJson(res, 200, {
       ...enrichRunDetail(log, runDir),
       branchId: log.branchId ?? branch ?? null,
+      lineage: buildRunLineage(path.join(petriDir, "runs"), log),
     });
     return;
   }

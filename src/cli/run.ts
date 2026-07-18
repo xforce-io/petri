@@ -9,10 +9,10 @@ import {
   collectRoleNames,
 } from "../config/loader.js";
 import { Engine } from "../engine/engine.js";
-import { RunLogger } from "../engine/logger.js";
+import { RunLogger, loadRunLog } from "../engine/logger.js";
 import { currentGeneratedHashes, loadGeneratedManifest, sha256 } from "../engine/manifest.js";
 import { acquireLock, releaseLock, killProcessTree } from "../engine/lock.js";
-import { loadBranch, runRootForBranch } from "../engine/branch.js";
+import { loadBranch, normalizeRunId, runRootForBranch } from "../engine/branch.js";
 import { createProviderRegistryFromConfig, validateRoleProviderConfig } from "../util/provider.js";
 import { resolveGitHubIssueInput } from "../input/github-issue.js";
 import type { LoadedRole } from "../types.js";
@@ -22,9 +22,28 @@ interface RunOptions {
   input?: string;
   from?: string;
   skipTo?: string;
+  resumeRun?: string;
   requireClean?: boolean;
   worktree?: string | boolean;
   branch?: string;
+}
+
+/** Validate and normalize the source run that an explicit resume continues from. */
+export function resolveResumeSource(
+  petriDir: string,
+  resumeRun?: string,
+  skipTo?: string,
+): { runId: string; stage: string } | undefined {
+  if (!resumeRun) return undefined;
+  if (!skipTo) {
+    throw new Error("--resume-run requires --skip-to <stage>.");
+  }
+  const runDirName = normalizeRunId(resumeRun);
+  const source = loadRunLog(path.join(petriDir, "runs", runDirName));
+  if (!source) {
+    throw new Error(`Resume source run not found: ${runDirName}`);
+  }
+  return { runId: source.runId, stage: skipTo };
 }
 
 export async function runCommand(opts: RunOptions): Promise<void> {
@@ -151,10 +170,19 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   // 6. Create logger and engine
   const petriDir = runRootForBranch(cwd, opts.branch);
   const artifactBaseDir = path.join(petriDir, "artifacts");
+  let resumedFrom: { runId: string; stage: string } | undefined;
+  try {
+    resumedFrom = resolveResumeSource(petriDir, opts.resumeRun, opts.skipTo);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(message));
+    process.exit(1);
+  }
   const logger = new RunLogger(petriDir, pipelineConfig.name, input, pipelineConfig.goal, {
     branchId: branchConfig?.branch_id,
     branchObjective: branchConfig?.objective,
     branchBaseline: branchConfig?.baseline,
+    resumedFrom,
   });
   const engine = new Engine({
     providers: providerRegistry.providers,
@@ -185,6 +213,9 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   // 8. Run and print result
   const branchLabel = branchConfig ? ` branch=${branchConfig.branch_id}` : "";
   console.log(chalk.blue(`Running pipeline: ${pipelineConfig.name} (run-${logger.runId}${branchLabel})`));
+  if (resumedFrom) {
+    console.log(chalk.blue(`Resuming from run-${resumedFrom.runId} at stage: ${resumedFrom.stage}`));
+  }
   if (executionCwd !== cwd) {
     process.chdir(executionCwd);
   }

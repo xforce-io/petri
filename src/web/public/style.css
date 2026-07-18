@@ -589,6 +589,34 @@ main {
   margin-bottom: 2px;
 }
 
+.trace-repeat-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  color: var(--text-muted);
+}
+
+.trace-role {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: calc(100% - 12px);
+  border: 0;
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.trace-role:hover,
+.trace-role.active {
+  background: rgba(88, 166, 255, 0.1);
+}
+
 .stage-item:hover {
   background: var(--border);
 }
@@ -637,6 +665,41 @@ main {
 .run-summary .label {
   color: var(--text);
   font-weight: 500;
+}
+
+.run-lineage {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  font-size: 0.8rem;
+}
+
+.lineage-label {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.lineage-arrow { color: var(--text-muted); }
+
+.lineage-run {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0.25rem 0.55rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.lineage-run:hover,
+.lineage-run.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: rgba(88, 166, 255, 0.1);
 }
 
 .detail-panel {

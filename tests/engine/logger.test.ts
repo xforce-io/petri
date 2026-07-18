@@ -151,6 +151,23 @@ describe("RunLogger", () => {
     expect(runLog.goal).toBe("test goal");
   });
 
+  it("records the explicit run and stage that a resumed run continues from", () => {
+    const petriDir = path.join(tmpDir, ".petri");
+    const first = new RunLogger(petriDir, "test-pipeline", "test input");
+    first.finish("blocked", "develop", "needs a retry");
+
+    const resumed = new RunLogger(petriDir, "test-pipeline", "test input", undefined, {
+      resumedFrom: { runId: first.runId, stage: "develop" },
+    });
+    resumed.finish("done");
+
+    const runLog = loadRunLog(resumed.runDir);
+    expect(runLog?.resumedFrom).toEqual({ runId: "001", stage: "develop" });
+    expect(fs.readFileSync(path.join(resumed.runDir, "run.log"), "utf-8")).toContain(
+      "Resumed from: run-001 at stage develop",
+    );
+  });
+
   it("records stage timing and usage", () => {
     const petriDir = path.join(tmpDir, ".petri");
     const logger = new RunLogger(petriDir, "pipe", "input");
