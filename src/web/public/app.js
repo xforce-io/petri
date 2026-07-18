@@ -10,6 +10,14 @@ let expandedStageKey = null;
 let eventSource = null;
 let currentConfigPath = null;
 let currentBranch = ""; // empty = project default runs
+let runsSplitterPointerId = null;
+let runsSplitWidth = 360;
+
+const RUNS_SPLIT_MIN = 280;
+const RUNS_SPLIT_MAX = 560;
+const RUNS_DETAIL_MIN = 420;
+const RUNS_SPLIT_STEP = 16;
+const RUNS_SPLITTER_SIZE = 12;
 
 // Create tab wizard state
 let wizard = {
@@ -120,8 +128,86 @@ function formatCost(usd) {
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
 
+function runsSplitMax(layout) {
+  return Math.max(
+    RUNS_SPLIT_MIN,
+    Math.min(RUNS_SPLIT_MAX, layout.clientWidth - RUNS_DETAIL_MIN - RUNS_SPLITTER_SIZE),
+  );
+}
+
+function setRunsSplitWidth(requestedWidth) {
+  const layout = $(".dashboard-layout");
+  const splitter = $("#runs-splitter");
+  if (!layout || !splitter) return RUNS_SPLIT_MIN;
+  // Runs detail starts hidden. Do not clamp the remembered default against a
+  // zero-width layout before the detail view becomes visible.
+  if (layout.clientWidth <= 0) return runsSplitWidth;
+
+  const max = runsSplitMax(layout);
+  const width = Math.round(Math.max(RUNS_SPLIT_MIN, Math.min(max, requestedWidth)));
+  runsSplitWidth = width;
+  layout.style.setProperty("--timeline-width", `${width}px`);
+  splitter.setAttribute("aria-valuemin", String(RUNS_SPLIT_MIN));
+  splitter.setAttribute("aria-valuemax", String(max));
+  splitter.setAttribute("aria-valuenow", String(width));
+  splitter.setAttribute("aria-valuetext", `阶段导航宽度 ${width} 像素`);
+  return width;
+}
+
+function setupRunsSplitter() {
+  const layout = $(".dashboard-layout");
+  const splitter = $("#runs-splitter");
+  if (!layout || !splitter || splitter.dataset.bound) return;
+  splitter.dataset.bound = "1";
+
+  const widthFromPointer = (event) => event.clientX - layout.getBoundingClientRect().left;
+  const stopDragging = (event) => {
+    if (runsSplitterPointerId !== event.pointerId) return;
+    splitter.releasePointerCapture?.(event.pointerId);
+    runsSplitterPointerId = null;
+    delete splitter.dataset.dragging;
+  };
+
+  splitter.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || window.matchMedia("(max-width: 800px)").matches) return;
+    event.preventDefault();
+    runsSplitterPointerId = event.pointerId;
+    splitter.dataset.dragging = "true";
+    splitter.setPointerCapture?.(event.pointerId);
+    setRunsSplitWidth(widthFromPointer(event));
+  });
+  splitter.addEventListener("pointermove", (event) => {
+    if (runsSplitterPointerId === event.pointerId) setRunsSplitWidth(widthFromPointer(event));
+  });
+  splitter.addEventListener("pointerup", stopDragging);
+  splitter.addEventListener("pointercancel", stopDragging);
+  splitter.addEventListener("keydown", (event) => {
+    const current = Number(splitter.getAttribute("aria-valuenow")) || RUNS_SPLIT_MIN;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      setRunsSplitWidth(current - RUNS_SPLIT_STEP);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      setRunsSplitWidth(current + RUNS_SPLIT_STEP);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setRunsSplitWidth(RUNS_SPLIT_MIN);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setRunsSplitWidth(runsSplitMax(layout));
+    }
+  });
+  window.addEventListener("resize", () => {
+    const current = Number(splitter.getAttribute("aria-valuenow")) || RUNS_SPLIT_MIN;
+    setRunsSplitWidth(current);
+  });
+  setRunsSplitWidth(Number(splitter.getAttribute("aria-valuenow")) || 360);
+}
+
 // ── Init ──
 document.addEventListener("DOMContentLoaded", () => {
+  setupRunsSplitter();
+
   // Main tab switching
   $$(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -527,6 +613,7 @@ function openRunDetail(runId) {
   switchToTab("runs");
   $("#runs-list-view").style.display = "none";
   $("#runs-detail-view").style.display = "";
+  setRunsSplitWidth(runsSplitWidth);
   loadRun(runId);
 }
 

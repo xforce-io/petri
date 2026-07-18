@@ -114,4 +114,22 @@ describe("web a11y native semantics (issue #22)", () => {
     expect(appJs).toMatch(/formatStageLabel/);
     expect(appJs).toMatch(/summarizeStageReason/);
   });
+
+  it("S1-S3: Runs split pane is a keyboard-operable separator with bounded resizing", () => {
+    const html = fs.readFileSync(path.join(process.cwd(), "src/web/public/index.html"), "utf-8");
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    const css = fs.readFileSync(path.join(process.cwd(), "src/web/public/style.css"), "utf-8");
+
+    expect(html).toMatch(/id="runs-splitter"[^>]*role="separator"/);
+    expect(html).toMatch(/aria-orientation="vertical"/);
+    expect(html).toMatch(/aria-valuemin="280"/);
+    expect(appJs).toMatch(/setupRunsSplitter/);
+    expect(appJs).toMatch(/pointerdown/);
+    expect(appJs).toMatch(/ArrowLeft/);
+    expect(appJs).toMatch(/ArrowRight/);
+    expect(appJs).toMatch(/aria-valuenow/);
+    expect(css).toMatch(/--timeline-width/);
+    expect(css).toMatch(/\.runs-splitter/);
+    expect(css).toMatch(/@media \(max-width: 800px\)/);
+  });
 });

@@ -550,18 +550,46 @@ main {
 /* ── Run Detail Layout ── */
 
 .dashboard-layout {
-  display: flex;
+  --timeline-width: 360px;
+  display: grid;
+  grid-template-columns: var(--timeline-width) 12px minmax(0, 1fr);
   height: calc(100% - 42px); /* account for breadcrumb */
+  min-width: 0;
 }
 
 .timeline-panel {
-  width: 360px;
-  min-width: 320px;
-  border-right: 1px solid var(--border);
+  min-width: 0;
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.runs-splitter {
+  position: relative;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.runs-splitter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 1px;
+  background: var(--border);
+  transition: background 0.15s, width 0.15s;
+}
+
+.runs-splitter:hover::before,
+.runs-splitter:focus-visible::before,
+.runs-splitter[data-dragging="true"]::before {
+  left: 4px;
+  width: 3px;
+  background: var(--accent);
 }
 
 .timeline-panel h3 {
@@ -739,9 +767,30 @@ main {
 
 .detail-panel {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+@media (max-width: 800px) {
+  .dashboard-layout {
+    display: block;
+    height: auto;
+  }
+
+  .timeline-panel {
+    max-height: 40vh;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .runs-splitter {
+    display: none;
+  }
+
+  .detail-panel {
+    min-height: 55vh;
+  }
 }
 
 .sub-tabs {
