@@ -549,17 +549,36 @@ main {
 
 /* ── Run Detail Layout ── */
 
+/* Establish a viewport-bounded height chain so split panes redistribute
+   free space instead of growing with long Prompt/Result content. */
+#runs-detail-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#runs-detail-view > .breadcrumb,
+#runs-detail-view > .run-lineage {
+  flex: 0 0 auto;
+}
+
 .dashboard-layout {
   --timeline-width: 360px;
   display: grid;
   grid-template-columns: var(--timeline-width) 12px minmax(0, 1fr);
-  height: calc(100% - 42px); /* account for breadcrumb */
+  flex: 1 1 auto;
+  min-height: 0;
   min-width: 0;
+  /* Fill remaining space under breadcrumb + optional lineage (no fixed calc). */
+  height: auto;
 }
 
 .timeline-panel {
   --run-summary-height: 260px;
   min-width: 0;
+  min-height: 0;
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
@@ -810,9 +829,16 @@ main {
 }
 
 @media (max-width: 800px) {
+  #runs-detail-view {
+    height: auto;
+    overflow: auto;
+  }
+
   .dashboard-layout {
     display: block;
+    flex: none;
     height: auto;
+    min-height: 0;
   }
 
   .timeline-panel {
@@ -1253,6 +1279,7 @@ main {
 
 .io-splitter {
   position: relative;
+  z-index: 1;
   flex: 0 0 12px;
   cursor: row-resize;
   touch-action: none;
@@ -1287,8 +1314,19 @@ main {
   padding: 8px 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
-  cursor: pointer;
   user-select: none;
+}
+
+/* Only the Prompt collapse control is interactive; Result header is not a drag handle. */
+button.io-header {
+  cursor: pointer;
+  width: 100%;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: var(--bg-secondary);
+  display: flex;
 }
 
 .io-label {
@@ -1863,7 +1901,6 @@ button.template-card {
   margin-bottom: 0.5rem;
 }
 
-button.io-header,
 button.artifact-item,
 button.step-item {
   font: inherit;

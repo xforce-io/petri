@@ -787,8 +787,11 @@ function openRunDetail(runId) {
   switchToTab("runs");
   $("#runs-list-view").style.display = "none";
   $("#runs-detail-view").style.display = "";
+  // Detail was display:none during init; re-apply clamps now that the layout
+  // has a real size so I/O / timeline / runs splitters can redistribute space.
   setRunsSplitWidth(runsSplitWidth);
   setTimelineSummaryHeight(runSummaryHeight);
+  syncIoSplitter();
   loadRun(runId);
 }
 

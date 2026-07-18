@@ -159,6 +159,8 @@ describe("web a11y native semantics (issue #22)", () => {
     expect(appJs).toMatch(/syncIoSplitter/);
     expect(appJs).toMatch(/function setIoPromptCollapsed/);
     expect(appJs).toMatch(/setIoPromptCollapsed\(false\)/);
+    // openRunDetail must re-clamp after display:none → visible so splitters work.
+    expect(appJs).toMatch(/function openRunDetail[\s\S]*?syncIoSplitter\(\)/);
     expect(css).toMatch(/--io-prompt-height/);
     expect(css).toMatch(/\.io-splitter/);
     expect(css).toMatch(/\.io-prompt-block/);
@@ -166,5 +168,12 @@ describe("web a11y native semantics (issue #22)", () => {
     expect(css).toMatch(/\.detail-panel\s*\{[\s\S]*?min-height:\s*0/);
     expect(css).toMatch(/\.sub-tab-content\s*\{[\s\S]*?min-height:\s*0/);
     expect(css).toMatch(/\.io-section\s*\{[\s\S]*?overflow:\s*hidden/);
+    // Viewport-bounded height chain: detail view + flex fill under breadcrumb/lineage.
+    expect(css).toMatch(/#runs-detail-view\s*\{[\s\S]*?height:\s*100%/);
+    expect(css).toMatch(/#runs-detail-view\s*\{[\s\S]*?display:\s*flex/);
+    expect(css).toMatch(/\.dashboard-layout\s*\{[\s\S]*?flex:\s*1/);
+    expect(css).toMatch(/\.dashboard-layout\s*\{[\s\S]*?min-height:\s*0/);
+    expect(css).not.toMatch(/\.dashboard-layout\s*\{[\s\S]*?height:\s*calc\(100%\s*-\s*42px\)/);
+    expect(css).toMatch(/button\.io-header\s*\{[\s\S]*?cursor:\s*pointer/);
   });
 });
