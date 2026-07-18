@@ -13,6 +13,7 @@ import { createProviderFromConfig } from "../../util/provider.js";
 import { sendJson, readBody } from "../server.js";
 import { startRun } from "../runner.js";
 import { resolveRunInput } from "../run-input.js";
+import { resolveGitHubIssueInput } from "../../input/github-issue.js";
 import { loadPipelineConfig } from "../../config/loader.js";
 import { listFilesRecursive, filterGeneratedFiles } from "../../util/fs.js";
 import { listPresetTemplates } from "../../templates/list.js";
@@ -145,6 +146,10 @@ export async function handleApiRequest(
         sendJson(res, 400, { error: resolved.error, inputDescription, pipelineGoal: pipelineGoal ?? null });
         return;
       }
+      const issueInput = resolveGitHubIssueInput({
+        projectDir,
+        input: resolved.input,
+      });
 
       const branchId = typeof parsed.branch === "string" && parsed.branch.trim()
         ? parsed.branch.trim()
@@ -153,14 +158,14 @@ export async function handleApiRequest(
       const result = startRun({
         projectDir,
         pipelineFile,
-        input: resolved.input,
+        input: issueInput.input,
         activeRuns,
         branchId,
       });
 
       sendJson(res, 200, {
         runId: result.runId,
-        inputSource: resolved.source,
+        inputSource: issueInput.source === "github_issue" ? issueInput.source : resolved.source,
         goal: pipelineGoal ?? null,
         branchId: branchId ?? null,
       });

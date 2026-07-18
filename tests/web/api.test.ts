@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as http from "node:http";
+import { execFileSync } from "node:child_process";
 import { RunLogger } from "../../src/engine/logger.js";
 import { createPetriServer, type ServerResult } from "../../src/web/server.js";
 
@@ -57,6 +58,7 @@ describe("Petri Web Server", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await new Promise<void>((resolve) => result.server.close(() => resolve()));
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -235,6 +237,69 @@ describe("Petri Web Server", () => {
     it("returns 400 for invalid JSON", async () => {
       const res = await request(result.port, "/api/runs", "POST", "not-json");
       expect(res.status).toBe(400);
+    });
+
+    it("returns a readable error for an invalid GitHub Issue URL", async () => {
+      const res = await request(
+        result.port,
+        "/api/runs",
+        "POST",
+        JSON.stringify({ input: "https://github.com/xforce-io/petri/pull/49" }),
+      );
+      expect(res.status).toBe(400);
+      expect(JSON.parse(res.body).error).toContain("Invalid GitHub Issue URL");
+    });
+
+    it("expands a valid GitHub Issue URL before starting the run", async () => {
+      execFileSync("git", ["init"], { cwd: tmpDir, stdio: "ignore" });
+      execFileSync("git", ["remote", "add", "origin", "https://github.com/xforce-io/petri.git"], { cwd: tmpDir });
+      const binDir = path.join(tmpDir, "bin");
+      fs.mkdirSync(binDir, { recursive: true });
+      const fakeGh = path.join(binDir, "gh");
+      fs.writeFileSync(fakeGh, [
+        "#!/bin/sh",
+        "case \"$2\" in",
+        "  repos/xforce-io/petri/issues/49) printf '%s' '{\"number\":49,\"title\":\"From URL\",\"body\":\"Issue body\",\"state\":\"open\",\"html_url\":\"https://github.com/xforce-io/petri/issues/49\",\"labels\":[]}' ;;",
+        "  *page=1) printf '%s' '[{\"id\":1,\"body\":\"comment from API\",\"user\":{\"login\":\"reviewer\"}}]' ;;",
+        "  *) exit 1 ;;",
+        "esac",
+        "",
+      ].join("\n"));
+      fs.chmodSync(fakeGh, 0o755);
+      vi.stubEnv("PATH", `${binDir}:${process.env.PATH ?? ""}`);
+      fs.writeFileSync(path.join(tmpDir, "petri.yaml"), [
+        "providers:",
+        "  default:",
+        "    type: grok",
+        "models:",
+        "  default:",
+        "    provider: default",
+        "    model: default",
+        "defaults:",
+        "  model: default",
+        "  gate_strategy: all",
+        "  max_retries: 0",
+        "",
+      ].join("\n"));
+
+      const res = await request(
+        result.port,
+        "/api/runs",
+        "POST",
+        JSON.stringify({ input: "https://github.com/xforce-io/petri/issues/49" }),
+      );
+      expect(res.status).toBe(200);
+      expect(JSON.parse(res.body).inputSource).toBe("github_issue");
+
+      await vi.waitFor(() => expect(fs.existsSync(
+        path.join(tmpDir, ".petri", "runs", "run-001", "run.json"),
+      )).toBe(true));
+      const runInput = JSON.parse(fs.readFileSync(
+        path.join(tmpDir, ".petri", "runs", "run-001", "run.json"),
+        "utf8",
+      )).input;
+      expect(runInput).toContain("Issue body");
+      expect(runInput).toContain("comment from API");
     });
 
     it("starts a run and returns runId", async () => {
