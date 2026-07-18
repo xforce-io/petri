@@ -1,5 +1,7 @@
 # 【code-dev】对齐 issue→设计→TDD→测试→codex review→迭代
 
+> 历史说明：本文中「整 run 单 Provider」的限制已由 [#47](https://github.com/xforce-io/petri/issues/47) 解除；当前以角色 `role.yaml.provider` 选择命名 Provider。
+
 - Issue: #42
 - 状态: Approved
 - 最后更新: 2026-07-18

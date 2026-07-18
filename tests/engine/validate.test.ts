@@ -45,6 +45,51 @@ describe("validateProject", () => {
     expect(result.errors[0]).toContain("ghost_role");
   });
 
+  it("reports an unknown role provider before execution", () => {
+    const dir = writeFixture({
+      "petri.yaml": [
+        "providers:",
+        "  default:",
+        "    type: codex",
+        "models:",
+        "  default:",
+        "    provider: default",
+        "    model: default",
+        "defaults:",
+        "  model: default",
+        "  gate_strategy: all",
+        "  max_retries: 1",
+        "",
+      ].join("\n"),
+      "pipeline.yaml": [
+        "name: provider-validation",
+        "stages:",
+        "  - repeat:",
+        "      name: loop",
+        "      max_iterations: 1",
+        "      until: reviewed",
+        "      stages:",
+        "        - name: review",
+        "          roles: [reviewer]",
+        "",
+      ].join("\n"),
+      "roles/reviewer/role.yaml": "persona: reviewer\nprovider: missing\nplaybooks: []\n",
+      "roles/reviewer/gate.yaml": [
+        "id: reviewed",
+        "evidence:",
+        "  path: '{stage}/{role}/result.json'",
+        "  check:",
+        "    field: score",
+        "    gte: 1",
+        "",
+      ].join("\n"),
+    });
+
+    const result = validateProject(dir);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain('role "reviewer": provider "missing" is not declared in petri.yaml.providers');
+  });
+
   it("rejects a pipeline with no repeat block", () => {
     const dir = writeFixture({
       "petri.yaml": MIN_PETRI,

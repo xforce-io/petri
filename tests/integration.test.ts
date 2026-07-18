@@ -31,12 +31,12 @@ function walkStages(entries: StageEntry[], visit: (e: StageEntry) => void): void
 }
 
 describe("code-dev template topology (issue #42 flow)", () => {
-  it("loads real YAML with issue → design → develop → unit_test command → review + codex", () => {
+  it("loads real YAML with issue → design → develop → unit_test command → review + grok", () => {
     const petri = loadPetriConfig(templateDir);
     const pipeline = loadPipelineConfig(templateDir);
 
-    // Codex as whole-run provider (single-provider constraint)
-    expect(Object.values(petri.providers).some((p) => p.type === "codex")).toBe(true);
+    // Grok is the template default provider; roles may now override it.
+    expect(Object.values(petri.providers).some((p) => p.type === "grok")).toBe(true);
 
     const stageNames: string[] = [];
     let hasCommandUnitTest = false;
@@ -81,7 +81,7 @@ describe("code-dev template topology (issue #42 flow)", () => {
     ).toMatch(/TDD|tests first/i);
     expect(
       fs.readFileSync(path.join(templateDir, "roles/code_reviewer/playbooks/review.md"), "utf-8"),
-    ).toMatch(/[Cc]odex/);
+    ).toMatch(/[Gg]rok/);
   });
 });
 

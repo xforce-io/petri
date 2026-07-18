@@ -787,6 +787,7 @@ function renderStageList() {
           role: a.role,
           attempt: a.attempt,
           model: a.model,
+          provider: a.provider,
           durationMs: a.durationMs,
           gatePassed: a.gatePassed,
           gateReason: a.gateReason,
@@ -807,7 +808,7 @@ function renderStageList() {
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
-          <div class="stage-meta">${escHtml(s.role === "command" ? "Command Stage" : (s.role || ""))}${s.role === "command" ? "" : (s.model ? " · " + escHtml(s.model) : "")} · ${formatDuration(s.durationMs)}</div>
+          <div class="stage-meta">${escHtml(s.role === "command" ? "Command Stage" : (s.role || ""))}${s.role === "command" ? "" : (s.provider ? " · " + escHtml(s.provider) : "")}${s.role === "command" ? "" : (s.model ? " · " + escHtml(s.model) : "")} · ${formatDuration(s.durationMs)}</div>
           ${s.gatePassed === false && s.gateReason ? `<div class="stage-fail-reason">${escHtml(s.gateReason)}</div>` : ""}
         </div>
       </button>`;
@@ -830,6 +831,7 @@ function renderStageList() {
     const dotClass = s.gatePassed === true ? "passed" : s.gatePassed === false ? "failed" : "pending";
     const usage = s.usage || {};
     const costStr = usage.costUsd ? ` · ${formatCost(usage.costUsd)}` : "";
+    const providerStr = s.provider ? ` · ${s.provider}` : "";
     const modelStr = s.model ? ` · ${s.model}` : "";
     const attemptStr = s.attempt ? ` · attempt ${s.attempt}` : "";
     return `
@@ -837,7 +839,7 @@ function renderStageList() {
         <div class="stage-dot ${dotClass}"></div>
         <div class="stage-info">
           <div class="stage-name">${escHtml(s.stage)}${attemptStr}</div>
-          <div class="stage-meta">${escHtml(s.role === "command" ? "Command Stage" : (s.role || ""))}${s.role === "command" ? "" : modelStr} · ${formatDuration(s.durationMs)}${costStr}</div>
+          <div class="stage-meta">${escHtml(s.role === "command" ? "Command Stage" : (s.role || ""))}${s.role === "command" ? "" : providerStr + modelStr} · ${formatDuration(s.durationMs)}${costStr}</div>
         </div>
       </button>
     `;
@@ -1097,6 +1099,7 @@ function renderGateDetail() {
       <div class="gate-status ${statusClass}">${statusText}</div>
       <div><strong>Stage:</strong> ${escHtml(stage.stage)}</div>
       <div><strong>Role:</strong> ${escHtml(stage.role || "-")}</div>
+      <div><strong>Provider:</strong> ${escHtml(stage.provider || "-")}</div>
       <div><strong>Model:</strong> ${escHtml(stage.model || "-")}</div>
       <div><strong>Duration:</strong> ${formatDuration(stage.durationMs)}</div>
       <div><strong>Tokens:</strong> ${usage.inputTokens || 0} in + ${usage.outputTokens || 0} out = ${tokenTotal}</div>
@@ -1162,7 +1165,7 @@ function formatSSEEvent(data) {
   const ts = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   switch (data.type) {
     case "stage-start": return `[${ts}] Stage "${data.stage}" attempt ${data.attempt}/${data.max}`;
-    case "role-start": return `[${ts}] ${data.stage}/${data.role} — model: ${data.model || "?"}`;
+    case "role-start": return `[${ts}] ${data.stage}/${data.role} — model: ${data.model || "?"}${data.provider ? ` | provider: ${data.provider}` : ""}`;
     case "role-end": return `[${ts}] ${data.stage}/${data.role} done (${formatDuration(data.durationMs)})`;
     case "gate-result": return `[${ts}] Gate [${data.passed ? "PASS" : "FAIL"}]: ${data.reason || ""}`;
     case "run-end": return `[${ts}] Run finished — ${data.status}`;
@@ -1223,7 +1226,7 @@ function renderTraceNode(node, depth) {
       (r) => `<div class="trace-role" style="margin-left:${pad + 12}px">
         <span class="stage-dot ${r.gatePassed === true ? "passed" : r.gatePassed === false ? "failed" : "pending"}"></span>
         <span>${escHtml(r.role)}</span>
-        <span class="stage-meta">${escHtml(r.id)}</span>
+        <span class="stage-meta">${escHtml(r.provider || "-")} · ${escHtml(r.model || "-")} · ${escHtml(r.id)}</span>
         ${r.gateReason ? `<div class="stage-fail-reason">${escHtml(r.gateReason)}</div>` : ""}
       </div>`,
     )

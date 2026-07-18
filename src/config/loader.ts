@@ -86,6 +86,10 @@ export function loadRole(
     fs.readFileSync(roleYamlPath, "utf-8")
   ) as RoleConfig;
 
+  if (roleConfig.provider !== undefined && typeof roleConfig.provider !== "string") {
+    throw new Error(`roles/${roleName}/role.yaml: 'provider' must be a string`);
+  }
+
   // Read soul.md for the persona text
   const soulPath = path.join(roleDir, "soul.md");
   let persona = roleConfig.persona;
@@ -145,6 +149,7 @@ export function loadRole(
     name: roleName,
     persona,
     model: roleConfig.model ?? defaultModel,
+    provider: roleConfig.provider,
     playbooks,
     gate,
   };

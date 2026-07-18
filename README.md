@@ -190,8 +190,33 @@ defaults:
   max_retries: 3
 ```
 
-Multi-type precedence when several providers are declared:
-**grok > codex > claude_code > milkie > pi**. If `providers` is empty, **grok** is selected.
+`role.yaml` 可用可选的 `provider` 选择 `petri.yaml.providers` 中的命名 Provider；未设置时沿用默认模型对应的 Provider（保持旧项目行为）。角色的 `model` 与该 Provider 的命名模型应匹配，错误引用会在 `petri validate` 或运行前报错，不会静默回退。
+
+```yaml
+# petri.yaml
+providers:
+  coding:
+    type: codex
+  review:
+    type: grok
+models:
+  coding:
+    provider: coding
+    model: default
+  review:
+    provider: review
+    model: default
+defaults:
+  model: coding
+  gate_strategy: all
+  max_retries: 3
+
+# roles/code_reviewer/role.yaml
+provider: review
+model: review
+```
+
+没有 `provider` 配置时仍使用历史选择规则：**grok > codex > claude_code > milkie > pi**；空 `providers` 时为 **grok**。
 
 CLI-backed providers (`grok`, `codex`, `claude_code`) spawn the local CLI, write `_prompt.md` / `_agent_run.json` under the stage artifact dir, and scan produced files. Override binaries with `PETRI_GROK_BIN` / `PETRI_CODEX_BIN` when needed.
 

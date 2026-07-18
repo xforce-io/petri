@@ -1,5 +1,7 @@
 Review the developer's code against the issue brief and design document.
-When this project uses `providers.default.type: codex`, you run via the **Codex CLI** (whole-run single provider — see design doc #42).
+You run through the Agent Provider selected by this role's `role.yaml`; when no
+role provider is set, the project default applies (the bundled code-dev default
+is the **Grok CLI**).
 
 ## Steps
 

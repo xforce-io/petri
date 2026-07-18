@@ -55,7 +55,7 @@ describe("applyTemplate", () => {
     expect(fs.existsSync(path.join(target, "roles", "developer", "role.yaml"))).toBe(true);
     expect(fs.existsSync(path.join(target, "roles", "designer", "soul.md"))).toBe(true);
     expect(fs.existsSync(path.join(target, "roles", "issue_analyst", "role.yaml"))).toBe(true);
-    expect(fs.readFileSync(path.join(target, "petri.yaml"), "utf-8")).toMatch(/type:\s*codex/);
+    expect(fs.readFileSync(path.join(target, "petri.yaml"), "utf-8")).toMatch(/type:\s*grok/);
     expect(fs.readFileSync(path.join(target, "pipeline.yaml"), "utf-8")).toMatch(/unit_test/);
   });
 

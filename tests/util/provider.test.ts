@@ -7,7 +7,13 @@ vi.mock("../../src/config/loader.js", () => ({
   loadPetriConfig: mockLoad,
 }));
 
-import { createProviderFromConfig, selectProviderType } from "../../src/util/provider.js";
+import {
+  createProviderFromConfig,
+  createProviderRegistryFromConfig,
+  resolveRoleProviderName,
+  selectProviderType,
+  validateRoleProviderConfig,
+} from "../../src/util/provider.js";
 import { ClaudeCodeProvider } from "../../src/providers/claude-code.js";
 import { CodexProvider } from "../../src/providers/codex.js";
 import { GrokProvider } from "../../src/providers/grok.js";
@@ -122,5 +128,72 @@ describe("createProviderFromConfig", () => {
       }),
     );
     expect(createProviderFromConfig("/proj")).toBeInstanceOf(PiProvider);
+  });
+});
+
+describe("role provider routing", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("creates a registry keyed by the provider names declared in petri.yaml", () => {
+    mockLoad.mockReturnValue(
+      config({
+        providers: {
+          codex: { type: "codex" },
+          reviewer: { type: "grok" },
+        },
+        models: {
+          coding: { provider: "codex", model: "gpt-5" },
+          review: { provider: "reviewer", model: "grok-4" },
+        },
+        defaults: { model: "coding", gate_strategy: "all", max_retries: 3 },
+      }),
+    );
+
+    const registry = createProviderRegistryFromConfig("/proj");
+
+    expect(registry.defaultProviderName).toBe("codex");
+    expect(registry.providers.codex).toBeInstanceOf(CodexProvider);
+    expect(registry.providers.reviewer).toBeInstanceOf(GrokProvider);
+  });
+
+  it("uses the default model's provider when a role omits provider", () => {
+    const petri = config({
+      providers: { default: { type: "codex" }, reviewer: { type: "grok" } },
+      models: {
+        coding: { provider: "default", model: "gpt-5" },
+        review: { provider: "reviewer", model: "grok-4" },
+      },
+      defaults: { model: "coding", gate_strategy: "all", max_retries: 3 },
+    });
+
+    expect(resolveRoleProviderName({ model: "coding" }, petri)).toBe("default");
+    expect(resolveRoleProviderName({ provider: "reviewer", model: "review" }, petri)).toBe("reviewer");
+  });
+
+  it("rejects an unknown explicit provider instead of falling back", () => {
+    const petri = config({
+      providers: { default: { type: "codex" } },
+      models: { coding: { provider: "default", model: "gpt-5" } },
+      defaults: { model: "coding", gate_strategy: "all", max_retries: 3 },
+    });
+
+    expect(() => validateRoleProviderConfig([
+      { name: "reviewer", provider: "missing", model: "coding" },
+    ], petri)).toThrow('role "reviewer": provider "missing" is not declared in petri.yaml.providers');
+  });
+
+  it("rejects a role model that belongs to another configured provider", () => {
+    const petri = config({
+      providers: { default: { type: "codex" }, reviewer: { type: "grok" } },
+      models: {
+        coding: { provider: "default", model: "gpt-5" },
+        review: { provider: "reviewer", model: "grok-4" },
+      },
+      defaults: { model: "coding", gate_strategy: "all", max_retries: 3 },
+    });
+
+    expect(() => validateRoleProviderConfig([
+      { name: "reviewer", provider: "reviewer", model: "coding" },
+    ], petri)).toThrow('role "reviewer": model "coding" belongs to provider "default", but role selects provider "reviewer"');
   });
 });

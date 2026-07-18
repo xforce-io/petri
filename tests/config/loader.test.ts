@@ -209,6 +209,35 @@ playbooks: []
     expect(role.model).toBe("fallback-model");
   });
 
+  it("loads an optional named provider for a role", () => {
+    writeFile(
+      tmpDir,
+      "roles/reviewer/role.yaml",
+      `
+persona: reviewer
+provider: grok-review
+playbooks: []
+`,
+    );
+
+    const role = loadRole(tmpDir, "reviewer", "fallback-model");
+    expect(role.provider).toBe("grok-review");
+  });
+
+  it("rejects a non-string role provider", () => {
+    writeFile(
+      tmpDir,
+      "roles/reviewer/role.yaml",
+      `
+persona: reviewer
+provider: 42
+playbooks: []
+`,
+    );
+
+    expect(() => loadRole(tmpDir, "reviewer", "fallback-model")).toThrow(/provider.*string/);
+  });
+
   it("loads local playbook files from playbooks/ directory", () => {
     writeFile(
       tmpDir,

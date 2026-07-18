@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { Engine } from "../../src/engine/engine.js";
-import { RunLogger } from "../../src/engine/logger.js";
+import { RunLogger, loadRunLog } from "../../src/engine/logger.js";
 import type {
   AgentConfig,
   AgentProvider,
@@ -47,11 +47,12 @@ function makeGate(pathTemplate: string, check?: { field: string; equals?: unknow
   };
 }
 
-function makeRole(name: string, gate: GateConfig | null): LoadedRole {
+function makeRole(name: string, gate: GateConfig | null, provider?: string): LoadedRole {
   return {
     name,
     persona: `${name} persona`,
     model: "test-model",
+    provider,
     playbooks: [],
     gate,
   };
@@ -66,6 +67,34 @@ describe("Engine", () => {
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("routes each role to its named provider and records it in the run log", async () => {
+    const called: string[] = [];
+    const makeProvider = (name: string): AgentProvider => createStubProvider(() => {
+      called.push(name);
+    });
+    const logger = new RunLogger(tmpDir, "provider-routing", "input");
+    const engine = new Engine({
+      providers: { codex: makeProvider("codex"), reviewer: makeProvider("reviewer") },
+      defaultProviderName: "codex",
+      roles: {
+        implementer: makeRole("implementer", null),
+        reviewer: makeRole("reviewer", null, "reviewer"),
+      },
+      artifactBaseDir: path.join(tmpDir, "artifacts"),
+      logger,
+    });
+
+    const result = await engine.run({
+      name: "provider-routing",
+      stages: [{ name: "work", roles: ["implementer", "reviewer"] }],
+    }, "input");
+
+    expect(result.status).toBe("done");
+    expect(called).toEqual(expect.arrayContaining(["codex", "reviewer"]));
+    logger.finish("done");
+    expect(loadRunLog(logger.runDir)?.stages.map((stage) => stage.provider).sort()).toEqual(["codex", "reviewer"]);
   });
 
   it("runs 2-stage pipeline to completion", async () => {
