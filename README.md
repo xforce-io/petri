@@ -178,7 +178,7 @@ A gate is the definition of "done" for a role. If it doesn't pass, the stage ret
 # petri.yaml
 providers:
   default:
-    type: pi             # pi | claude_code
+    type: grok           # grok (default) | codex | claude_code | milkie | pi
 
 models:
   sonnet:
@@ -189,6 +189,11 @@ defaults:
   model: sonnet
   max_retries: 3
 ```
+
+Multi-type precedence when several providers are declared:
+**grok > codex > claude_code > milkie > pi**. If `providers` is empty, **grok** is selected.
+
+CLI-backed providers (`grok`, `codex`, `claude_code`) spawn the local CLI, write `_prompt.md` / `_agent_run.json` under the stage artifact dir, and scan produced files. Override binaries with `PETRI_GROK_BIN` / `PETRI_CODEX_BIN` when needed.
 
 ## CLI
 
