@@ -2,7 +2,7 @@ Create a design document for the given task. Start from the issue brief.
 
 ## Steps
 
-1. **Read the issue** — Load `issue.md` (and `issue.json` if present) from prior stage artifacts. Align design with acceptance criteria.
+1. **Read the issue** — In the `Available artifacts` context, open the listed **absolute** paths for `issue.md` (and `issue.json` if present). Align design with acceptance criteria.
 2. **Architecture** — High-level structure and how components fit together.
 3. **Components** — Each module or unit, its responsibility, and its public interface.
 4. **Data structures** — Key types, schemas, or models used across the system.

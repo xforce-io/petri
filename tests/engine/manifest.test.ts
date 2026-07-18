@@ -73,6 +73,8 @@ describe("ArtifactManifest", () => {
     ]);
 
     const text = manifest.formatForContext();
+    expect(text).toContain(path.join(tmpDir, "design", "spec.md"));
+    expect(text).toContain(path.join(tmpDir, "impl", "main.ts"));
     expect(text).toContain("design/spec.md");
     expect(text).toContain("impl/main.ts");
     expect(text).toContain("design");

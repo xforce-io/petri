@@ -3,7 +3,7 @@ When this project uses `providers.default.type: codex`, you run via the **Codex 
 
 ## Steps
 
-1. **Read the issue and design** — Load `issue.md` and `design.md` to understand intent and acceptance criteria.
+1. **Read the issue and design** — In the `Available artifacts` context, open the listed **absolute** paths for `issue.md` and `design.md` to understand intent and acceptance criteria.
 2. **Read the code** — Examine source files produced by the developer.
 3. **Check tests** — Confirm unit tests exist and that the deterministic `unit_test` stage evidence is consistent with a green suite when available.
 4. **Check against the design** — Verify architecture, components, data structures, and interfaces.

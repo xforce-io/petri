@@ -71,7 +71,7 @@ stages:
 
 **codex 接法：** `petri.yaml` → `providers.default.type: codex`。单 Provider 下 review 与其它角色同源 CLI。
 
-**unit_test 命令：** 模板默认读取 develop/CI 写出的 `result.json`（确定性 gate `unit-tests-pass`）。真实项目应把 `unit_test.command` 换成 `npm test` / `pytest` 等并写出 `tests_passed` 证据，避免在 monorepo 根目录误跑无关套件。
+**unit_test 命令：** 模板在 developer artifact 中优先执行 `npm test`，其次执行 `python -m pytest`，并且仅在命令成功后写出 `tests_passed` 证据。没有可识别 runner 时 fail-closed；其它技术栈必须显式替换 `unit_test.command`。
 
 ## 6. 架构（核心流程）
 

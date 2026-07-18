@@ -25,21 +25,19 @@ stages:
           roles: [developer]
           max_retries: 5
 
-        # 4. Deterministic test stage (not agent self-report).
-        # Projects should replace this command with their real runner, e.g.:
-        #   npm test && printf '{"tests_passed":true}' > {artifact_dir}/result.json
-        # Default: pick up evidence written by develop/CI (result.json) or fail-closed
-        # only when evidence says tests_passed=false; missing evidence uses explicit fallback.
+        # 4. Deterministic test stage (not agent self-report). The developer
+        # works in its artifact directory, so run its actual Node/Python suite
+        # there. Projects using another runner must replace this command.
         - name: unit_test
           command: >
-            if [ -f result.json ]; then
-              cp result.json "{artifact_dir}/result.json";
-            elif [ -f tests_result.json ]; then
-              cp tests_result.json "{artifact_dir}/result.json";
-            elif [ -f .petri/test-evidence.json ]; then
-              cp .petri/test-evidence.json "{artifact_dir}/result.json";
+            test_dir="$(dirname "{artifact_dir}")/develop/developer";
+            if [ -f "$test_dir/package.json" ]; then
+              (cd "$test_dir" && npm test) && printf '%s\n' '{"tests_passed":true,"runner":"npm test"}' > "{artifact_dir}/result.json";
+            elif [ -f "$test_dir/pytest.ini" ] || [ -f "$test_dir/pyproject.toml" ] || [ -d "$test_dir/tests" ]; then
+              (cd "$test_dir" && python -m pytest) && printf '%s\n' '{"tests_passed":true,"runner":"python -m pytest"}' > "{artifact_dir}/result.json";
             else
-              printf '%s\n' '{"tests_passed":true,"runner":"template-fallback","note":"customize unit_test.command to run your suite and write result.json"}' > "{artifact_dir}/result.json";
+              echo "unit_test: no supported test runner found in $test_dir; configure unit_test.command for this project" >&2;
+              exit 1;
             fi
           timeout: 600000
           gate:

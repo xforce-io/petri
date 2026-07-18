@@ -31,9 +31,9 @@ export class ArtifactManifest {
       return "No artifacts.";
     }
     const lines = this.artifacts.map(
-      (a) => `- [${a.stage}/${a.role}] ${a.path}`
+      (a) => `- [${a.stage}/${a.role}] ${path.resolve(this.baseDir, a.path)} (relative: ${a.path})`
     );
-    return ["Artifacts:", ...lines].join("\n");
+    return ["Artifacts (read the absolute paths below):", ...lines].join("\n");
   }
 
   save(): void {

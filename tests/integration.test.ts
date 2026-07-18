@@ -112,6 +112,7 @@ describe("Integration: code-dev pipeline end-to-end", () => {
     // 3. Stub provider: write gate evidence by role persona (real soul.md text)
     const artifactBaseDir = path.join(tmpDir, "artifacts");
     fs.mkdirSync(artifactBaseDir, { recursive: true });
+    const contexts = new Map<string, string>();
 
     const stubProvider: AgentProvider = {
       createAgent(config: AgentConfig): PetriAgent {
@@ -119,6 +120,7 @@ describe("Integration: code-dev pipeline end-to-end", () => {
           async run(): Promise<AgentResult> {
             const artifacts: string[] = [];
             fs.mkdirSync(config.artifactDir, { recursive: true });
+            contexts.set(config.artifactDir, config.context);
 
             if (config.persona.includes("issue analyst")) {
               const issueMd = path.join(config.artifactDir, "issue.md");
@@ -144,13 +146,9 @@ describe("Integration: code-dev pipeline end-to-end", () => {
                 JSON.stringify({ tests_passed: true, test_summary: "stub green" }),
               );
               artifacts.push(resultJson);
-              // Evidence for deterministic unit_test command stage (cwd = artifactBaseDir parent is project)
-              // Engine command runs with default cwd = process cwd; template falls back if no result.json at cwd.
-              // Write project-root result.json so unit_test can copy it when present.
-              const projectResult = path.join(tmpDir, "result.json");
               fs.writeFileSync(
-                projectResult,
-                JSON.stringify({ tests_passed: true, runner: "stub-develop" }),
+                path.join(config.artifactDir, "package.json"),
+                JSON.stringify({ scripts: { test: "node -e \"process.exit(0)\"" } }),
               );
             } else if (config.persona.includes("reviewer")) {
               const reviewJson = path.join(config.artifactDir, "review.json");
@@ -187,6 +185,13 @@ describe("Integration: code-dev pipeline end-to-end", () => {
     // 5. status done + gate artifacts
     expect(result.status).toBe("done");
 
+    expect(contexts.get(path.join(artifactBaseDir, "design", "designer"))).toContain(
+      path.join(artifactBaseDir, "issue", "issue_analyst", "issue.md"),
+    );
+    expect(contexts.get(path.join(artifactBaseDir, "develop", "developer"))).toContain(
+      path.join(artifactBaseDir, "design", "designer", "design.md"),
+    );
+
     expect(fs.existsSync(path.join(artifactBaseDir, "issue", "issue_analyst", "issue.json"))).toBe(
       true,
     );
@@ -220,6 +225,7 @@ describe("Integration: code-dev pipeline end-to-end", () => {
       fs.readFileSync(path.join(artifactBaseDir, "unit_test", "result.json"), "utf-8"),
     );
     expect(unitTestJson.tests_passed).toBe(true);
+    expect(unitTestJson.runner).toBe("npm test");
 
     const reviewJson = JSON.parse(
       fs.readFileSync(
@@ -230,5 +236,57 @@ describe("Integration: code-dev pipeline end-to-end", () => {
     expect(reviewJson.approved).toBe(true);
 
     expect(fs.existsSync(path.join(artifactBaseDir, "manifest.json"))).toBe(true);
+  });
+
+  it("blocks when the developer artifact has no supported test runner", async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "petri-integration-"));
+    fs.cpSync(templateDir, tmpDir, { recursive: true });
+
+    const petriConfig = loadPetriConfig(tmpDir);
+    const pipeline = loadPipelineConfig(tmpDir);
+    const defaultModel = petriConfig.models[petriConfig.defaults.model].model;
+    const roles = Object.fromEntries(
+      collectRoleNames(pipeline.stages).map((name) => [name, loadRole(tmpDir, name, defaultModel)]),
+    ) as Record<string, LoadedRole>;
+
+    const artifactBaseDir = path.join(tmpDir, "artifacts");
+    const stubProvider: AgentProvider = {
+      createAgent(config: AgentConfig): PetriAgent {
+        return {
+          async run(): Promise<AgentResult> {
+            fs.mkdirSync(config.artifactDir, { recursive: true });
+            const artifacts: string[] = [];
+            if (config.persona.includes("issue analyst")) {
+              const file = path.join(config.artifactDir, "issue.json");
+              fs.writeFileSync(file, JSON.stringify({ accepted: true }));
+              artifacts.push(file);
+            } else if (config.persona.includes("architect")) {
+              const file = path.join(config.artifactDir, "design.json");
+              fs.writeFileSync(file, JSON.stringify({ completed: true }));
+              artifacts.push(file);
+            } else if (config.persona.includes("pragmatic")) {
+              const file = path.join(config.artifactDir, "result.json");
+              fs.writeFileSync(file, JSON.stringify({ tests_passed: true }));
+              artifacts.push(file);
+            }
+            return { artifacts };
+          },
+        };
+      },
+    };
+
+    const engine = new Engine({
+      provider: stubProvider,
+      roles,
+      artifactBaseDir,
+      defaultGateStrategy: petriConfig.defaults.gate_strategy,
+      defaultMaxRetries: petriConfig.defaults.max_retries,
+    });
+
+    await expect(engine.run(pipeline, "Build a CLI tool")).resolves.toMatchObject({
+      status: "blocked",
+      stage: "unit_test",
+    });
+    expect(fs.existsSync(path.join(artifactBaseDir, "unit_test", "result.json"))).toBe(false);
   });
 });
