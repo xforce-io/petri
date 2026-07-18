@@ -415,12 +415,14 @@ async function loadDashboard() {
   }
   const runs = (res.status === 200 && Array.isArray(res.data)) ? res.data : [];
 
-  const total = runs.length;
-  const running = runs.filter((r) => r.status === "running").length;
+  const sorted = runs.slice().sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
+  const total = sorted.length;
+  const activeRun = sorted.find((r) => r.status === "running" && r.runId);
+  const running = sorted.filter((r) => r.status === "running").length;
   const totalCost = runs.reduce((sum, r) => sum + (r.totalUsage?.costUsd || 0), 0);
   const successRate = computeSuccessRate(runs);
   const completed = runs.filter((r) => computeRunStatuses(r).executionStatus === "completed").length;
-  const actionLabel = running > 0 ? "Continue / start another run" : total > 0 ? "Start another run" : "Start a run";
+  const actionLabel = activeRun ? "View current run" : total > 0 ? "Start another run" : "Start a run";
 
   // Primary next-action hero (not peer of KPI cards)
   const workbench = $("#home-workbench");
@@ -436,35 +438,29 @@ async function loadDashboard() {
       </div>
     `;
     const startRunBtn = $("#home-start-run-btn");
-    if (startRunBtn) startRunBtn.addEventListener("click", goToStartRun);
+    if (startRunBtn) {
+      startRunBtn.addEventListener("click", () => {
+        if (activeRun) openRunDetail(activeRun.runId);
+        else goToStartRun();
+      });
+    }
   }
 
-  // Demoted metrics (secondary; not same-level peers of Start run)
+  // Keep operational metrics secondary. A brand-new project has no useful metrics yet.
   const metrics = $("#stats-cards");
   if (metrics) {
-    metrics.className = "stats-cards home-metrics home-kpi";
-    metrics.innerHTML = `
-      <div class="stat-card home-kpi-card">
-        <div class="stat-value">${total}</div>
-        <div class="stat-label">Total Runs</div>
-      </div>
-      <div class="stat-card home-kpi-card">
-        <div class="stat-value stat-success">${successRate}%</div>
-        <div class="stat-label">Success Rate</div>
-        <div class="stat-sub">Quality passed · ${completed} completed</div>
-      </div>
-      <div class="stat-card home-kpi-card">
-        <div class="stat-value">${running}</div>
-        <div class="stat-label">Running</div>
-      </div>
-      <div class="stat-card home-kpi-card">
-        <div class="stat-value">${formatCost(totalCost)}</div>
-        <div class="stat-label">Total Cost</div>
-      </div>
-    `;
+    metrics.className = "home-metrics";
+    metrics.style.display = total ? "" : "none";
+    metrics.innerHTML = total ? `
+      <p class="home-metrics-summary" aria-label="Run metrics">
+        <span>${total} total runs</span>
+        <span>${successRate}% quality passed · ${completed} completed</span>
+        <span>${running} running</span>
+        <span>${formatCost(totalCost)} total cost</span>
+      </p>
+    ` : "";
   }
 
-  const sorted = runs.slice().sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
   const recent = sorted.slice(0, 5);
   const tbody = $("#overview-runs-tbody");
   const emptyMsg = $("#overview-runs-empty");
@@ -490,11 +486,6 @@ async function loadDashboard() {
     if (emptyMsg) emptyMsg.style.display = "";
     $("#overview-runs-table").style.display = "none";
     tbody.innerHTML = "";
-    // Wire empty-state Start button (HTML may already have it; re-bind each load)
-    const emptyStart = $("#home-empty-start-btn");
-    if (emptyStart) {
-      emptyStart.onclick = goToStartRun;
-    }
   }
 }
 

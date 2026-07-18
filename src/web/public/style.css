@@ -175,22 +175,28 @@ header h1 {
   margin-bottom: 1rem;
   max-width: 36rem;
 }
-.home-metrics.home-kpi {
-  margin-bottom: 1.25rem;
-  opacity: 0.92;
+.home-metrics {
+  margin: 0 0 1.25rem;
 }
-.home-kpi-card {
-  padding: 0.85rem 1rem;
+.home-metrics-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
 }
-.home-kpi-card .stat-value {
-  font-size: 1.25rem;
+.home-metrics-summary span + span::before {
+  content: "·";
+  margin-right: 1rem;
+  color: var(--border);
 }
 .home-empty-runs {
   text-align: left;
-  padding: 0.5rem 0;
+  padding: 1rem 0;
 }
 .home-empty-runs p {
-  margin-bottom: 0.75rem;
+  margin: 0;
   color: var(--text-muted);
 }
 

@@ -687,7 +687,7 @@ describe("product web: Home next-action workbench (issue #45)", () => {
     }
   });
 
-  it("S2: with-project Home renders next-action hero, not KPI-equal peer start button", () => {
+  it("S2: with-project Home renders one next-action hero and compact secondary metrics", () => {
     const app = readApp();
     const css = readCss();
     // Primary next-action block markers
@@ -700,18 +700,28 @@ describe("product web: Home next-action workbench (issue #45)", () => {
     const loadBody = loadFn.slice(0, 3500);
     expect(loadBody).toMatch(/home-next-action/);
     expect(loadBody).toMatch(/home-start-run-btn/);
-    // KPI metrics demoted: either absent from equal peer grid or under home-metrics
-    expect(loadBody).toMatch(/home-metrics|home-kpi/);
-    // Start run must NOT be rendered as a peer stat-card in the KPI row
-    // Forbidden pattern: five equal cards including start as last stat-card-action in stats-cards only
+    // Metrics are a compact summary, not a row of KPI peer cards.
+    expect(loadBody).toMatch(/home-metrics-summary/);
+    expect(loadBody).not.toMatch(/home-kpi-card/);
+    // Start run must NOT be rendered as a peer stat-card in the metrics row.
     expect(loadBody).not.toMatch(
       /stats-cards[\s\S]{0,800}stat-card-action[\s\S]{0,200}home-start-run-btn/,
     );
-    // CSS distinguishes primary next-action from demoted metrics
+    // CSS distinguishes primary next-action from compact metrics.
     expect(css).toMatch(/home-next-action|\.home-metrics/);
   });
 
-  it("S3: zero-runs empty path focuses Run start in ≤2 steps; no dead-end Runs-tab copy", () => {
+  it("S2: running work opens the current run instead of promising an unsupported continue action", () => {
+    const app = readApp();
+    const loadFn = app.slice(app.indexOf("async function loadDashboard"), app.indexOf("async function loadDashboard") + 4000);
+
+    expect(loadFn).toMatch(/activeRun/);
+    expect(loadFn).toMatch(/View current run/);
+    expect(loadFn).toMatch(/openRunDetail\(activeRun\.runId\)/);
+    expect(loadFn).not.toMatch(/Continue\s*\/\s*start another run/);
+  });
+
+  it("S3: zero-runs path focuses the single Home Run start in ≤2 steps; no dead-end copy", () => {
     const html = readHtml();
     const app = readApp();
 
@@ -720,7 +730,7 @@ describe("product web: Home next-action workbench (issue #45)", () => {
     expect(app).not.toMatch(/Open the Runs tab to start one/i);
     expect(app).not.toMatch(/Go to Runs tab to start one/i);
 
-    // Empty state is actionable: button or goToStartRun helper
+    // The hero is the only actionable entry point.
     expect(app).toMatch(/function goToStartRun|goToStartRun\s*=/);
     expect(app).toMatch(/goToStartRun\(/);
 
@@ -732,10 +742,7 @@ describe("product web: Home next-action workbench (issue #45)", () => {
     expect(goSlice).toMatch(/run-input|run-start-btn/);
     expect(goSlice).toMatch(/\.focus\(/);
 
-    // Empty state uses the same path (button wired to goToStartRun)
-    expect(app).toMatch(/overview-runs-empty|home-empty-start/);
-    const loadFn = app.slice(app.indexOf("async function loadDashboard"), app.indexOf("async function loadDashboard") + 4000);
-    // When no recent runs, empty path wires goToStartRun
-    expect(loadFn).toMatch(/goToStartRun/);
+    // Do not render a duplicate empty-state primary CTA.
+    expect(html).not.toMatch(/id="home-empty-start-btn"/);
   });
 });
