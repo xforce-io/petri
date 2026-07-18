@@ -800,6 +800,10 @@ main {
 .detail-panel {
   flex: 1;
   min-width: 0;
+  /* This panel sits in a fixed-height grid row.  Without min-height: 0,
+     long I/O content gives its flex children their intrinsic height and
+     pushes the splitter (and Result) below the viewport. */
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -856,6 +860,7 @@ main {
 .sub-tab-content {
   display: none;
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 1rem;
 }
@@ -1219,6 +1224,7 @@ main {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .io-block {

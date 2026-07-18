@@ -157,9 +157,14 @@ describe("web a11y native semantics (issue #22)", () => {
     expect(html).toMatch(/aria-label="调整输入区域高度"/);
     expect(appJs).toMatch(/setupIoSplitter/);
     expect(appJs).toMatch(/syncIoSplitter/);
+    expect(appJs).toMatch(/function setIoPromptCollapsed/);
+    expect(appJs).toMatch(/setIoPromptCollapsed\(false\)/);
     expect(css).toMatch(/--io-prompt-height/);
     expect(css).toMatch(/\.io-splitter/);
     expect(css).toMatch(/\.io-prompt-block/);
     expect(css).toMatch(/\.io-result-block/);
+    expect(css).toMatch(/\.detail-panel\s*\{[\s\S]*?min-height:\s*0/);
+    expect(css).toMatch(/\.sub-tab-content\s*\{[\s\S]*?min-height:\s*0/);
+    expect(css).toMatch(/\.io-section\s*\{[\s\S]*?overflow:\s*hidden/);
   });
 });

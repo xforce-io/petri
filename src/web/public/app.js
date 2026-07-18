@@ -320,6 +320,20 @@ function syncIoSplitter() {
   if (!collapsed) setIoPromptHeight(ioPromptHeight);
 }
 
+function setIoPromptCollapsed(collapsed) {
+  const prompt = $("#io-prompt");
+  const button = $("#io-prompt-toggle");
+  if (!prompt) return;
+
+  prompt.classList.toggle("collapsed", collapsed);
+  if (button) {
+    button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    const toggle = button.querySelector(".io-toggle");
+    if (toggle) toggle.textContent = collapsed ? "\u25B6" : "\u25BC";
+  }
+  syncIoSplitter();
+}
+
 function setupIoSplitter() {
   const section = $(".io-section");
   const splitter = $("#io-splitter");
@@ -457,13 +471,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("click", (e) => {
     if (e.target.closest("#io-prompt-toggle")) {
       const el = $("#io-prompt");
-      el.classList.toggle("collapsed");
-      const btn = e.target.closest("#io-prompt-toggle");
-      const toggle = btn.querySelector(".io-toggle");
-      const collapsed = el.classList.contains("collapsed");
-      if (toggle) toggle.textContent = collapsed ? "\u25B6" : "\u25BC";
-      if (btn && btn.setAttribute) btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      syncIoSplitter();
+      setIoPromptCollapsed(!el.classList.contains("collapsed"));
     }
   });
 
@@ -1318,11 +1326,12 @@ async function loadStageIO() {
   const promptRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_prompt.md");
   if (promptRes.status === 200 && promptRes.data) {
     promptEl.innerHTML = DOMPurify.sanitize(marked.parse(promptRes.data));
-    promptEl.classList.add("collapsed");
   } else {
     promptEl.textContent = "(No prompt saved for this attempt — available when snapshot includes _prompt.md)";
-    promptEl.classList.remove("collapsed");
   }
+  // A long prompt starts expanded in its own scroll pane so Result remains
+  // visible and the divider is immediately available for mouse dragging.
+  setIoPromptCollapsed(false);
 
   const resultRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_result.md");
   if (resultRes.status === 200 && resultRes.data) {
@@ -1330,7 +1339,6 @@ async function loadStageIO() {
   } else {
     resultEl.textContent = "(No result saved for this attempt — available when snapshot includes _result.md)";
   }
-  syncIoSplitter();
 }
 
 /** Filter run.log to the selected stage attempt only (issue #16). */
