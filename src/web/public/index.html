@@ -180,14 +180,25 @@
             </div>
             <div id="subtab-io" class="sub-tab-content active">
               <div class="io-section">
-                <div class="io-block">
+                <div class="io-block io-prompt-block">
                   <button type="button" class="io-header" id="io-prompt-toggle" aria-expanded="true" aria-controls="io-prompt">
                     <span class="io-label">Prompt (Input)</span>
                     <span class="io-toggle">&#9660;</span>
                   </button>
                   <div id="io-prompt" class="io-content io-markdown">Select a stage to view agent I/O.</div>
                 </div>
-                <div class="io-block">
+                <div
+                  id="io-splitter"
+                  class="io-splitter"
+                  role="separator"
+                  aria-label="调整输入区域高度"
+                  aria-description="使用上下方向键调整高度；Home 设为最小，End 设为最大。"
+                  aria-orientation="horizontal"
+                  aria-valuemin="160"
+                  aria-valuenow="320"
+                  tabindex="0"
+                ></div>
+                <div class="io-block io-result-block">
                   <div class="io-header">
                     <span class="io-label">Result (Output)</span>
                   </div>

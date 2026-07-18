@@ -147,4 +147,19 @@ describe("web a11y native semantics (issue #22)", () => {
     expect(css).toMatch(/\.timeline-splitter/);
     expect(css).toMatch(/\.run-summary[^}]*overflow:\s*auto/);
   });
+
+  it("S1-S3: expanded I/O input and output are independently resizable and scrollable", () => {
+    const html = fs.readFileSync(path.join(process.cwd(), "src/web/public/index.html"), "utf-8");
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    const css = fs.readFileSync(path.join(process.cwd(), "src/web/public/style.css"), "utf-8");
+
+    expect(html).toMatch(/id="io-splitter"[^>]*role="separator"/);
+    expect(html).toMatch(/aria-label="调整输入区域高度"/);
+    expect(appJs).toMatch(/setupIoSplitter/);
+    expect(appJs).toMatch(/syncIoSplitter/);
+    expect(css).toMatch(/--io-prompt-height/);
+    expect(css).toMatch(/\.io-splitter/);
+    expect(css).toMatch(/\.io-prompt-block/);
+    expect(css).toMatch(/\.io-result-block/);
+  });
 });

@@ -1214,17 +1214,65 @@ main {
 
 /* ── I/O Tab ── */
 .io-section {
+  --io-prompt-height: 320px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .io-block {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
 }
+
+.io-prompt-block {
+  flex: 0 0 var(--io-prompt-height);
+  min-height: 160px;
+}
+
+.io-prompt-block.is-collapsed {
+  flex-basis: auto;
+  min-height: 0;
+}
+
+.io-result-block {
+  flex: 1 1 auto;
+  min-height: 140px;
+}
+
+.io-splitter {
+  position: relative;
+  flex: 0 0 12px;
+  cursor: row-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.io-splitter::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 5px;
+  left: 0;
+  height: 1px;
+  background: var(--border);
+  transition: background 0.15s, height 0.15s;
+}
+
+.io-splitter:hover::before,
+.io-splitter:focus-visible::before,
+.io-splitter[data-dragging="true"]::before {
+  bottom: 4px;
+  height: 3px;
+  background: var(--accent);
+}
+
+.io-splitter[hidden] { display: none; }
 
 .io-header {
   display: flex;
@@ -1249,6 +1297,8 @@ main {
 }
 
 .io-content {
+  flex: 1;
+  min-height: 0;
   padding: 12px;
   margin: 0;
   font-family: var(--mono);
@@ -1278,8 +1328,8 @@ main {
 }
 
 .io-result-content {
-  min-height: 100px;
-  max-height: 500px;
+  min-height: 0;
+  max-height: none;
 }
 
 /* Markdown rendering in I/O panels */

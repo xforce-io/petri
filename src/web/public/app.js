@@ -14,6 +14,8 @@ let runsSplitterPointerId = null;
 let runsSplitWidth = 360;
 let timelineSplitterPointerId = null;
 let runSummaryHeight = 260;
+let ioSplitterPointerId = null;
+let ioPromptHeight = 320;
 
 const RUNS_SPLIT_MIN = 280;
 const RUNS_SPLIT_MAX = 560;
@@ -23,6 +25,9 @@ const RUNS_SPLITTER_SIZE = 12;
 const TIMELINE_SUMMARY_MIN = 160;
 const TIMELINE_STAGE_MIN = 180;
 const TIMELINE_SPLITTER_SIZE = 12;
+const IO_PROMPT_MIN = 160;
+const IO_RESULT_MIN = 140;
+const IO_SPLITTER_SIZE = 12;
 
 // Create tab wizard state
 let wizard = {
@@ -283,10 +288,90 @@ function setupTimelineSplitter() {
   setTimelineSummaryHeight(runSummaryHeight);
 }
 
+function ioPromptMax(section) {
+  return Math.max(IO_PROMPT_MIN, section.clientHeight - IO_RESULT_MIN - IO_SPLITTER_SIZE);
+}
+
+function setIoPromptHeight(requestedHeight) {
+  const section = $(".io-section");
+  const splitter = $("#io-splitter");
+  if (!section || !splitter) return IO_PROMPT_MIN;
+  if (section.clientHeight <= 0) return ioPromptHeight;
+
+  const max = ioPromptMax(section);
+  const height = Math.round(Math.max(IO_PROMPT_MIN, Math.min(max, requestedHeight)));
+  ioPromptHeight = height;
+  section.style.setProperty("--io-prompt-height", `${height}px`);
+  splitter.setAttribute("aria-valuemin", String(IO_PROMPT_MIN));
+  splitter.setAttribute("aria-valuemax", String(max));
+  splitter.setAttribute("aria-valuenow", String(height));
+  splitter.setAttribute("aria-valuetext", `输入区域高度 ${height} 像素`);
+  return height;
+}
+
+function syncIoSplitter() {
+  const prompt = $("#io-prompt");
+  const promptBlock = $(".io-prompt-block");
+  const splitter = $("#io-splitter");
+  if (!prompt || !promptBlock || !splitter) return;
+  const collapsed = prompt.classList.contains("collapsed");
+  promptBlock.classList.toggle("is-collapsed", collapsed);
+  splitter.hidden = collapsed;
+  if (!collapsed) setIoPromptHeight(ioPromptHeight);
+}
+
+function setupIoSplitter() {
+  const section = $(".io-section");
+  const splitter = $("#io-splitter");
+  if (!section || !splitter || splitter.dataset.bound) return;
+  splitter.dataset.bound = "1";
+
+  const heightFromPointer = (event) => event.clientY - section.getBoundingClientRect().top;
+  const stopDragging = (event) => {
+    if (ioSplitterPointerId !== event.pointerId) return;
+    splitter.releasePointerCapture?.(event.pointerId);
+    ioSplitterPointerId = null;
+    delete splitter.dataset.dragging;
+  };
+
+  splitter.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || splitter.hidden) return;
+    event.preventDefault();
+    ioSplitterPointerId = event.pointerId;
+    splitter.dataset.dragging = "true";
+    splitter.setPointerCapture?.(event.pointerId);
+    setIoPromptHeight(heightFromPointer(event));
+  });
+  splitter.addEventListener("pointermove", (event) => {
+    if (ioSplitterPointerId === event.pointerId) setIoPromptHeight(heightFromPointer(event));
+  });
+  splitter.addEventListener("pointerup", stopDragging);
+  splitter.addEventListener("pointercancel", stopDragging);
+  splitter.addEventListener("keydown", (event) => {
+    const current = Number(splitter.getAttribute("aria-valuenow")) || ioPromptHeight;
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setIoPromptHeight(current + RUNS_SPLIT_STEP);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setIoPromptHeight(current - RUNS_SPLIT_STEP);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setIoPromptHeight(IO_PROMPT_MIN);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setIoPromptHeight(ioPromptMax(section));
+    }
+  });
+  window.addEventListener("resize", () => setIoPromptHeight(ioPromptHeight));
+  syncIoSplitter();
+}
+
 // ── Init ──
 document.addEventListener("DOMContentLoaded", () => {
   setupRunsSplitter();
   setupTimelineSplitter();
+  setupIoSplitter();
 
   // Main tab switching
   $$(".tab").forEach((tab) => {
@@ -378,6 +463,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const collapsed = el.classList.contains("collapsed");
       if (toggle) toggle.textContent = collapsed ? "\u25B6" : "\u25BC";
       if (btn && btn.setAttribute) btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      syncIoSplitter();
     }
   });
 
@@ -1244,6 +1330,7 @@ async function loadStageIO() {
   } else {
     resultEl.textContent = "(No result saved for this attempt — available when snapshot includes _result.md)";
   }
+  syncIoSplitter();
 }
 
 /** Filter run.log to the selected stage attempt only (issue #16). */
