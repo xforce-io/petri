@@ -239,6 +239,18 @@ petri validate                     # Check configuration
 petri web [--port <number>]        # Web dashboard
 ```
 
+### 从 GitHub Issue 启动 code-dev
+
+可把当前项目仓库的 GitHub Issue URL 直接作为输入：
+
+```bash
+petri run --input https://github.com/<owner>/<repo>/issues/<number>
+```
+
+Petri 会通过已登录的 `gh` CLI 读取 Issue 正文和全部评论，再将它们传给
+`issue_analyst`。URL 必须属于当前 Git `origin`；无权限、Issue 不存在或评论
+读取失败时，运行会在启动前明确失败，不会退化为不完整的纯文本需求。
+
 ### Exploration Branches
 
 A branch is a named, independent line of investigation. Use branches when several optimization directions should each have their own run history instead of sharing one global `run-001`, `run-002`, ... sequence.
