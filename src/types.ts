@@ -128,8 +128,10 @@ export interface PetriConfig {
   };
 }
 
+export type ProviderType = "pi" | "claude_code" | "codex" | "milkie" | "grok";
+
 export interface ProviderConfig {
-  type: "pi" | "claude_code" | "codex" | "milkie";
+  type: ProviderType;
 }
 
 export interface ModelConfig {
