@@ -1,13 +1,16 @@
+# code-dev flow: whole-run AgentProvider is codex so review (and other roles)
+# share the Codex CLI. Engine does not yet support per-role providers —
+# see docs/design/42-code-dev-issue-tdd-codex-flow.md.
 providers:
   default:
-    type: claude_code
+    type: codex
 
 models:
-  sonnet:
+  default:
     provider: default
-    model: sonnet
+    model: default
 
 defaults:
-  model: sonnet
+  model: default
   gate_strategy: all
   max_retries: 3

@@ -1,0 +1,7 @@
+id: issue-accepted
+description: Issue brief must be captured and accepted
+evidence:
+  path: "{stage}/{role}/issue.json"
+  check:
+    field: accepted
+    equals: true
