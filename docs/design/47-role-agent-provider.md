@@ -93,4 +93,5 @@ sequenceDiagram
 ## 13. 关联
 
 - Issue: #47
+- PR: #48
 - 相关模块：`src/util/provider.ts`、`src/engine/engine.ts`、`src/config/loader.ts`、`src/web/runner.ts`
