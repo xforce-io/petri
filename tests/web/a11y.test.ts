@@ -132,4 +132,19 @@ describe("web a11y native semantics (issue #22)", () => {
     expect(css).toMatch(/\.runs-splitter/);
     expect(css).toMatch(/@media \(max-width: 800px\)/);
   });
+
+  it("S1-S3: timeline stages and run summary are independently resizable and scrollable", () => {
+    const html = fs.readFileSync(path.join(process.cwd(), "src/web/public/index.html"), "utf-8");
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    const css = fs.readFileSync(path.join(process.cwd(), "src/web/public/style.css"), "utf-8");
+
+    expect(html).toMatch(/id="timeline-splitter"[^>]*role="separator"/);
+    expect(html).toMatch(/aria-orientation="horizontal"/);
+    expect(appJs).toMatch(/setupTimelineSplitter/);
+    expect(appJs).toMatch(/ArrowUp/);
+    expect(appJs).toMatch(/ArrowDown/);
+    expect(css).toMatch(/--run-summary-height/);
+    expect(css).toMatch(/\.timeline-splitter/);
+    expect(css).toMatch(/\.run-summary[^}]*overflow:\s*auto/);
+  });
 });

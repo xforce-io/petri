@@ -12,12 +12,17 @@ let currentConfigPath = null;
 let currentBranch = ""; // empty = project default runs
 let runsSplitterPointerId = null;
 let runsSplitWidth = 360;
+let timelineSplitterPointerId = null;
+let runSummaryHeight = 260;
 
 const RUNS_SPLIT_MIN = 280;
 const RUNS_SPLIT_MAX = 560;
 const RUNS_DETAIL_MIN = 420;
 const RUNS_SPLIT_STEP = 16;
 const RUNS_SPLITTER_SIZE = 12;
+const TIMELINE_SUMMARY_MIN = 160;
+const TIMELINE_STAGE_MIN = 180;
+const TIMELINE_SPLITTER_SIZE = 12;
 
 // Create tab wizard state
 let wizard = {
@@ -204,9 +209,84 @@ function setupRunsSplitter() {
   setRunsSplitWidth(Number(splitter.getAttribute("aria-valuenow")) || 360);
 }
 
+function timelineSummaryMax(panel) {
+  const headingHeight = panel.querySelector("h3")?.offsetHeight || 0;
+  return Math.max(
+    TIMELINE_SUMMARY_MIN,
+    panel.clientHeight - headingHeight - TIMELINE_STAGE_MIN - TIMELINE_SPLITTER_SIZE,
+  );
+}
+
+function setTimelineSummaryHeight(requestedHeight) {
+  const panel = $(".timeline-panel");
+  const splitter = $("#timeline-splitter");
+  if (!panel || !splitter) return TIMELINE_SUMMARY_MIN;
+  // Runs detail starts hidden. Keep the remembered value until the panel has
+  // a usable height, then apply the same bounded layout once it is visible.
+  if (panel.clientHeight <= 0) return runSummaryHeight;
+
+  const max = timelineSummaryMax(panel);
+  const height = Math.round(Math.max(TIMELINE_SUMMARY_MIN, Math.min(max, requestedHeight)));
+  runSummaryHeight = height;
+  panel.style.setProperty("--run-summary-height", `${height}px`);
+  splitter.setAttribute("aria-valuemin", String(TIMELINE_SUMMARY_MIN));
+  splitter.setAttribute("aria-valuemax", String(max));
+  splitter.setAttribute("aria-valuenow", String(height));
+  splitter.setAttribute("aria-valuetext", `运行摘要高度 ${height} 像素`);
+  return height;
+}
+
+function setupTimelineSplitter() {
+  const panel = $(".timeline-panel");
+  const splitter = $("#timeline-splitter");
+  if (!panel || !splitter || splitter.dataset.bound) return;
+  splitter.dataset.bound = "1";
+
+  const heightFromPointer = (event) => panel.getBoundingClientRect().bottom - event.clientY;
+  const stopDragging = (event) => {
+    if (timelineSplitterPointerId !== event.pointerId) return;
+    splitter.releasePointerCapture?.(event.pointerId);
+    timelineSplitterPointerId = null;
+    delete splitter.dataset.dragging;
+  };
+
+  splitter.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    timelineSplitterPointerId = event.pointerId;
+    splitter.dataset.dragging = "true";
+    splitter.setPointerCapture?.(event.pointerId);
+    setTimelineSummaryHeight(heightFromPointer(event));
+  });
+  splitter.addEventListener("pointermove", (event) => {
+    if (timelineSplitterPointerId === event.pointerId) setTimelineSummaryHeight(heightFromPointer(event));
+  });
+  splitter.addEventListener("pointerup", stopDragging);
+  splitter.addEventListener("pointercancel", stopDragging);
+  splitter.addEventListener("keydown", (event) => {
+    const current = Number(splitter.getAttribute("aria-valuenow")) || runSummaryHeight;
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setTimelineSummaryHeight(current + RUNS_SPLIT_STEP);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setTimelineSummaryHeight(current - RUNS_SPLIT_STEP);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setTimelineSummaryHeight(TIMELINE_SUMMARY_MIN);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setTimelineSummaryHeight(timelineSummaryMax(panel));
+    }
+  });
+  window.addEventListener("resize", () => setTimelineSummaryHeight(runSummaryHeight));
+  setTimelineSummaryHeight(runSummaryHeight);
+}
+
 // ── Init ──
 document.addEventListener("DOMContentLoaded", () => {
   setupRunsSplitter();
+  setupTimelineSplitter();
 
   // Main tab switching
   $$(".tab").forEach((tab) => {
@@ -614,6 +694,7 @@ function openRunDetail(runId) {
   $("#runs-list-view").style.display = "none";
   $("#runs-detail-view").style.display = "";
   setRunsSplitWidth(runsSplitWidth);
+  setTimelineSummaryHeight(runSummaryHeight);
   loadRun(runId);
 }
 
