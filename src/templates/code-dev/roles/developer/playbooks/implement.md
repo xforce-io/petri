@@ -1,13 +1,14 @@
-Implement the project based on the design artifact.
+Implement the project with **TDD**, based on the issue brief and design artifact.
 
 ## Steps
 
-1. **Read the design** — Load `design.md` from the workspace. Understand the architecture, components, and test plan before writing any code.
-2. **Create the project** — Set up the project structure, dependencies, and configuration files.
-3. **Write tests first** — Implement the tests described in the design's test plan. Tests should fail initially (there is no implementation yet).
-4. **Write the implementation** — Build each component according to the design. Run tests frequently as you go.
+1. **Read the issue and design** — Load `issue.md` and `design.md` from the workspace. Understand acceptance criteria, architecture, components, and the test plan before writing production code.
+2. **Create the project** — Set up structure, dependencies, and configuration if missing.
+3. **Write tests first (TDD red)** — Implement the tests described in the design's test plan. Tests should fail initially when there is no implementation yet.
+4. **Write the implementation (TDD green)** — Build each component according to the design. Run tests frequently as you go.
 5. **Run all tests** — Execute the full test suite. Every test must pass.
-6. **Write the gate artifact:**
+6. **Leave evidence for the command stage** — Prefer writing a project-root `result.json` with `{"tests_passed": true, ...}` so the deterministic `unit_test` stage can verify; also keep your role gate artifact.
+7. **Write the gate artifact:**
 
 ```json
 // {stage}/{role}/result.json
@@ -19,9 +20,9 @@ Implement the project based on the design artifact.
 
 ## On retry
 
-If tests fail and you are retried:
+If tests fail and you are retried (or review rejected the last iteration):
 
-1. Read the error output carefully.
+1. Read the error / review findings carefully.
 2. State a hypothesis for why it failed.
 3. Make the minimal change needed to fix it.
 4. Run the tests again to verify.

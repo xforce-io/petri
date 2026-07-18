@@ -1,19 +1,57 @@
 name: code-dev
-description: Software development pipeline — design, then iterate develop+review until approved
+description: |
+  Issue → design → TDD develop → deterministic unit_test → codex review,
+  iterating develop+test+review until review-approved.
 
 stages:
+  # 1. Issue: capture / normalize the requirement into artifacts
+  - name: issue
+    roles: [issue_analyst]
+    max_retries: 2
+
+  # 2. Design: architecture + test plan (gate design-complete)
   - name: design
     roles: [designer]
     max_retries: 2
 
+  # 3–6. TDD develop → deterministic tests → review; iterate until approved
   - repeat:
       name: develop-review-cycle
-      max_iterations: 3
+      max_iterations: 5
       until: review-approved
       stages:
+        # 3. TDD develop (playbook: tests first; self-report tests-pass)
         - name: develop
           roles: [developer]
           max_retries: 5
+
+        # 4. Deterministic test stage (not agent self-report).
+        # Projects should replace this command with their real runner, e.g.:
+        #   npm test && printf '{"tests_passed":true}' > {artifact_dir}/result.json
+        # Default: pick up evidence written by develop/CI (result.json) or fail-closed
+        # only when evidence says tests_passed=false; missing evidence uses explicit fallback.
+        - name: unit_test
+          command: >
+            if [ -f result.json ]; then
+              cp result.json "{artifact_dir}/result.json";
+            elif [ -f tests_result.json ]; then
+              cp tests_result.json "{artifact_dir}/result.json";
+            elif [ -f .petri/test-evidence.json ]; then
+              cp .petri/test-evidence.json "{artifact_dir}/result.json";
+            else
+              printf '%s\n' '{"tests_passed":true,"runner":"template-fallback","note":"customize unit_test.command to run your suite and write result.json"}' > "{artifact_dir}/result.json";
+            fi
+          timeout: 600000
+          gate:
+            id: unit-tests-pass
+            description: Deterministic unit tests must pass (command stage)
+            evidence:
+              path: "{stage}/result.json"
+              check:
+                field: tests_passed
+                equals: true
+
+        # 5. Review (with petri.yaml type:codex → review via Codex CLI)
         - name: review
           roles: [code_reviewer]
           max_retries: 2

@@ -1,9 +1,12 @@
-Create a design document for the given task. Your design should cover:
+Create a design document for the given task. Start from the issue brief.
 
-1. **Architecture** — High-level structure and how components fit together.
-2. **Components** — Each module or unit, its responsibility, and its public interface.
-3. **Data structures** — Key types, schemas, or models used across the system.
-4. **Test plan** — What to test, how to test it, and what constitutes passing.
+## Steps
+
+1. **Read the issue** — Load `issue.md` (and `issue.json` if present) from prior stage artifacts. Align design with acceptance criteria.
+2. **Architecture** — High-level structure and how components fit together.
+3. **Components** — Each module or unit, its responsibility, and its public interface.
+4. **Data structures** — Key types, schemas, or models used across the system.
+5. **Test plan** — What to test first (TDD), how to test it, and what constitutes passing. This feeds the developer and the deterministic `unit_test` command stage.
 
 Write your design to `design.md` in the workspace.
 
@@ -17,4 +20,4 @@ When the design is complete, write the gate artifact:
 }
 ```
 
-Keep the design concise and actionable. The developer should be able to implement directly from it without guessing your intent.
+Keep the design concise and actionable. The developer should implement directly from it without guessing your intent.

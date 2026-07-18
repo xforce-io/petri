@@ -206,9 +206,21 @@ describe("Petri Web Server", () => {
       expect(codeDev).toBeDefined();
       expect(codeDev.id).toBe("code-dev");
       expect(codeDev.name).toBe("code-dev");
-      expect(codeDev.description).toBe("Software development pipeline — design, then iterate develop+review until approved");
-      expect(codeDev.stages).toEqual(["design", "develop", "review"]);
-      expect(codeDev.roles).toEqual(["designer", "developer", "code_reviewer"]);
+      expect(codeDev.description).toContain("Issue → design → TDD develop");
+      expect(codeDev.description).toContain("review-approved");
+      expect(codeDev.stages).toEqual([
+        "issue",
+        "design",
+        "develop",
+        "unit_test",
+        "review",
+      ]);
+      expect(codeDev.roles).toEqual([
+        "issue_analyst",
+        "designer",
+        "developer",
+        "code_reviewer",
+      ]);
     });
   });
 

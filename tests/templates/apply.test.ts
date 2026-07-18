@@ -17,6 +17,7 @@ describe("listPresetTemplates", () => {
     expect(codeDev).toBeDefined();
     expect(codeDev!.stages.length).toBeGreaterThan(0);
     expect(codeDev!.roles).toContain("developer");
+    expect(codeDev!.roles).toContain("issue_analyst");
   });
 });
 
@@ -53,6 +54,9 @@ describe("applyTemplate", () => {
     expect(fs.existsSync(path.join(target, "pipeline.yaml"))).toBe(true);
     expect(fs.existsSync(path.join(target, "roles", "developer", "role.yaml"))).toBe(true);
     expect(fs.existsSync(path.join(target, "roles", "designer", "soul.md"))).toBe(true);
+    expect(fs.existsSync(path.join(target, "roles", "issue_analyst", "role.yaml"))).toBe(true);
+    expect(fs.readFileSync(path.join(target, "petri.yaml"), "utf-8")).toMatch(/type:\s*codex/);
+    expect(fs.readFileSync(path.join(target, "pipeline.yaml"), "utf-8")).toMatch(/unit_test/);
   });
 
   it("throws NOT_FOUND for unknown template", () => {
