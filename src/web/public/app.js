@@ -371,14 +371,30 @@ function resetState() {
 }
 
 // ══════════════════════════════════════
-// ── Dashboard Tab: Overview
+// ── Dashboard Tab: Overview (#45 next-action workbench)
 // ══════════════════════════════════════
+
+/** Navigate to Runs start form and focus input (≤2 steps from Home empty). */
+function goToStartRun() {
+  switchToTab("runs");
+  showRunsList();
+  // Focus after tab paint so the control is visible and submittable
+  requestAnimationFrame(() => {
+    const input = $("#run-input");
+    const startBtn = $("#run-start-btn");
+    if (input) {
+      input.focus();
+      return;
+    }
+    if (startBtn) startBtn.focus();
+  });
+}
 
 async function loadDashboard() {
   const onboarding = $("#onboarding");
   const overview = $("#overview-page");
 
-  // Zero projects → product onboarding (template create path)
+  // Zero projects → product onboarding (single primary create CTA)
   if (!projects.length) {
     if (onboarding) onboarding.style.display = "";
     if (overview) overview.style.display = "none";
@@ -399,46 +415,58 @@ async function loadDashboard() {
   }
   const runs = (res.status === 200 && Array.isArray(res.data)) ? res.data : [];
 
-  const total = runs.length;
-  const running = runs.filter((r) => r.status === "running").length;
+  const sorted = runs.slice().sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
+  const total = sorted.length;
+  const activeRun = sorted.find((r) => r.status === "running" && r.runId);
+  const running = sorted.filter((r) => r.status === "running").length;
   const totalCost = runs.reduce((sum, r) => sum + (r.totalUsage?.costUsd || 0), 0);
   const successRate = computeSuccessRate(runs);
   const completed = runs.filter((r) => computeRunStatuses(r).executionStatus === "completed").length;
+  const actionLabel = activeRun ? "View current run" : total > 0 ? "Start another run" : "Start a run";
 
-  $("#stats-cards").innerHTML = `
-    <div class="stat-card">
-      <div class="stat-value">${total}</div>
-      <div class="stat-label">Total Runs</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-value stat-success">${successRate}%</div>
-      <div class="stat-label">Success Rate</div>
-      <div class="stat-sub">Quality passed · ${completed} completed</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-value">${running}</div>
-      <div class="stat-label">Running</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-value">${formatCost(totalCost)}</div>
-      <div class="stat-label">Total Cost</div>
-    </div>
-    <button type="button" class="stat-card stat-card-action" id="home-start-run-btn">
-      <div class="stat-value">▶</div>
-      <div class="stat-label">Start a Run</div>
-    </button>
-  `;
-  const startRunBtn = $("#home-start-run-btn");
-  if (startRunBtn) startRunBtn.addEventListener("click", () => switchToTab("runs"));
+  // Primary next-action hero (not peer of KPI cards)
+  const workbench = $("#home-workbench");
+  if (workbench) {
+    workbench.innerHTML = `
+      <div id="home-next-action" class="home-next-action">
+        <div class="home-project-context">
+          <span class="home-project-label">Project</span>
+          <strong class="home-project-name">${escHtml(currentProject || "—")}</strong>
+        </div>
+        <p class="home-next-hint">Describe a goal and run the pipeline — watch stages, gates, and retries evolve.</p>
+        <button type="button" class="btn-primary btn-large" id="home-start-run-btn">${escHtml(actionLabel)}</button>
+      </div>
+    `;
+    const startRunBtn = $("#home-start-run-btn");
+    if (startRunBtn) {
+      startRunBtn.addEventListener("click", () => {
+        if (activeRun) openRunDetail(activeRun.runId);
+        else goToStartRun();
+      });
+    }
+  }
 
+  // Keep operational metrics secondary. A brand-new project has no useful metrics yet.
+  const metrics = $("#stats-cards");
+  if (metrics) {
+    metrics.className = "home-metrics";
+    metrics.style.display = total ? "" : "none";
+    metrics.innerHTML = total ? `
+      <p class="home-metrics-summary" aria-label="Run metrics">
+        <span>${total} total runs</span>
+        <span>${successRate}% quality passed · ${completed} completed</span>
+        <span>${running} running</span>
+        <span>${formatCost(totalCost)} total cost</span>
+      </p>
+    ` : "";
+  }
 
-  const sorted = runs.slice().sort((a, b) => (b.startedAt || "").localeCompare(a.startedAt || ""));
-  const recent = sorted.slice(0, 10);
+  const recent = sorted.slice(0, 5);
   const tbody = $("#overview-runs-tbody");
   const emptyMsg = $("#overview-runs-empty");
 
   if (recent.length > 0) {
-    emptyMsg.style.display = "none";
+    if (emptyMsg) emptyMsg.style.display = "none";
     $("#overview-runs-table").style.display = "table";
     tbody.innerHTML = recent.map((r) => renderRunRow(r)).join("");
     tbody.querySelectorAll("tr").forEach((row) => {
@@ -455,8 +483,7 @@ async function loadDashboard() {
       });
     });
   } else {
-    emptyMsg.style.display = "";
-    emptyMsg.textContent = "No runs yet. Open the Runs tab to start one.";
+    if (emptyMsg) emptyMsg.style.display = "";
     $("#overview-runs-table").style.display = "none";
     tbody.innerHTML = "";
   }

@@ -615,3 +615,134 @@ describe("product web: attempt-bound artifacts (issue #16)", () => {
     expect(appJs).toMatch(/resolveAttemptIoPrefix/);
   });
 });
+
+describe("product web: Home next-action workbench (issue #45)", () => {
+  const publicDir = path.join(process.cwd(), "src/web/public");
+
+  function readHtml() {
+    return fs.readFileSync(path.join(publicDir, "index.html"), "utf-8");
+  }
+  function readApp() {
+    return fs.readFileSync(path.join(publicDir, "app.js"), "utf-8");
+  }
+  function readCss() {
+    return fs.readFileSync(path.join(publicDir, "style.css"), "utf-8");
+  }
+
+  it("S1: zero-project Home has one primary create CTA and secondary open-existing help only", () => {
+    const html = readHtml();
+
+    // Primary create card + button
+    expect(html).toMatch(/id="onboarding-create-card"/);
+    expect(html).toMatch(/id="new-project-btn"/);
+    expect(html).toMatch(/class="[^"]*home-primary[^"]*"|home-primary-cta|onboarding-create-card/);
+
+    // Single primary create button in onboarding (not three peer journey cards)
+    const onboarding = html.slice(
+      html.indexOf('id="onboarding"'),
+      html.indexOf('id="overview-page"'),
+    );
+    expect(onboarding).toMatch(/id="new-project-btn"/);
+    // No fake numbered 1/2/3 peer journey headings
+    expect(onboarding).not.toMatch(/>\s*1\.\s*New project/i);
+    expect(onboarding).not.toMatch(/>\s*2\.\s*Open existing/i);
+    expect(onboarding).not.toMatch(/>\s*3\.\s*Run/i);
+    // Must not have three equal onboarding-card peers for journey steps
+    const peerCards = onboarding.match(/class="onboarding-card"/g) || [];
+    // At most one full onboarding-card for the primary create; open-existing is helper, not peer card
+    expect(peerCards.length).toBeLessThanOrEqual(1);
+
+    // Secondary open-existing is helper text, not a primary CTA button
+    expect(onboarding).toMatch(/id="onboarding-open-existing"|class="[^"]*home-secondary-help/);
+    expect(onboarding).toMatch(/petri web|petri\.yaml/);
+    // Helper must not contain a btn-primary
+    const helperStart = Math.max(
+      onboarding.indexOf("onboarding-open-existing"),
+      onboarding.indexOf("home-secondary-help"),
+    );
+    expect(helperStart).toBeGreaterThan(-1);
+    const helperSlice = onboarding.slice(helperStart, helperStart + 600);
+    expect(helperSlice).not.toMatch(/btn-primary/);
+  });
+
+  it("S1: served GET / HTML matches zero-project primary CTA contract", async () => {
+    const workspace = makeTmpDir();
+    const result = await createPetriServer({
+      projectDirs: [],
+      workspaceRoot: workspace,
+      port: 0,
+    });
+    try {
+      const res = await request(result.port, "/");
+      expect(res.status).toBe(200);
+      expect(res.body).toMatch(/id="onboarding-create-card"/);
+      expect(res.body).toMatch(/id="new-project-btn"/);
+      expect(res.body).not.toMatch(/>\s*1\.\s*New project/i);
+      expect(res.body).not.toMatch(/>\s*2\.\s*Open existing/i);
+      expect(res.body).not.toMatch(/>\s*3\.\s*Run/i);
+      expect(res.body).toMatch(/onboarding-open-existing|home-secondary-help/);
+    } finally {
+      await new Promise<void>((resolve) => result.server.close(() => resolve()));
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("S2: with-project Home renders one next-action hero and compact secondary metrics", () => {
+    const app = readApp();
+    const css = readCss();
+    // Primary next-action block markers
+    expect(app).toMatch(/home-next-action|id="home-next-action"/);
+    expect(app).toMatch(/id="home-start-run-btn"/);
+    // Project context shown on Home
+    expect(app).toMatch(/home-project-context|currentProject/);
+    // loadDashboard builds next-action primary (not only five equal stat-cards)
+    const loadFn = app.slice(app.indexOf("async function loadDashboard"));
+    const loadBody = loadFn.slice(0, 3500);
+    expect(loadBody).toMatch(/home-next-action/);
+    expect(loadBody).toMatch(/home-start-run-btn/);
+    // Metrics are a compact summary, not a row of KPI peer cards.
+    expect(loadBody).toMatch(/home-metrics-summary/);
+    expect(loadBody).not.toMatch(/home-kpi-card/);
+    // Start run must NOT be rendered as a peer stat-card in the metrics row.
+    expect(loadBody).not.toMatch(
+      /stats-cards[\s\S]{0,800}stat-card-action[\s\S]{0,200}home-start-run-btn/,
+    );
+    // CSS distinguishes primary next-action from compact metrics.
+    expect(css).toMatch(/home-next-action|\.home-metrics/);
+  });
+
+  it("S2: running work opens the current run instead of promising an unsupported continue action", () => {
+    const app = readApp();
+    const loadFn = app.slice(app.indexOf("async function loadDashboard"), app.indexOf("async function loadDashboard") + 4000);
+
+    expect(loadFn).toMatch(/activeRun/);
+    expect(loadFn).toMatch(/View current run/);
+    expect(loadFn).toMatch(/openRunDetail\(activeRun\.runId\)/);
+    expect(loadFn).not.toMatch(/Continue\s*\/\s*start another run/);
+  });
+
+  it("S3: zero-runs path focuses the single Home Run start in ≤2 steps; no dead-end copy", () => {
+    const html = readHtml();
+    const app = readApp();
+
+    // Dead-end copy must be gone from shipped assets
+    expect(html).not.toMatch(/Go to Runs tab to start one/i);
+    expect(app).not.toMatch(/Open the Runs tab to start one/i);
+    expect(app).not.toMatch(/Go to Runs tab to start one/i);
+
+    // The hero is the only actionable entry point.
+    expect(app).toMatch(/function goToStartRun|goToStartRun\s*=/);
+    expect(app).toMatch(/goToStartRun\(/);
+
+    // goToStartRun must switch to runs and focus input or start button
+    const goFnIdx = app.search(/function goToStartRun|goToStartRun\s*=\s*(?:async\s*)?\(/);
+    expect(goFnIdx).toBeGreaterThan(-1);
+    const goSlice = app.slice(goFnIdx, goFnIdx + 800);
+    expect(goSlice).toMatch(/switchToTab\(\s*["']runs["']\s*\)/);
+    expect(goSlice).toMatch(/run-input|run-start-btn/);
+    expect(goSlice).toMatch(/\.focus\(/);
+
+    // Do not render a duplicate empty-state primary CTA.
+    expect(html).not.toMatch(/id="home-empty-start-btn"/);
+  });
+});
