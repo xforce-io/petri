@@ -1,4 +1,6 @@
 persona: soul.md
+provider: codex_review
+model: codex_review
 playbooks:
   - petri:file_operations
   - review

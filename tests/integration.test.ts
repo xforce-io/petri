@@ -35,8 +35,12 @@ describe("code-dev template topology (issue #42 flow)", () => {
     const petri = loadPetriConfig(templateDir);
     const pipeline = loadPipelineConfig(templateDir);
 
-    // Grok is the template default provider; roles may now override it.
-    expect(Object.values(petri.providers).some((p) => p.type === "grok")).toBe(true);
+    // Grok is the template default, while code review is explicitly routed to Codex.
+    expect(petri.providers.default?.type).toBe("grok");
+    expect(petri.providers.codex_review?.type).toBe("codex");
+    const reviewer = loadRole(templateDir, "code_reviewer", petri.defaults.model);
+    expect(reviewer.provider).toBe("codex_review");
+    expect(reviewer.model).toBe("codex_review");
 
     const stageNames: string[] = [];
     let hasCommandUnitTest = false;
@@ -170,7 +174,8 @@ describe("Integration: code-dev pipeline end-to-end", () => {
 
     // 4. Run the Engine with the real pipeline (includes real unit_test command stage)
     const engine = new Engine({
-      provider: stubProvider,
+      providers: { default: stubProvider, codex_review: stubProvider },
+      defaultProviderName: "default",
       roles,
       artifactBaseDir,
       defaultGateStrategy: petriConfig.defaults.gate_strategy,
@@ -276,7 +281,8 @@ describe("Integration: code-dev pipeline end-to-end", () => {
     };
 
     const engine = new Engine({
-      provider: stubProvider,
+      providers: { default: stubProvider, codex_review: stubProvider },
+      defaultProviderName: "default",
       roles,
       artifactBaseDir,
       defaultGateStrategy: petriConfig.defaults.gate_strategy,

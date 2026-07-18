@@ -1,12 +1,17 @@
-# code-dev defaults to Grok. To route a specific role elsewhere, add another
-# named provider/model here and set `provider` + `model` in that role.yaml.
+# code-dev defaults to Grok. Code review uses the named Codex Provider below;
+# other roles can opt in the same way with `provider` + `model` in role.yaml.
 providers:
   default:
     type: grok
+  codex_review:
+    type: codex
 
 models:
   default:
     provider: default
+    model: default
+  codex_review:
+    provider: codex_review
     model: default
 
 defaults:

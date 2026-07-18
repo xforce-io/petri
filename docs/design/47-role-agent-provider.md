@@ -88,7 +88,7 @@ sequenceDiagram
 ## 12. 开放问题 / 决策记录
 
 - 决策：Provider 由 role 决定，stage override 仅覆盖模型。
-- 决策：code-dev 保持单 Grok 默认，README 提供混合 Provider 示例，不要求模板用户本地安装两个 CLI。
+- 决策：code-dev 的 issue、design、develop 默认走 Grok，`code_reviewer` 显式走 Codex；README 提供混合 Provider 示例。该模板因此需要相应 CLI 可用。
 
 ## 13. 关联
 
