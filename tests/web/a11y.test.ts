@@ -103,4 +103,15 @@ describe("web a11y native semantics (issue #22)", () => {
     expect(appJs).toMatch(/aria-pressed=/);
     expect(appJs).toMatch(/renderRunLineage/);
   });
+
+  it("S1-S3: default Runs workbench uses stage summaries and progressively reveals execution details", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).toMatch(/renderWorkbenchStages/);
+    expect(appJs).toMatch(/stage-workbench-card/);
+    expect(appJs).toMatch(/stage-detail-toggle/);
+    expect(appJs).toMatch(/aria-expanded=/);
+    expect(appJs).toMatch(/buildStageSummaries/);
+    expect(appJs).toMatch(/formatStageLabel/);
+    expect(appJs).toMatch(/summarizeStageReason/);
+  });
 });

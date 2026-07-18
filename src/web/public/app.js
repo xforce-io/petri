@@ -6,6 +6,7 @@ let projects = [];
 let currentRunId = null;
 let currentRunData = null;
 let currentStageIndex = -1;
+let expandedStageKey = null;
 let eventSource = null;
 let currentConfigPath = null;
 let currentBranch = ""; // empty = project default runs
@@ -771,10 +772,11 @@ async function loadRun(runId) {
 
 function renderStageList() {
   const list = $("#stage-list");
-  // Prefer hierarchical Run Trace (issue #15) when present
+  // The default is a human-readable workbench. Raw trace remains available
+  // only inside an explicitly expanded stage detail.
   const trace = currentRunData.trace;
   if (trace && Array.isArray(trace.root) && trace.root.length > 0) {
-    renderTraceTimeline(list, trace);
+    renderWorkbenchStages(list, trace);
     return;
   }
 
@@ -849,6 +851,114 @@ function renderStageList() {
 
   list.querySelectorAll(".stage-item").forEach((el) => {
     el.addEventListener("click", () => selectStage(parseInt(el.dataset.index, 10)));
+  });
+}
+
+function buildStageSummaries(trace) {
+  const attempts = [];
+  const visit = (nodes) => (nodes || []).forEach((node) => {
+    if (node.kind === "repeat_iteration") return visit(node.children);
+    if (node.kind === "stage_attempt") attempts.push(node);
+  });
+  visit(trace.root);
+  const stageLogs = currentRunData?.stages || [];
+  return attempts.map((node) => {
+    const matching = stageLogs.filter((s) => s.stage === node.stage && String(s.attempt) === String(node.attempt));
+    const gatePassed = node.stageGate?.passed ?? (matching.length ? matching.every((s) => s.gatePassed !== false) : undefined);
+    const status = gatePassed === true ? "passed" : gatePassed === false ? "failed" : node.status === "running" ? "running" : "pending";
+    const start = node.startedAt ? new Date(node.startedAt).getTime() : NaN;
+    const end = node.finishedAt ? new Date(node.finishedAt).getTime() : NaN;
+    return {
+      key: `${node.stage}:${node.iteration ?? 0}:${node.attempt}`,
+      stage: node.stage,
+      attempt: node.attempt,
+      iteration: node.iteration,
+      repeatName: node.repeatName,
+      status,
+      reason: gatePassed === false ? (node.stageGate?.reason || matching.find((s) => s.gatePassed === false)?.gateReason || "Stage gate failed") : "",
+      durationMs: Number.isFinite(start) && Number.isFinite(end) ? end - start : undefined,
+      roles: node.roles || matching.map((s) => ({ role: s.role, model: s.model, provider: s.provider, gatePassed: s.gatePassed, gateReason: s.gateReason })),
+      rawId: node.id,
+    };
+  });
+}
+
+function formatStageLabel(stage) {
+  const labels = { issue: "Issue", design: "Design", develop: "Develop", unit_test: "Test", review: "Review" };
+  return labels[stage] || String(stage).replace(/[_-]+/g, " ").replace(/\b\w/g, (x) => x.toUpperCase());
+}
+
+function formatStageStatus(status) {
+  return { passed: "通过", failed: "失败", running: "进行中", pending: "等待中" }[status] || "等待中";
+}
+
+function summarizeStageReason(reason, stage) {
+  const text = String(reason || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  if (/command failed/i.test(text)) {
+    return `${formatStageLabel(stage)} 命令失败；在 Gate 或 Log 查看完整输出`;
+  }
+  return text.length > 110 ? `${text.slice(0, 107)}…` : text;
+}
+
+function stageSummaryIndex(summary, role) {
+  return (currentRunData?.stages || []).findIndex((s) =>
+    s.stage === summary.stage
+    && String(s.attempt) === String(summary.attempt)
+    && (!role || s.role === role),
+  );
+}
+
+function renderWorkbenchStages(list, trace) {
+  const summaries = buildStageSummaries(trace);
+  if (summaries.length === 0) {
+    list.innerHTML = '<p class="empty-state">No stages yet.</p>';
+    return;
+  }
+  list.innerHTML = summaries.map((summary) => {
+    const selected = stageSummaryIndex(summary) === currentStageIndex;
+    const expanded = expandedStageKey === summary.key;
+    const cycle = summary.repeatName ? `第 ${summary.iteration || 1} 轮` : "";
+    const meta = [cycle, summary.durationMs != null ? formatDuration(summary.durationMs) : ""].filter(Boolean).join(" · ");
+    const detailId = `stage-detail-${summary.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+    const roles = summary.roles.map((role) => `<button type="button" class="stage-role-row" data-stage="${escAttr(summary.stage)}" data-attempt="${escAttr(String(summary.attempt))}" data-role="${escAttr(role.role)}">
+      <span class="stage-dot ${role.gatePassed === true ? "passed" : role.gatePassed === false ? "failed" : "pending"}"></span>
+      <span>${escHtml(role.role === "command" ? "测试命令" : role.role)}</span>
+    </button>`).join("");
+    return `<div class="stage-workbench">
+      <button type="button" class="stage-workbench-card${selected ? " active" : ""}" data-stage="${escAttr(summary.stage)}" data-attempt="${escAttr(String(summary.attempt))}" aria-pressed="${selected ? "true" : "false"}">
+        <span class="stage-dot ${summary.status === "passed" ? "passed" : summary.status === "failed" ? "failed" : "pending"}"></span>
+        <span class="stage-card-copy"><span class="stage-card-title">${escHtml(formatStageLabel(summary.stage))}</span><span class="stage-card-meta">${escHtml(meta || "—")}</span></span>
+        <span class="stage-status ${summary.status}">${formatStageStatus(summary.status)}</span>
+      </button>
+      ${summary.reason ? `<div class="stage-card-reason">${escHtml(summarizeStageReason(summary.reason, summary.stage))}</div>` : ""}
+      <button type="button" class="stage-detail-toggle" data-key="${escAttr(summary.key)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="${detailId}">执行详情 ${expanded ? "−" : "+"}</button>
+      <div id="${detailId}" class="stage-execution-detail" ${expanded ? "" : "hidden"}>
+        ${roles || '<span class="stage-meta">等待角色执行</span>'}
+        <div class="stage-gate-summary">Gate：${formatStageStatus(summary.status)}</div>
+        <details class="trace-debug"><summary>Debug metadata</summary><code>${escHtml(summary.rawId)}</code></details>
+      </div>
+    </div>`;
+  }).join("");
+  list.querySelectorAll(".stage-workbench-card").forEach((el) => {
+    el.addEventListener("click", () => {
+      const summary = summaries.find((s) => s.stage === el.dataset.stage && String(s.attempt) === String(el.dataset.attempt));
+      const idx = summary ? stageSummaryIndex(summary) : -1;
+      if (idx >= 0) selectStage(idx);
+    });
+  });
+  list.querySelectorAll(".stage-detail-toggle").forEach((el) => {
+    el.addEventListener("click", () => {
+      expandedStageKey = expandedStageKey === el.dataset.key ? null : el.dataset.key;
+      renderWorkbenchStages(list, trace);
+    });
+  });
+  list.querySelectorAll(".stage-role-row").forEach((el) => {
+    el.addEventListener("click", () => {
+      const summary = summaries.find((s) => s.stage === el.dataset.stage && String(s.attempt) === String(el.dataset.attempt));
+      const idx = summary ? stageSummaryIndex(summary, el.dataset.role) : -1;
+      if (idx >= 0) selectStage(idx);
+    });
   });
 }
 

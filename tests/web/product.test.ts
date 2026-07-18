@@ -544,6 +544,13 @@ describe("product web: run detail structured trace (issue #15)", () => {
     expect(appJs).toMatch(/repeat_iteration|trace\.root/);
     expect(appJs).toMatch(/stageGate|stage_gate|Stage gate/);
   });
+
+  it("frontend defaults to a human-readable stage workbench instead of raw trace identifiers", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).toMatch(/renderWorkbenchStages/);
+    expect(appJs).toMatch(/默认不展示|Debug metadata/);
+    expect(appJs).toMatch(/formatStageLabel/);
+  });
 });
 
 describe("product web: app.js parseability after trace UI (issue #15)", () => {
