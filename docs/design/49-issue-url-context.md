@@ -95,4 +95,5 @@ URL 允许 query/hash；PR、Discussion、GitLab URL 不会被误解析为 Issue
 ## 13. 关联
 
 - Issue: #49
+- PR: #50
 - 相关模块：`src/input/github-issue.ts`、`src/cli/run.ts`、`src/web/routes/api.ts`、`src/templates/code-dev/roles/issue_analyst/`
