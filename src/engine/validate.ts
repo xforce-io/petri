@@ -1,4 +1,5 @@
 import { loadPetriConfig, loadPipelineConfig, loadRole } from "../config/loader.js";
+import { validateRoleProviderConfig } from "../util/provider.js";
 import { isRepeatBlock, isCommandStage, type GateCheck, type GateCheckClause, type GateConfig, type LoadedRole, type StageEntry } from "../types.js";
 
 export interface ValidationResult {
@@ -12,8 +13,9 @@ export function validateProject(projectDir: string, pipelineFile: string = "pipe
 
   // 1. Load petri.yaml
   let defaultModel = "default";
+  let petriConfig: ReturnType<typeof loadPetriConfig> | undefined;
   try {
-    const petriConfig = loadPetriConfig(projectDir);
+    petriConfig = loadPetriConfig(projectDir);
     defaultModel = petriConfig.defaults.model;
   } catch (err: unknown) {
     errors.push(`petri.yaml: ${err instanceof Error ? err.message : String(err)}`);
@@ -105,6 +107,14 @@ export function validateProject(projectDir: string, pipelineFile: string = "pipe
       loadedRoles.push(loadRole(projectDir, name, defaultModel));
     } catch (err: unknown) {
       errors.push(`role "${name}": ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  if (petriConfig) {
+    try {
+      validateRoleProviderConfig(loadedRoles, petriConfig);
+    } catch (err: unknown) {
+      errors.push(err instanceof Error ? err.message : String(err));
     }
   }
 

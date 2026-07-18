@@ -1,6 +1,5 @@
-# code-dev flow: whole-run AgentProvider is codex so review (and other roles)
-# share the Codex CLI. Engine does not yet support per-role providers —
-# see docs/design/42-code-dev-issue-tdd-codex-flow.md.
+# code-dev defaults to Codex. To route a specific role elsewhere, add another
+# named provider/model here and set `provider` + `model` in that role.yaml.
 providers:
   default:
     type: codex

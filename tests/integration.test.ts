@@ -35,7 +35,7 @@ describe("code-dev template topology (issue #42 flow)", () => {
     const petri = loadPetriConfig(templateDir);
     const pipeline = loadPipelineConfig(templateDir);
 
-    // Codex as whole-run provider (single-provider constraint)
+    // Codex is the template default provider; roles may now override it.
     expect(Object.values(petri.providers).some((p) => p.type === "codex")).toBe(true);
 
     const stageNames: string[] = [];

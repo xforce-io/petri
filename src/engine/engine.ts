@@ -21,7 +21,10 @@ import type {
 } from "../types.js";
 
 export interface EngineOptions {
-  provider: AgentProvider;
+  /** Legacy single-provider form. Use providers for per-role routing. */
+  provider?: AgentProvider;
+  providers?: Record<string, AgentProvider>;
+  defaultProviderName?: string;
   roles: Record<string, LoadedRole>;
   artifactBaseDir: string;
   defaultGateStrategy?: GateStrategy;
@@ -32,7 +35,8 @@ export interface EngineOptions {
 }
 
 export class Engine {
-  private readonly provider: AgentProvider;
+  private readonly providers: Record<string, AgentProvider>;
+  private readonly defaultProviderName: string;
   private readonly roles: Record<string, LoadedRole>;
   private readonly artifactBaseDir: string;
   private readonly defaultGateStrategy: GateStrategy;
@@ -48,7 +52,11 @@ export class Engine {
   private artifactSnapshotSeq = 0;
 
   constructor(opts: EngineOptions) {
-    this.provider = opts.provider;
+    if (!opts.provider && !opts.providers) {
+      throw new Error("Engine requires a provider or providers registry");
+    }
+    this.providers = opts.providers ?? { default: opts.provider! };
+    this.defaultProviderName = opts.defaultProviderName ?? "default";
     this.roles = opts.roles;
     this.artifactBaseDir = opts.artifactBaseDir;
     this.defaultGateStrategy = opts.defaultGateStrategy ?? "all";
@@ -259,9 +267,14 @@ export class Engine {
             });
 
             const model = stage.overrides?.[roleName]?.model ?? role.model;
-            const timer = this.logger?.logRoleStart(stage.name, roleName, model);
+            const providerName = role.provider ?? this.defaultProviderName;
+            const provider = this.providers[providerName];
+            if (!provider) {
+              throw new Error(`role "${roleName}": provider "${providerName}" is not configured`);
+            }
+            const timer = this.logger?.logRoleStart(stage.name, roleName, model, providerName);
 
-              const agent = this.provider.createAgent({
+              const agent = provider.createAgent({
                 persona: role.persona,
                 playbooks: role.playbooks,
                 context,

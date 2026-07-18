@@ -9,6 +9,7 @@ export interface StageLog {
   role: string;
   attempt: number;
   model: string;
+  provider?: string;
   startedAt: string;
   finishedAt: string;
   durationMs: number;
@@ -39,6 +40,7 @@ export interface RoleExecutionNode {
   iteration: number;
   repeatName: string | null;
   model: string;
+  provider?: string;
   status: "running" | "done" | "failed";
   startedAt: string;
   finishedAt?: string;
@@ -151,6 +153,7 @@ export function buildTraceFromStages(stages: StageLog[]): RunTrace {
         iteration: 0,
         repeatName: null,
         model: r.model,
+        ...(r.provider ? { provider: r.provider } : {}),
         status: "done" as const,
         startedAt: r.startedAt,
         finishedAt: r.finishedAt,
@@ -420,7 +423,7 @@ export class RunLogger extends EventEmitter {
     this.persistTrace();
   }
 
-  logRoleStart(stage: string, role: string, model: string): StageTimer {
+  logRoleStart(stage: string, role: string, model: string, provider?: string): StageTimer {
     const attempt = this.currentAttempt?.attempt ?? 0;
     const iteration = this.currentAttempt?.iteration ?? this.repeatCtx?.iteration ?? 0;
     const repeatName = this.currentAttempt?.repeatName ?? this.repeatCtx?.name ?? null;
@@ -434,6 +437,7 @@ export class RunLogger extends EventEmitter {
       iteration,
       repeatName,
       model,
+      ...(provider ? { provider } : {}),
       status: "running",
       startedAt: new Date().toISOString(),
       artifacts: [],
@@ -441,13 +445,14 @@ export class RunLogger extends EventEmitter {
     if (this.currentAttempt) {
       this.currentAttempt.roles.push(roleNode);
     }
-    this.append(`  ${stage}/${role} — model: ${model}`);
-    this.emit("role-start", { stage, role, model, id, attempt: roleNode.attempt, iteration, repeatName });
+    this.append(`  ${stage}/${role} — model: ${model}${provider ? ` | provider: ${provider}` : ""}`);
+    this.emit("role-start", { stage, role, model, provider, id, attempt: roleNode.attempt, iteration, repeatName });
     this.persistTrace();
     return {
       stage,
       role,
       model,
+      provider,
       startedAt: new Date(),
       roleId: id,
     };
@@ -472,6 +477,7 @@ export class RunLogger extends EventEmitter {
       role: timer.role,
       attempt: opts.attempt ?? 0,
       model: timer.model,
+      ...(timer.provider ? { provider: timer.provider } : {}),
       startedAt: timer.startedAt.toISOString(),
       finishedAt: finishedAt.toISOString(),
       durationMs,
@@ -626,6 +632,7 @@ export interface StageTimer {
   stage: string;
   role: string;
   model: string;
+  provider?: string;
   startedAt: Date;
   roleId?: string;
 }

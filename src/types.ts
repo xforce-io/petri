@@ -90,6 +90,8 @@ export function isCommandStage(entry: StageEntry): entry is CommandStage {
 export interface RoleConfig {
   persona: string;
   model?: string;
+  /** Optional named entry from petri.yaml.providers. */
+  provider?: string;
   playbooks: string[];
 }
 
@@ -196,6 +198,7 @@ export interface LoadedRole {
   name: string;
   persona: string;
   model: string;
+  provider?: string;
   playbooks: string[];
   gate: GateConfig | null;
 }

@@ -55,6 +55,7 @@ export function buildEvolutionView(stages: StageLog[]): Array<{
     attempt: number;
     role: string;
     model: string;
+    provider?: string;
     gatePassed: boolean;
     gateReason: string;
     durationMs: number;
@@ -76,6 +77,7 @@ export function buildEvolutionView(stages: StageLog[]): Array<{
       attempt: s.attempt,
       role: s.role,
       model: s.model,
+      provider: s.provider,
       gatePassed: s.gatePassed,
       gateReason: s.gateReason,
       durationMs: s.durationMs,

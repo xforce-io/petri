@@ -13,8 +13,8 @@ import { RunLogger } from "../engine/logger.js";
 import { currentGeneratedHashes, loadGeneratedManifest, sha256 } from "../engine/manifest.js";
 import { acquireLock, releaseLock, killProcessTree } from "../engine/lock.js";
 import { loadBranch, runRootForBranch } from "../engine/branch.js";
-import { createProviderFromConfig } from "../util/provider.js";
-import type { AgentProvider, LoadedRole } from "../types.js";
+import { createProviderRegistryFromConfig, validateRoleProviderConfig } from "../util/provider.js";
+import type { LoadedRole } from "../types.js";
 
 interface RunOptions {
   pipeline: string;
@@ -134,9 +134,10 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   for (const name of roleNames) {
     roles[name] = loadRole(rolesBase, name, defaultModel);
   }
+  validateRoleProviderConfig(Object.values(roles), petriConfig);
 
-  // 5. Create provider based on config (claude_code > milkie > pi)
-  const provider: AgentProvider = createProviderFromConfig(cwd);
+  // 5. Create every configured provider; Engine resolves the role's named one.
+  const providerRegistry = createProviderRegistryFromConfig(cwd);
 
   // 6. Create logger and engine
   const petriDir = runRootForBranch(cwd, opts.branch);
@@ -147,7 +148,8 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     branchBaseline: branchConfig?.baseline,
   });
   const engine = new Engine({
-    provider,
+    providers: providerRegistry.providers,
+    defaultProviderName: providerRegistry.defaultProviderName,
     roles,
     artifactBaseDir,
     defaultGateStrategy: petriConfig.defaults.gate_strategy,

@@ -5,6 +5,7 @@ import {
   loadRole,
 } from "../config/loader.js";
 import { isRepeatBlock, isCommandStage } from "../types.js";
+import { validateRoleProviderConfig } from "../util/provider.js";
 
 export async function validateCommand(): Promise<void> {
   const cwd = process.cwd();
@@ -12,8 +13,9 @@ export async function validateCommand(): Promise<void> {
 
   // 1. Load petri.yaml
   let defaultModel = "default";
+  let petriConfig: ReturnType<typeof loadPetriConfig> | undefined;
   try {
-    const petriConfig = loadPetriConfig(cwd);
+    petriConfig = loadPetriConfig(cwd);
     defaultModel = petriConfig.defaults.model;
     console.log(chalk.green("✔ petri.yaml loaded"));
   } catch (err: unknown) {
@@ -55,9 +57,11 @@ export async function validateCommand(): Promise<void> {
   }
 
   // 3. Load each role
+  const loadedRoles = [];
   for (const name of roleNames) {
     try {
       const role = loadRole(cwd, name, defaultModel);
+      loadedRoles.push(role);
       const gateInfo = role.gate ? "gate" : "no gate";
       const playbookCount = role.playbooks.length;
       console.log(
@@ -68,6 +72,16 @@ export async function validateCommand(): Promise<void> {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.log(chalk.red(`✘ role "${name}": ${msg}`));
+      hasErrors = true;
+    }
+  }
+
+  if (petriConfig) {
+    try {
+      validateRoleProviderConfig(loadedRoles, petriConfig);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(chalk.red(`✘ provider routing: ${msg}`));
       hasErrors = true;
     }
   }

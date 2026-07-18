@@ -2,8 +2,7 @@ import * as path from "node:path";
 import { loadPetriConfig, loadPipelineConfig, loadRole, collectRoleNames } from "../config/loader.js";
 import { RunLogger } from "../engine/logger.js";
 import { Engine } from "../engine/engine.js";
-import { createProviderFromConfig } from "../util/provider.js";
-import type { AgentProvider } from "../types.js";
+import { createProviderRegistryFromConfig, validateRoleProviderConfig } from "../util/provider.js";
 import { loadBranch, runRootForBranch } from "../engine/branch.js";
 
 export interface StartRunOpts {
@@ -35,9 +34,10 @@ export function startRun(opts: StartRunOpts): StartRunResult {
   for (const name of roleNames) {
     roles[name] = loadRole(projectDir, name, defaultModel);
   }
+  validateRoleProviderConfig(Object.values(roles), petriConfig);
 
-  // 4. Create provider
-  const provider: AgentProvider = createProviderFromConfig(projectDir);
+  // 4. Create the registry once; individual roles select from it at runtime.
+  const providerRegistry = createProviderRegistryFromConfig(projectDir);
 
   // 5. Create logger and engine (branch-scoped petri root when branchId set — issue #19)
   let branchMeta: { branch_id: string; objective?: string; baseline?: string } | undefined;
@@ -53,7 +53,8 @@ export function startRun(opts: StartRunOpts): StartRunResult {
   const artifactBaseDir = path.join(petriDir, "artifacts");
 
   const engine = new Engine({
-    provider,
+    providers: providerRegistry.providers,
+    defaultProviderName: providerRegistry.defaultProviderName,
     roles,
     artifactBaseDir,
     defaultGateStrategy: petriConfig.defaults.gate_strategy,
