@@ -42,38 +42,35 @@
   <main>
     <!-- Home / Dashboard Tab -->
     <section id="tab-dashboard" class="tab-content active">
-      <!-- Onboarding when zero projects -->
+      <!-- Onboarding when zero projects: one primary CTA + secondary help (#45) -->
       <div id="onboarding" class="onboarding" style="display:none;">
         <h2>Set the conditions. Watch it evolve.</h2>
         <p class="onboarding-lead">
-          Petri is an evolutionary agent harness. Pick a preset template, run a pipeline,
-          and observe retries, gates, and stagnation in one place.
+          Pick a preset development pipeline, create a local project, then run it in the browser
+          and watch each stage retry and pass gates.
         </p>
-        <div class="onboarding-actions">
-          <div class="onboarding-card" id="onboarding-create-card">
-            <h3>1. New project from preset</h3>
-            <p>Copy a preset pipeline into this workspace.</p>
+        <div class="onboarding-actions home-onboarding-layout">
+          <div class="onboarding-card home-primary-cta" id="onboarding-create-card">
+            <h3>New project from preset</h3>
+            <p>Copy a preset pipeline into this workspace — free and deterministic.</p>
             <label for="new-project-name">Project name</label>
             <input id="new-project-name" type="text" placeholder="my-project" maxlength="64" />
             <label for="new-project-template">Template</label>
             <select id="new-project-template"></select>
-            <button id="new-project-btn" class="btn-primary">Create project</button>
+            <button type="button" id="new-project-btn" class="btn-primary">Create project</button>
             <div id="new-project-error" class="error-msg"></div>
           </div>
-          <div class="onboarding-card">
-            <h3>2. Open existing</h3>
-            <p>Run <code>petri web</code> from a folder that already has <code>petri.yaml</code>, or a parent of such folders.</p>
-            <p class="muted">CLI: <code>petri init --template code-dev</code></p>
-          </div>
-          <div class="onboarding-card">
-            <h3>3. Run &amp; observe</h3>
-            <p>After a project exists, start a run and watch stage attempts, gates, and blocked reasons.</p>
-          </div>
         </div>
+        <p id="onboarding-open-existing" class="home-secondary-help muted">
+          Already have a project? Run <code>petri web</code> from a folder that contains
+          <code>petri.yaml</code>, or from a parent of such folders.
+          CLI: <code>petri init --template code-dev</code>
+        </p>
       </div>
 
       <div id="overview-page" class="overview-page">
-        <div id="stats-cards" class="stats-cards"></div>
+        <div id="home-workbench" class="home-workbench"></div>
+        <div id="stats-cards" class="stats-cards home-metrics" aria-label="Run metrics"></div>
         <div class="overview-section">
           <h3>Recent Runs</h3>
           <table id="overview-runs-table" class="runs-table">
@@ -89,7 +86,10 @@
             </thead>
             <tbody id="overview-runs-tbody"></tbody>
           </table>
-          <p id="overview-runs-empty" class="empty-state">No runs yet. Go to Runs tab to start one.</p>
+          <div id="overview-runs-empty" class="empty-state home-empty-runs">
+            <p>No runs yet for this project.</p>
+            <button type="button" id="home-empty-start-btn" class="btn-primary">Start a run</button>
+          </div>
         </div>
       </div>
     </section>
