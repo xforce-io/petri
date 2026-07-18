@@ -1,8 +1,8 @@
-# code-dev defaults to Codex. To route a specific role elsewhere, add another
+# code-dev defaults to Grok. To route a specific role elsewhere, add another
 # named provider/model here and set `provider` + `model` in that role.yaml.
 providers:
   default:
-    type: codex
+    type: grok
 
 models:
   default:

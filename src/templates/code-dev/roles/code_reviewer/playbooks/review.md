@@ -1,7 +1,7 @@
 Review the developer's code against the issue brief and design document.
 You run through the Agent Provider selected by this role's `role.yaml`; when no
 role provider is set, the project default applies (the bundled code-dev default
-is the **Codex CLI**).
+is the **Grok CLI**).
 
 ## Steps
 

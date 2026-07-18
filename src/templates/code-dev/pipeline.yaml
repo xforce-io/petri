@@ -1,6 +1,6 @@
 name: code-dev
 description: |
-  Issue → design → TDD develop → deterministic unit_test → codex review,
+  Issue → design → TDD develop → deterministic unit_test → agent review,
   iterating develop+test+review until review-approved.
 
 stages:
@@ -49,7 +49,7 @@ stages:
                 field: tests_passed
                 equals: true
 
-        # 5. Review (with petri.yaml type:codex → review via Codex CLI)
+        # 5. Review (uses the role's Provider, or the project default)
         - name: review
           roles: [code_reviewer]
           max_retries: 2
