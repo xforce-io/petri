@@ -225,6 +225,7 @@ CLI-backed providers (`grok`, `codex`, `claude_code`) spawn the local CLI, write
 ```bash
 petri init [--template <name>]     # Scaffold project
 petri run [--pipeline <file>]      # Execute pipeline
+petri run --skip-to <stage> --resume-run <run-id> # Continue from a recorded run
 petri run --branch <id>             # Execute under a named exploration branch
 petri status                       # Latest run status
 petri status --branch <id>          # Latest run status within a branch
@@ -250,6 +251,18 @@ petri run --input https://github.com/<owner>/<repo>/issues/<number>
 Petri 会通过已登录的 `gh` CLI 读取 Issue 正文和全部评论，再将它们传给
 `issue_analyst`。URL 必须属于当前 Git `origin`；无权限、Issue 不存在或评论
 读取失败时，运行会在启动前明确失败，不会退化为不完整的纯文本需求。
+
+### 断点续跑与流程链路
+
+当某次运行在后续阶段需要重试时，显式指定来源 run 与继续阶段：
+
+```bash
+petri run --skip-to unit_test --resume-run 002
+```
+
+`--resume-run` 必须与 `--skip-to` 一起使用，且来源 run 必须存在。新的
+`run.json` 会记录 `resumedFrom`，Runs 详情页以可点击的「研发流程」链路展示
+来源 run 和本次续跑；旧 run 没有该字段时仍可照常查看，但不会被推断为有链路。
 
 ### Exploration Branches
 

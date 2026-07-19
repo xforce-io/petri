@@ -139,14 +139,38 @@
           <span class="breadcrumb-sep">/</span>
           <span id="breadcrumb-run" class="breadcrumb-current"></span>
         </div>
+        <div id="run-lineage" class="run-lineage" aria-label="研发流程链路"></div>
         <div class="dashboard-layout">
           <aside class="timeline-panel">
             <h3>Pipeline Stages</h3>
             <div id="stage-list" class="stage-list">
               <p class="empty-state">No stages.</p>
             </div>
+            <div
+              id="timeline-splitter"
+              class="timeline-splitter"
+              role="separator"
+              aria-label="调整运行摘要高度"
+              aria-description="使用上下方向键调整高度；Home 设为最小，End 设为最大。"
+              aria-orientation="horizontal"
+              aria-valuemin="160"
+              aria-valuenow="260"
+              tabindex="0"
+            ></div>
             <div id="run-summary" class="run-summary"></div>
           </aside>
+          <div
+            id="runs-splitter"
+            class="runs-splitter"
+            role="separator"
+            aria-label="调整阶段导航宽度"
+            aria-description="使用左右方向键调整宽度；Home 设为最小，End 设为最大。"
+            aria-orientation="vertical"
+            aria-valuemin="280"
+            aria-valuemax="560"
+            aria-valuenow="360"
+            tabindex="0"
+          ></div>
           <div class="detail-panel">
             <div class="sub-tabs">
               <button class="sub-tab active" data-subtab="io">I/O</button>
@@ -156,14 +180,25 @@
             </div>
             <div id="subtab-io" class="sub-tab-content active">
               <div class="io-section">
-                <div class="io-block">
+                <div class="io-block io-prompt-block">
                   <button type="button" class="io-header" id="io-prompt-toggle" aria-expanded="true" aria-controls="io-prompt">
                     <span class="io-label">Prompt (Input)</span>
                     <span class="io-toggle">&#9660;</span>
                   </button>
                   <div id="io-prompt" class="io-content io-markdown">Select a stage to view agent I/O.</div>
                 </div>
-                <div class="io-block">
+                <div
+                  id="io-splitter"
+                  class="io-splitter"
+                  role="separator"
+                  aria-label="调整输入区域高度"
+                  aria-description="使用上下方向键调整高度；Home 设为最小，End 设为最大。"
+                  aria-orientation="horizontal"
+                  aria-valuemin="160"
+                  aria-valuenow="320"
+                  tabindex="0"
+                ></div>
+                <div class="io-block io-result-block">
                   <div class="io-header">
                     <span class="io-label">Result (Output)</span>
                   </div>

@@ -113,6 +113,51 @@ describe("Petri Web Server", () => {
       expect(data.status).toBe("done");
     });
 
+    it("returns an ordered lineage for an explicitly resumed run", async () => {
+      const petriDir = path.join(tmpDir, ".petri");
+      const initial = new RunLogger(petriDir, "test-pipe", "test input");
+      initial.finish("blocked", "develop", "needs a retry");
+      const resumed = new RunLogger(petriDir, "test-pipe", "test input", undefined, {
+        resumedFrom: { runId: initial.runId, stage: "unit_test" },
+      });
+      resumed.finish("done");
+
+      const res = await request(result.port, "/api/runs/002");
+      expect(res.status).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data.lineage).toEqual([
+        expect.objectContaining({ runId: "001", status: "blocked" }),
+        expect.objectContaining({
+          runId: "002",
+          status: "done",
+          resumedFrom: { runId: "001", stage: "unit_test" },
+        }),
+      ]);
+    });
+
+    it("keeps full resume lineage when viewing the parent run so UI can navigate back", async () => {
+      const petriDir = path.join(tmpDir, ".petri");
+      const initial = new RunLogger(petriDir, "test-pipe", "test input");
+      initial.finish("blocked", "unit_test", "needs a retry");
+      const resumed = new RunLogger(petriDir, "test-pipe", "test input", undefined, {
+        resumedFrom: { runId: initial.runId, stage: "unit_test" },
+      });
+      resumed.finish("done");
+
+      // Parent has no resumedFrom; lineage must still include the child that resumed from it.
+      const res = await request(result.port, `/api/runs/${initial.runId}`);
+      expect(res.status).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data.lineage).toEqual([
+        expect.objectContaining({ runId: initial.runId, status: "blocked" }),
+        expect.objectContaining({
+          runId: resumed.runId,
+          status: "done",
+          resumedFrom: { runId: initial.runId, stage: "unit_test" },
+        }),
+      ]);
+    });
+
     it("returns 404 for missing run", async () => {
       const res = await request(result.port, "/api/runs/999");
       expect(res.status).toBe(404);

@@ -549,19 +549,67 @@ main {
 
 /* ── Run Detail Layout ── */
 
-.dashboard-layout {
+/* Establish a viewport-bounded height chain so split panes redistribute
+   free space instead of growing with long Prompt/Result content. */
+#runs-detail-view {
   display: flex;
-  height: calc(100% - 42px); /* account for breadcrumb */
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#runs-detail-view > .breadcrumb,
+#runs-detail-view > .run-lineage {
+  flex: 0 0 auto;
+}
+
+.dashboard-layout {
+  --timeline-width: 360px;
+  display: grid;
+  grid-template-columns: var(--timeline-width) 12px minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  /* Fill remaining space under breadcrumb + optional lineage (no fixed calc). */
+  height: auto;
 }
 
 .timeline-panel {
-  width: 280px;
-  min-width: 280px;
-  border-right: 1px solid var(--border);
+  --run-summary-height: 260px;
+  min-width: 0;
+  min-height: 0;
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.runs-splitter {
+  position: relative;
+  z-index: 1;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.runs-splitter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 1px;
+  background: var(--border);
+  transition: background 0.15s, width 0.15s;
+}
+
+.runs-splitter:hover::before,
+.runs-splitter:focus-visible::before,
+.runs-splitter[data-dragging="true"]::before {
+  left: 4px;
+  width: 3px;
+  background: var(--accent);
 }
 
 .timeline-panel h3 {
@@ -573,9 +621,37 @@ main {
 }
 
 .stage-list {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 180px;
   overflow-y: auto;
   padding: 0 0.5rem;
+}
+
+.timeline-splitter {
+  position: relative;
+  flex: 0 0 12px;
+  cursor: row-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.timeline-splitter::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 5px;
+  left: 0;
+  height: 1px;
+  background: var(--border);
+  transition: background 0.15s, height 0.15s;
+}
+
+.timeline-splitter:hover::before,
+.timeline-splitter:focus-visible::before,
+.timeline-splitter[data-dragging="true"]::before {
+  bottom: 4px;
+  height: 3px;
+  background: var(--accent);
 }
 
 .stage-item {
@@ -587,6 +663,69 @@ main {
   cursor: pointer;
   transition: background 0.15s;
   margin-bottom: 2px;
+}
+
+.stage-workbench { margin: 0.45rem 0; }
+
+.stage-workbench-card {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.65rem 0.7rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stage-workbench-card:hover { background: var(--border); }
+.stage-workbench-card.active { border-color: var(--accent); background: rgba(88, 166, 255, 0.1); }
+.stage-card-copy { display: grid; gap: 0.12rem; min-width: 0; flex: 1; }
+.stage-card-title { font-size: 0.95rem; font-weight: 650; }
+.stage-card-meta { color: var(--text-muted); font-size: 0.75rem; }
+.stage-status { border-radius: 999px; padding: 0.18rem 0.45rem; font-size: 0.72rem; font-weight: 650; white-space: nowrap; }
+.stage-status.passed { color: var(--success-bright); background: rgba(45, 106, 79, 0.22); }
+.stage-status.failed { color: var(--danger); background: rgba(218, 54, 51, 0.14); }
+.stage-status.running, .stage-status.pending { color: var(--text-muted); background: var(--border); }
+.stage-card-reason { margin: 0.25rem 0.7rem 0; color: var(--danger); font-size: 0.78rem; line-height: 1.35; }
+.stage-detail-toggle { margin: 0.3rem 0.7rem 0; border: 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-size: 0.78rem; padding: 0.2rem 0; }
+.stage-execution-detail { margin: 0.25rem 0.35rem 0.5rem 1.55rem; padding: 0.35rem 0.5rem; border-left: 2px solid var(--border); }
+.stage-role-row { display: flex; align-items: center; gap: 0.5rem; width: 100%; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; font: inherit; padding: 0.28rem 0; text-align: left; }
+.stage-role-row:hover { color: var(--text); }
+.stage-gate-summary { color: var(--text-muted); font-size: 0.75rem; padding: 0.28rem 0; }
+.trace-debug { color: var(--text-muted); font-size: 0.7rem; }
+.trace-debug code { display: block; overflow-wrap: anywhere; padding-top: 0.25rem; }
+
+.trace-repeat-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  color: var(--text-muted);
+}
+
+.trace-role {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: calc(100% - 12px);
+  border: 0;
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.trace-role:hover,
+.trace-role.active {
+  background: rgba(88, 166, 255, 0.1);
 }
 
 .stage-item:hover {
@@ -627,6 +766,9 @@ main {
 }
 
 .run-summary {
+  flex: 0 0 var(--run-summary-height);
+  min-height: 0;
+  overflow: auto;
   border-top: 1px solid var(--border);
   padding: 0.75rem 1rem;
   font-size: 0.8rem;
@@ -639,11 +781,78 @@ main {
   font-weight: 500;
 }
 
+.run-lineage {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  font-size: 0.8rem;
+}
+
+.lineage-label {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.lineage-arrow { color: var(--text-muted); }
+
+.lineage-run {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0.25rem 0.55rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.lineage-run:hover,
+.lineage-run.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: rgba(88, 166, 255, 0.1);
+}
+
 .detail-panel {
   flex: 1;
+  min-width: 0;
+  /* This panel sits in a fixed-height grid row.  Without min-height: 0,
+     long I/O content gives its flex children their intrinsic height and
+     pushes the splitter (and Result) below the viewport. */
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+@media (max-width: 800px) {
+  #runs-detail-view {
+    height: auto;
+    overflow: auto;
+  }
+
+  .dashboard-layout {
+    display: block;
+    flex: none;
+    height: auto;
+    min-height: 0;
+  }
+
+  .timeline-panel {
+    height: min(56vh, 620px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .runs-splitter {
+    display: none;
+  }
+
+  .detail-panel {
+    min-height: 55vh;
+  }
 }
 
 .sub-tabs {
@@ -677,6 +886,7 @@ main {
 .sub-tab-content {
   display: none;
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 1rem;
 }
@@ -1035,17 +1245,67 @@ main {
 
 /* ── I/O Tab ── */
 .io-section {
+  --io-prompt-height: 320px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .io-block {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
 }
+
+.io-prompt-block {
+  flex: 0 0 var(--io-prompt-height);
+  min-height: 160px;
+}
+
+.io-prompt-block.is-collapsed {
+  flex-basis: auto;
+  min-height: 0;
+}
+
+.io-result-block {
+  flex: 1 1 auto;
+  min-height: 140px;
+}
+
+.io-splitter {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 12px;
+  cursor: row-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.io-splitter::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 5px;
+  left: 0;
+  height: 1px;
+  background: var(--border);
+  transition: background 0.15s, height 0.15s;
+}
+
+.io-splitter:hover::before,
+.io-splitter:focus-visible::before,
+.io-splitter[data-dragging="true"]::before {
+  bottom: 4px;
+  height: 3px;
+  background: var(--accent);
+}
+
+.io-splitter[hidden] { display: none; }
 
 .io-header {
   display: flex;
@@ -1054,8 +1314,19 @@ main {
   padding: 8px 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
-  cursor: pointer;
   user-select: none;
+}
+
+/* Only the Prompt collapse control is interactive; Result header is not a drag handle. */
+button.io-header {
+  cursor: pointer;
+  width: 100%;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: var(--bg-secondary);
+  display: flex;
 }
 
 .io-label {
@@ -1070,6 +1341,8 @@ main {
 }
 
 .io-content {
+  flex: 1;
+  min-height: 0;
   padding: 12px;
   margin: 0;
   font-family: var(--mono);
@@ -1099,8 +1372,8 @@ main {
 }
 
 .io-result-content {
-  min-height: 100px;
-  max-height: 500px;
+  min-height: 0;
+  max-height: none;
 }
 
 /* Markdown rendering in I/O panels */
@@ -1628,7 +1901,6 @@ button.template-card {
   margin-bottom: 0.5rem;
 }
 
-button.io-header,
 button.artifact-item,
 button.step-item {
   font: inherit;

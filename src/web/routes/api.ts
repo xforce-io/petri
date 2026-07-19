@@ -103,6 +103,87 @@ function enrichRunDetail(log: RunLog, runDir?: string): Record<string, unknown> 
   };
 }
 
+function lineageNode(run: RunLog): Record<string, unknown> {
+  return {
+    runId: run.runId,
+    pipeline: run.pipeline,
+    status: run.status ?? "running",
+    startedAt: run.startedAt,
+    blockedStage: run.blockedStage ?? null,
+    resumedFrom: run.resumedFrom,
+  };
+}
+
+/**
+ * Return the full explicit resume lineage containing this run:
+ * walk ancestors via resumedFrom, then include every descendant that
+ * explicitly resumed from a node in that tree.
+ *
+ * Walking only upward left parent runs with a single-node lineage, so the
+ * UI hid「研发流程」after clicking an earlier run and users could not return.
+ */
+function buildRunLineage(runsDir: string, currentRun: RunLog): Array<Record<string, unknown>> {
+  const all: RunLog[] = [];
+  const byId = new Map<string, RunLog>();
+  for (const name of listRuns(runsDir)) {
+    const log = loadRunLog(path.join(runsDir, name));
+    if (!log) continue;
+    all.push(log);
+    byId.set(log.runId, log);
+  }
+  // Ensure the current run is present even if listRuns races with a live write.
+  if (!byId.has(currentRun.runId)) {
+    all.push(currentRun);
+    byId.set(currentRun.runId, currentRun);
+  }
+
+  const children = new Map<string, RunLog[]>();
+  for (const run of all) {
+    const parentId = run.resumedFrom?.runId;
+    if (!parentId) continue;
+    const list = children.get(parentId) ?? [];
+    list.push(run);
+    children.set(parentId, list);
+  }
+  for (const list of children.values()) {
+    list.sort(
+      (a, b) =>
+        String(a.startedAt || "").localeCompare(String(b.startedAt || "")) ||
+        a.runId.localeCompare(b.runId),
+    );
+  }
+
+  // Walk to the oldest explicit ancestor (cycle-safe).
+  const ancestorSeen = new Set<string>();
+  let root: RunLog = currentRun;
+  let cursor: RunLog | null = currentRun;
+  while (cursor && !ancestorSeen.has(cursor.runId)) {
+    ancestorSeen.add(cursor.runId);
+    const sourceId = cursor.resumedFrom?.runId;
+    if (!sourceId) break;
+    const parent = byId.get(sourceId) ?? loadRunLog(path.join(runsDir, `run-${sourceId}`));
+    if (!parent) break;
+    root = parent;
+    cursor = parent;
+  }
+
+  // Preorder from that root through explicit resume children.
+  const chain: RunLog[] = [];
+  const visit = new Set<string>();
+  const walk = (run: RunLog) => {
+    if (visit.has(run.runId)) return;
+    visit.add(run.runId);
+    chain.push(run);
+    for (const child of children.get(run.runId) ?? []) walk(child);
+  };
+  walk(root);
+
+  if (!visit.has(currentRun.runId)) {
+    return [lineageNode(currentRun)];
+  }
+  return chain.map(lineageNode);
+}
+
 export async function handleApiRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -548,6 +629,7 @@ function handleRunDetail(res: http.ServerResponse, projectDir: string, id: strin
     sendJson(res, 200, {
       ...enrichRunDetail(log, runDir),
       branchId: log.branchId ?? branch ?? null,
+      lineage: buildRunLineage(path.join(petriDir, "runs"), log),
     });
     return;
   }

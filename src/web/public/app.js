@@ -6,9 +6,28 @@ let projects = [];
 let currentRunId = null;
 let currentRunData = null;
 let currentStageIndex = -1;
+let expandedStageKey = null;
 let eventSource = null;
 let currentConfigPath = null;
 let currentBranch = ""; // empty = project default runs
+let runsSplitterPointerId = null;
+let runsSplitWidth = 360;
+let timelineSplitterPointerId = null;
+let runSummaryHeight = 260;
+let ioSplitterPointerId = null;
+let ioPromptHeight = 320;
+
+const RUNS_SPLIT_MIN = 280;
+const RUNS_SPLIT_MAX = 560;
+const RUNS_DETAIL_MIN = 420;
+const RUNS_SPLIT_STEP = 16;
+const RUNS_SPLITTER_SIZE = 12;
+const TIMELINE_SUMMARY_MIN = 160;
+const TIMELINE_STAGE_MIN = 180;
+const TIMELINE_SPLITTER_SIZE = 12;
+const IO_PROMPT_MIN = 160;
+const IO_RESULT_MIN = 140;
+const IO_SPLITTER_SIZE = 12;
 
 // Create tab wizard state
 let wizard = {
@@ -119,8 +138,255 @@ function formatCost(usd) {
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
 
+function runsSplitMax(layout) {
+  return Math.max(
+    RUNS_SPLIT_MIN,
+    Math.min(RUNS_SPLIT_MAX, layout.clientWidth - RUNS_DETAIL_MIN - RUNS_SPLITTER_SIZE),
+  );
+}
+
+function setRunsSplitWidth(requestedWidth) {
+  const layout = $(".dashboard-layout");
+  const splitter = $("#runs-splitter");
+  if (!layout || !splitter) return RUNS_SPLIT_MIN;
+  // Runs detail starts hidden. Do not clamp the remembered default against a
+  // zero-width layout before the detail view becomes visible.
+  if (layout.clientWidth <= 0) return runsSplitWidth;
+
+  const max = runsSplitMax(layout);
+  const width = Math.round(Math.max(RUNS_SPLIT_MIN, Math.min(max, requestedWidth)));
+  runsSplitWidth = width;
+  layout.style.setProperty("--timeline-width", `${width}px`);
+  splitter.setAttribute("aria-valuemin", String(RUNS_SPLIT_MIN));
+  splitter.setAttribute("aria-valuemax", String(max));
+  splitter.setAttribute("aria-valuenow", String(width));
+  splitter.setAttribute("aria-valuetext", `阶段导航宽度 ${width} 像素`);
+  return width;
+}
+
+function setupRunsSplitter() {
+  const layout = $(".dashboard-layout");
+  const splitter = $("#runs-splitter");
+  if (!layout || !splitter || splitter.dataset.bound) return;
+  splitter.dataset.bound = "1";
+
+  const widthFromPointer = (event) => event.clientX - layout.getBoundingClientRect().left;
+  const stopDragging = (event) => {
+    if (runsSplitterPointerId !== event.pointerId) return;
+    splitter.releasePointerCapture?.(event.pointerId);
+    runsSplitterPointerId = null;
+    delete splitter.dataset.dragging;
+  };
+
+  splitter.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || window.matchMedia("(max-width: 800px)").matches) return;
+    event.preventDefault();
+    runsSplitterPointerId = event.pointerId;
+    splitter.dataset.dragging = "true";
+    splitter.setPointerCapture?.(event.pointerId);
+    setRunsSplitWidth(widthFromPointer(event));
+  });
+  splitter.addEventListener("pointermove", (event) => {
+    if (runsSplitterPointerId === event.pointerId) setRunsSplitWidth(widthFromPointer(event));
+  });
+  splitter.addEventListener("pointerup", stopDragging);
+  splitter.addEventListener("pointercancel", stopDragging);
+  splitter.addEventListener("keydown", (event) => {
+    const current = Number(splitter.getAttribute("aria-valuenow")) || RUNS_SPLIT_MIN;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      setRunsSplitWidth(current - RUNS_SPLIT_STEP);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      setRunsSplitWidth(current + RUNS_SPLIT_STEP);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setRunsSplitWidth(RUNS_SPLIT_MIN);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setRunsSplitWidth(runsSplitMax(layout));
+    }
+  });
+  window.addEventListener("resize", () => {
+    const current = Number(splitter.getAttribute("aria-valuenow")) || RUNS_SPLIT_MIN;
+    setRunsSplitWidth(current);
+  });
+  setRunsSplitWidth(Number(splitter.getAttribute("aria-valuenow")) || 360);
+}
+
+function timelineSummaryMax(panel) {
+  const headingHeight = panel.querySelector("h3")?.offsetHeight || 0;
+  return Math.max(
+    TIMELINE_SUMMARY_MIN,
+    panel.clientHeight - headingHeight - TIMELINE_STAGE_MIN - TIMELINE_SPLITTER_SIZE,
+  );
+}
+
+function setTimelineSummaryHeight(requestedHeight) {
+  const panel = $(".timeline-panel");
+  const splitter = $("#timeline-splitter");
+  if (!panel || !splitter) return TIMELINE_SUMMARY_MIN;
+  // Runs detail starts hidden. Keep the remembered value until the panel has
+  // a usable height, then apply the same bounded layout once it is visible.
+  if (panel.clientHeight <= 0) return runSummaryHeight;
+
+  const max = timelineSummaryMax(panel);
+  const height = Math.round(Math.max(TIMELINE_SUMMARY_MIN, Math.min(max, requestedHeight)));
+  runSummaryHeight = height;
+  panel.style.setProperty("--run-summary-height", `${height}px`);
+  splitter.setAttribute("aria-valuemin", String(TIMELINE_SUMMARY_MIN));
+  splitter.setAttribute("aria-valuemax", String(max));
+  splitter.setAttribute("aria-valuenow", String(height));
+  splitter.setAttribute("aria-valuetext", `运行摘要高度 ${height} 像素`);
+  return height;
+}
+
+function setupTimelineSplitter() {
+  const panel = $(".timeline-panel");
+  const splitter = $("#timeline-splitter");
+  if (!panel || !splitter || splitter.dataset.bound) return;
+  splitter.dataset.bound = "1";
+
+  const heightFromPointer = (event) => panel.getBoundingClientRect().bottom - event.clientY;
+  const stopDragging = (event) => {
+    if (timelineSplitterPointerId !== event.pointerId) return;
+    splitter.releasePointerCapture?.(event.pointerId);
+    timelineSplitterPointerId = null;
+    delete splitter.dataset.dragging;
+  };
+
+  splitter.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    timelineSplitterPointerId = event.pointerId;
+    splitter.dataset.dragging = "true";
+    splitter.setPointerCapture?.(event.pointerId);
+    setTimelineSummaryHeight(heightFromPointer(event));
+  });
+  splitter.addEventListener("pointermove", (event) => {
+    if (timelineSplitterPointerId === event.pointerId) setTimelineSummaryHeight(heightFromPointer(event));
+  });
+  splitter.addEventListener("pointerup", stopDragging);
+  splitter.addEventListener("pointercancel", stopDragging);
+  splitter.addEventListener("keydown", (event) => {
+    const current = Number(splitter.getAttribute("aria-valuenow")) || runSummaryHeight;
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setTimelineSummaryHeight(current + RUNS_SPLIT_STEP);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setTimelineSummaryHeight(current - RUNS_SPLIT_STEP);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setTimelineSummaryHeight(TIMELINE_SUMMARY_MIN);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setTimelineSummaryHeight(timelineSummaryMax(panel));
+    }
+  });
+  window.addEventListener("resize", () => setTimelineSummaryHeight(runSummaryHeight));
+  setTimelineSummaryHeight(runSummaryHeight);
+}
+
+function ioPromptMax(section) {
+  return Math.max(IO_PROMPT_MIN, section.clientHeight - IO_RESULT_MIN - IO_SPLITTER_SIZE);
+}
+
+function setIoPromptHeight(requestedHeight) {
+  const section = $(".io-section");
+  const splitter = $("#io-splitter");
+  if (!section || !splitter) return IO_PROMPT_MIN;
+  if (section.clientHeight <= 0) return ioPromptHeight;
+
+  const max = ioPromptMax(section);
+  const height = Math.round(Math.max(IO_PROMPT_MIN, Math.min(max, requestedHeight)));
+  ioPromptHeight = height;
+  section.style.setProperty("--io-prompt-height", `${height}px`);
+  splitter.setAttribute("aria-valuemin", String(IO_PROMPT_MIN));
+  splitter.setAttribute("aria-valuemax", String(max));
+  splitter.setAttribute("aria-valuenow", String(height));
+  splitter.setAttribute("aria-valuetext", `输入区域高度 ${height} 像素`);
+  return height;
+}
+
+function syncIoSplitter() {
+  const prompt = $("#io-prompt");
+  const promptBlock = $(".io-prompt-block");
+  const splitter = $("#io-splitter");
+  if (!prompt || !promptBlock || !splitter) return;
+  const collapsed = prompt.classList.contains("collapsed");
+  promptBlock.classList.toggle("is-collapsed", collapsed);
+  splitter.hidden = collapsed;
+  if (!collapsed) setIoPromptHeight(ioPromptHeight);
+}
+
+function setIoPromptCollapsed(collapsed) {
+  const prompt = $("#io-prompt");
+  const button = $("#io-prompt-toggle");
+  if (!prompt) return;
+
+  prompt.classList.toggle("collapsed", collapsed);
+  if (button) {
+    button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    const toggle = button.querySelector(".io-toggle");
+    if (toggle) toggle.textContent = collapsed ? "\u25B6" : "\u25BC";
+  }
+  syncIoSplitter();
+}
+
+function setupIoSplitter() {
+  const section = $(".io-section");
+  const splitter = $("#io-splitter");
+  if (!section || !splitter || splitter.dataset.bound) return;
+  splitter.dataset.bound = "1";
+
+  const heightFromPointer = (event) => event.clientY - section.getBoundingClientRect().top;
+  const stopDragging = (event) => {
+    if (ioSplitterPointerId !== event.pointerId) return;
+    splitter.releasePointerCapture?.(event.pointerId);
+    ioSplitterPointerId = null;
+    delete splitter.dataset.dragging;
+  };
+
+  splitter.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || splitter.hidden) return;
+    event.preventDefault();
+    ioSplitterPointerId = event.pointerId;
+    splitter.dataset.dragging = "true";
+    splitter.setPointerCapture?.(event.pointerId);
+    setIoPromptHeight(heightFromPointer(event));
+  });
+  splitter.addEventListener("pointermove", (event) => {
+    if (ioSplitterPointerId === event.pointerId) setIoPromptHeight(heightFromPointer(event));
+  });
+  splitter.addEventListener("pointerup", stopDragging);
+  splitter.addEventListener("pointercancel", stopDragging);
+  splitter.addEventListener("keydown", (event) => {
+    const current = Number(splitter.getAttribute("aria-valuenow")) || ioPromptHeight;
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setIoPromptHeight(current + RUNS_SPLIT_STEP);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setIoPromptHeight(current - RUNS_SPLIT_STEP);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setIoPromptHeight(IO_PROMPT_MIN);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setIoPromptHeight(ioPromptMax(section));
+    }
+  });
+  window.addEventListener("resize", () => setIoPromptHeight(ioPromptHeight));
+  syncIoSplitter();
+}
+
 // ── Init ──
 document.addEventListener("DOMContentLoaded", () => {
+  setupRunsSplitter();
+  setupTimelineSplitter();
+  setupIoSplitter();
+
   // Main tab switching
   $$(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -205,12 +471,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("click", (e) => {
     if (e.target.closest("#io-prompt-toggle")) {
       const el = $("#io-prompt");
-      el.classList.toggle("collapsed");
-      const btn = e.target.closest("#io-prompt-toggle");
-      const toggle = btn.querySelector(".io-toggle");
-      const collapsed = el.classList.contains("collapsed");
-      if (toggle) toggle.textContent = collapsed ? "\u25B6" : "\u25BC";
-      if (btn && btn.setAttribute) btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      setIoPromptCollapsed(!el.classList.contains("collapsed"));
     }
   });
 
@@ -526,6 +787,11 @@ function openRunDetail(runId) {
   switchToTab("runs");
   $("#runs-list-view").style.display = "none";
   $("#runs-detail-view").style.display = "";
+  // Detail was display:none during init; re-apply clamps now that the layout
+  // has a real size so I/O / timeline / runs splitters can redistribute space.
+  setRunsSplitWidth(runsSplitWidth);
+  setTimelineSummaryHeight(runSummaryHeight);
+  syncIoSplitter();
   loadRun(runId);
 }
 
@@ -742,6 +1008,7 @@ async function startNewRun() {
 
 async function loadRun(runId) {
   currentRunId = runId;
+  currentStageIndex = -1;
 
   // Update breadcrumb
   $("#breadcrumb-run").textContent = `run-${runId}`;
@@ -755,6 +1022,7 @@ async function loadRun(runId) {
   currentRunData = res.data;
   renderStageList();
   renderRunSummary();
+  renderRunLineage();
 
   // Select first stage by default
   if (currentRunData.stages && currentRunData.stages.length > 0) {
@@ -769,10 +1037,11 @@ async function loadRun(runId) {
 
 function renderStageList() {
   const list = $("#stage-list");
-  // Prefer hierarchical Run Trace (issue #15) when present
+  // The default is a human-readable workbench. Raw trace remains available
+  // only inside an explicitly expanded stage detail.
   const trace = currentRunData.trace;
   if (trace && Array.isArray(trace.root) && trace.root.length > 0) {
-    renderTraceTimeline(list, trace);
+    renderWorkbenchStages(list, trace);
     return;
   }
 
@@ -850,6 +1119,114 @@ function renderStageList() {
   });
 }
 
+function buildStageSummaries(trace) {
+  const attempts = [];
+  const visit = (nodes) => (nodes || []).forEach((node) => {
+    if (node.kind === "repeat_iteration") return visit(node.children);
+    if (node.kind === "stage_attempt") attempts.push(node);
+  });
+  visit(trace.root);
+  const stageLogs = currentRunData?.stages || [];
+  return attempts.map((node) => {
+    const matching = stageLogs.filter((s) => s.stage === node.stage && String(s.attempt) === String(node.attempt));
+    const gatePassed = node.stageGate?.passed ?? (matching.length ? matching.every((s) => s.gatePassed !== false) : undefined);
+    const status = gatePassed === true ? "passed" : gatePassed === false ? "failed" : node.status === "running" ? "running" : "pending";
+    const start = node.startedAt ? new Date(node.startedAt).getTime() : NaN;
+    const end = node.finishedAt ? new Date(node.finishedAt).getTime() : NaN;
+    return {
+      key: `${node.stage}:${node.iteration ?? 0}:${node.attempt}`,
+      stage: node.stage,
+      attempt: node.attempt,
+      iteration: node.iteration,
+      repeatName: node.repeatName,
+      status,
+      reason: gatePassed === false ? (node.stageGate?.reason || matching.find((s) => s.gatePassed === false)?.gateReason || "Stage gate failed") : "",
+      durationMs: Number.isFinite(start) && Number.isFinite(end) ? end - start : undefined,
+      roles: node.roles || matching.map((s) => ({ role: s.role, model: s.model, provider: s.provider, gatePassed: s.gatePassed, gateReason: s.gateReason })),
+      rawId: node.id,
+    };
+  });
+}
+
+function formatStageLabel(stage) {
+  const labels = { issue: "Issue", design: "Design", develop: "Develop", unit_test: "Test", review: "Review" };
+  return labels[stage] || String(stage).replace(/[_-]+/g, " ").replace(/\b\w/g, (x) => x.toUpperCase());
+}
+
+function formatStageStatus(status) {
+  return { passed: "通过", failed: "失败", running: "进行中", pending: "等待中" }[status] || "等待中";
+}
+
+function summarizeStageReason(reason, stage) {
+  const text = String(reason || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  if (/command failed/i.test(text)) {
+    return `${formatStageLabel(stage)} 命令失败；在 Gate 或 Log 查看完整输出`;
+  }
+  return text.length > 110 ? `${text.slice(0, 107)}…` : text;
+}
+
+function stageSummaryIndex(summary, role) {
+  return (currentRunData?.stages || []).findIndex((s) =>
+    s.stage === summary.stage
+    && String(s.attempt) === String(summary.attempt)
+    && (!role || s.role === role),
+  );
+}
+
+function renderWorkbenchStages(list, trace) {
+  const summaries = buildStageSummaries(trace);
+  if (summaries.length === 0) {
+    list.innerHTML = '<p class="empty-state">No stages yet.</p>';
+    return;
+  }
+  list.innerHTML = summaries.map((summary) => {
+    const selected = stageSummaryIndex(summary) === currentStageIndex;
+    const expanded = expandedStageKey === summary.key;
+    const cycle = summary.repeatName ? `第 ${summary.iteration || 1} 轮` : "";
+    const meta = [cycle, summary.durationMs != null ? formatDuration(summary.durationMs) : ""].filter(Boolean).join(" · ");
+    const detailId = `stage-detail-${summary.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+    const roles = summary.roles.map((role) => `<button type="button" class="stage-role-row" data-stage="${escAttr(summary.stage)}" data-attempt="${escAttr(String(summary.attempt))}" data-role="${escAttr(role.role)}">
+      <span class="stage-dot ${role.gatePassed === true ? "passed" : role.gatePassed === false ? "failed" : "pending"}"></span>
+      <span>${escHtml(role.role === "command" ? "测试命令" : role.role)}</span>
+    </button>`).join("");
+    return `<div class="stage-workbench">
+      <button type="button" class="stage-workbench-card${selected ? " active" : ""}" data-stage="${escAttr(summary.stage)}" data-attempt="${escAttr(String(summary.attempt))}" aria-pressed="${selected ? "true" : "false"}">
+        <span class="stage-dot ${summary.status === "passed" ? "passed" : summary.status === "failed" ? "failed" : "pending"}"></span>
+        <span class="stage-card-copy"><span class="stage-card-title">${escHtml(formatStageLabel(summary.stage))}</span><span class="stage-card-meta">${escHtml(meta || "—")}</span></span>
+        <span class="stage-status ${summary.status}">${formatStageStatus(summary.status)}</span>
+      </button>
+      ${summary.reason ? `<div class="stage-card-reason">${escHtml(summarizeStageReason(summary.reason, summary.stage))}</div>` : ""}
+      <button type="button" class="stage-detail-toggle" data-key="${escAttr(summary.key)}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="${detailId}">执行详情 ${expanded ? "−" : "+"}</button>
+      <div id="${detailId}" class="stage-execution-detail" ${expanded ? "" : "hidden"}>
+        ${roles || '<span class="stage-meta">等待角色执行</span>'}
+        <div class="stage-gate-summary">Gate：${formatStageStatus(summary.status)}</div>
+        <details class="trace-debug"><summary>Debug metadata</summary><code>${escHtml(summary.rawId)}</code></details>
+      </div>
+    </div>`;
+  }).join("");
+  list.querySelectorAll(".stage-workbench-card").forEach((el) => {
+    el.addEventListener("click", () => {
+      const summary = summaries.find((s) => s.stage === el.dataset.stage && String(s.attempt) === String(el.dataset.attempt));
+      const idx = summary ? stageSummaryIndex(summary) : -1;
+      if (idx >= 0) selectStage(idx);
+    });
+  });
+  list.querySelectorAll(".stage-detail-toggle").forEach((el) => {
+    el.addEventListener("click", () => {
+      expandedStageKey = expandedStageKey === el.dataset.key ? null : el.dataset.key;
+      renderWorkbenchStages(list, trace);
+    });
+  });
+  list.querySelectorAll(".stage-role-row").forEach((el) => {
+    el.addEventListener("click", () => {
+      const summary = summaries.find((s) => s.stage === el.dataset.stage && String(s.attempt) === String(el.dataset.attempt));
+      const idx = summary ? stageSummaryIndex(summary, el.dataset.role) : -1;
+      if (idx >= 0) selectStage(idx);
+    });
+  });
+}
+
 function renderRunSummary() {
   const r = currentRunData;
   const usage = r.totalUsage || {};
@@ -883,9 +1260,30 @@ function renderRunSummary() {
   `;
 }
 
+function renderRunLineage() {
+  const container = $("#run-lineage");
+  if (!container) return;
+  const lineage = Array.isArray(currentRunData?.lineage) ? currentRunData.lineage : [];
+  if (lineage.length <= 1) {
+    container.innerHTML = "";
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  container.innerHTML = `<span class="lineage-label">研发流程</span>${lineage.map((run, index) => {
+    const isCurrent = String(run.runId) === String(currentRunId);
+    const resume = run.resumedFrom ? ` · 从 run-${escHtml(run.resumedFrom.runId)} 的 ${escHtml(run.resumedFrom.stage)} 继续` : "";
+    const arrow = index === 0 ? "" : '<span class="lineage-arrow" aria-hidden="true">→</span>';
+    return `${arrow}<button type="button" class="lineage-run${isCurrent ? " active" : ""}" data-run-id="${escAttr(run.runId)}" aria-current="${isCurrent ? "step" : "false"}">run-${escHtml(run.runId)} · ${escHtml(run.status || "running")}${resume}</button>`;
+  }).join("")}`;
+  container.querySelectorAll(".lineage-run").forEach((el) => {
+    el.addEventListener("click", () => openRunDetail(el.dataset.runId));
+  });
+}
+
 function selectStage(index) {
   currentStageIndex = index;
-  $$(".stage-item").forEach((el, i) => el.classList.toggle("active", i === index));
+  renderStageList();
   loadStageIO();
   loadRunLog();
   loadStageArtifacts();
@@ -931,11 +1329,12 @@ async function loadStageIO() {
   const promptRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_prompt.md");
   if (promptRes.status === 200 && promptRes.data) {
     promptEl.innerHTML = DOMPurify.sanitize(marked.parse(promptRes.data));
-    promptEl.classList.add("collapsed");
   } else {
     promptEl.textContent = "(No prompt saved for this attempt — available when snapshot includes _prompt.md)";
-    promptEl.classList.remove("collapsed");
   }
+  // A long prompt starts expanded in its own scroll pane so Result remains
+  // visible and the divider is immediately available for mouse dragging.
+  setIoPromptCollapsed(false);
 
   const resultRes = await api("/api/runs/" + currentRunId + "/artifacts/" + prefix + "/_result.md");
   if (resultRes.status === 200 && resultRes.data) {
@@ -1187,20 +1586,19 @@ function renderTraceTimeline(list, trace) {
     parts.push(renderTraceNode(node, 0));
   }
   list.innerHTML = parts.join("") || '<p class="empty-state">No trace nodes yet.</p>';
-  list.querySelectorAll("[data-trace-id]").forEach((el) => {
+  list.querySelectorAll("[data-trace-stage]").forEach((el) => {
     el.addEventListener("click", () => {
-      list.querySelectorAll("[data-trace-id]").forEach((e) => e.classList.remove("active"));
-      el.classList.add("active");
-      // Select first role under stage attempt for detail panels
       const stage = el.getAttribute("data-stage");
       const attempt = el.getAttribute("data-attempt");
+      const role = el.getAttribute("data-role");
       if (stage && currentRunData && Array.isArray(currentRunData.stages)) {
         const idx = currentRunData.stages.findIndex(
-          (s) => s.stage === stage && String(s.attempt) === String(attempt || s.attempt),
+          (s) => s.stage === stage
+            && String(s.attempt) === String(attempt || s.attempt)
+            && (!role || s.role === role),
         );
         if (idx >= 0) {
-          currentStageIndex = idx;
-          renderStageDetail(currentRunData.stages[idx]);
+          selectStage(idx);
         }
       }
     });
@@ -1212,7 +1610,7 @@ function renderTraceNode(node, depth) {
   if (node.kind === "repeat_iteration") {
     const kids = (node.children || []).map((c) => renderTraceNode(c, depth + 1)).join("");
     return `<div class="trace-repeat" data-trace-id="${escAttr(node.id)}" style="margin-left:${pad}px">
-      <div class="stage-item trace-repeat-header">
+      <div class="trace-repeat-header">
         <span class="stage-dot ${node.status === "done" ? "passed" : node.status === "running" ? "pending" : "failed"}"></span>
         <div class="stage-name">Repeat ${escHtml(node.repeatName)} · iteration ${node.iteration}/${node.maxIterations}</div>
         <div class="stage-meta">${escHtml(node.id)}</div>
@@ -1223,12 +1621,15 @@ function renderTraceNode(node, depth) {
   // stage_attempt
   const roles = (node.roles || [])
     .map(
-      (r) => `<div class="trace-role" style="margin-left:${pad + 12}px">
+      (r) => {
+        const active = traceSelectionMatches(node.stage, node.attempt, r.role) ? " active" : "";
+        return `<button type="button" class="trace-role${active}" data-trace-stage data-stage="${escAttr(node.stage)}" data-attempt="${escAttr(String(node.attempt))}" data-role="${escAttr(r.role)}" aria-pressed="${active ? "true" : "false"}" style="margin-left:${pad + 12}px">
         <span class="stage-dot ${r.gatePassed === true ? "passed" : r.gatePassed === false ? "failed" : "pending"}"></span>
         <span>${escHtml(r.role)}</span>
         <span class="stage-meta">${escHtml(r.provider || "-")} · ${escHtml(r.model || "-")} · ${escHtml(r.id)}</span>
         ${r.gateReason ? `<div class="stage-fail-reason">${escHtml(r.gateReason)}</div>` : ""}
-      </div>`,
+      </button>`;
+      },
     )
     .join("");
   const gate = node.stageGate
@@ -1245,15 +1646,24 @@ function renderTraceNode(node, depth) {
       : node.iteration
         ? ` · i${node.iteration}`
         : "";
-  return `<div class="trace-attempt" data-trace-id="${escAttr(node.id)}" data-stage="${escAttr(node.stage)}" data-attempt="${escAttr(String(node.attempt))}" style="margin-left:${pad}px">
-    <div class="stage-item">
+  const active = traceSelectionMatches(node.stage, node.attempt) ? " active" : "";
+  return `<div class="trace-attempt" style="margin-left:${pad}px">
+    <button type="button" class="stage-item trace-attempt${active}" data-trace-stage data-stage="${escAttr(node.stage)}" data-attempt="${escAttr(String(node.attempt))}" aria-pressed="${active ? "true" : "false"}">
       <span class="stage-dot ${node.status === "done" ? "passed" : node.status === "running" ? "pending" : "failed"}"></span>
       <div class="stage-name">${escHtml(node.stage)} · attempt ${node.attempt}${rep}</div>
       <div class="stage-meta">${escHtml(node.id)}</div>
-    </div>
+    </button>
     ${roles}
     ${gate}
   </div>`;
+}
+
+function traceSelectionMatches(stage, attempt, role) {
+  const selected = currentStageEntry();
+  return !!selected
+    && selected.stage === stage
+    && String(selected.attempt) === String(attempt)
+    && (!role || selected.role === role);
 }
 
 async function loadConfigTab() {

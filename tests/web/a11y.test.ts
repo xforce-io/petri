@@ -95,4 +95,85 @@ describe("web a11y native semantics (issue #22)", () => {
     expect(appJs).toMatch(/button type="button" class="artifact-item/);
     expect(appJs).not.toMatch(/<div class="artifact-item"/);
   });
+
+  it("S2: trace attempts and roles are native buttons and expose lineage navigation", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).toMatch(/button type="button" class="stage-item trace-attempt/);
+    expect(appJs).toMatch(/button type="button" class="trace-role/);
+    expect(appJs).toMatch(/aria-pressed=/);
+    expect(appJs).toMatch(/renderRunLineage/);
+  });
+
+  it("S1-S3: default Runs workbench uses stage summaries and progressively reveals execution details", () => {
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    expect(appJs).toMatch(/renderWorkbenchStages/);
+    expect(appJs).toMatch(/stage-workbench-card/);
+    expect(appJs).toMatch(/stage-detail-toggle/);
+    expect(appJs).toMatch(/aria-expanded=/);
+    expect(appJs).toMatch(/buildStageSummaries/);
+    expect(appJs).toMatch(/formatStageLabel/);
+    expect(appJs).toMatch(/summarizeStageReason/);
+  });
+
+  it("S1-S3: Runs split pane is a keyboard-operable separator with bounded resizing", () => {
+    const html = fs.readFileSync(path.join(process.cwd(), "src/web/public/index.html"), "utf-8");
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    const css = fs.readFileSync(path.join(process.cwd(), "src/web/public/style.css"), "utf-8");
+
+    expect(html).toMatch(/id="runs-splitter"[^>]*role="separator"/);
+    expect(html).toMatch(/aria-orientation="vertical"/);
+    expect(html).toMatch(/aria-valuemin="280"/);
+    expect(appJs).toMatch(/setupRunsSplitter/);
+    expect(appJs).toMatch(/pointerdown/);
+    expect(appJs).toMatch(/ArrowLeft/);
+    expect(appJs).toMatch(/ArrowRight/);
+    expect(appJs).toMatch(/aria-valuenow/);
+    expect(css).toMatch(/--timeline-width/);
+    expect(css).toMatch(/\.runs-splitter/);
+    expect(css).toMatch(/@media \(max-width: 800px\)/);
+  });
+
+  it("S1-S3: timeline stages and run summary are independently resizable and scrollable", () => {
+    const html = fs.readFileSync(path.join(process.cwd(), "src/web/public/index.html"), "utf-8");
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    const css = fs.readFileSync(path.join(process.cwd(), "src/web/public/style.css"), "utf-8");
+
+    expect(html).toMatch(/id="timeline-splitter"[^>]*role="separator"/);
+    expect(html).toMatch(/aria-orientation="horizontal"/);
+    expect(appJs).toMatch(/setupTimelineSplitter/);
+    expect(appJs).toMatch(/ArrowUp/);
+    expect(appJs).toMatch(/ArrowDown/);
+    expect(css).toMatch(/--run-summary-height/);
+    expect(css).toMatch(/\.timeline-splitter/);
+    expect(css).toMatch(/\.run-summary[^}]*overflow:\s*auto/);
+  });
+
+  it("S1-S3: expanded I/O input and output are independently resizable and scrollable", () => {
+    const html = fs.readFileSync(path.join(process.cwd(), "src/web/public/index.html"), "utf-8");
+    const appJs = fs.readFileSync(path.join(process.cwd(), "src/web/public/app.js"), "utf-8");
+    const css = fs.readFileSync(path.join(process.cwd(), "src/web/public/style.css"), "utf-8");
+
+    expect(html).toMatch(/id="io-splitter"[^>]*role="separator"/);
+    expect(html).toMatch(/aria-label="调整输入区域高度"/);
+    expect(appJs).toMatch(/setupIoSplitter/);
+    expect(appJs).toMatch(/syncIoSplitter/);
+    expect(appJs).toMatch(/function setIoPromptCollapsed/);
+    expect(appJs).toMatch(/setIoPromptCollapsed\(false\)/);
+    // openRunDetail must re-clamp after display:none → visible so splitters work.
+    expect(appJs).toMatch(/function openRunDetail[\s\S]*?syncIoSplitter\(\)/);
+    expect(css).toMatch(/--io-prompt-height/);
+    expect(css).toMatch(/\.io-splitter/);
+    expect(css).toMatch(/\.io-prompt-block/);
+    expect(css).toMatch(/\.io-result-block/);
+    expect(css).toMatch(/\.detail-panel\s*\{[\s\S]*?min-height:\s*0/);
+    expect(css).toMatch(/\.sub-tab-content\s*\{[\s\S]*?min-height:\s*0/);
+    expect(css).toMatch(/\.io-section\s*\{[\s\S]*?overflow:\s*hidden/);
+    // Viewport-bounded height chain: detail view + flex fill under breadcrumb/lineage.
+    expect(css).toMatch(/#runs-detail-view\s*\{[\s\S]*?height:\s*100%/);
+    expect(css).toMatch(/#runs-detail-view\s*\{[\s\S]*?display:\s*flex/);
+    expect(css).toMatch(/\.dashboard-layout\s*\{[\s\S]*?flex:\s*1/);
+    expect(css).toMatch(/\.dashboard-layout\s*\{[\s\S]*?min-height:\s*0/);
+    expect(css).not.toMatch(/\.dashboard-layout\s*\{[\s\S]*?height:\s*calc\(100%\s*-\s*42px\)/);
+    expect(css).toMatch(/button\.io-header\s*\{[\s\S]*?cursor:\s*pointer/);
+  });
 });
