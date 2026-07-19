@@ -853,7 +853,82 @@ describe("Engine", () => {
     const result = await engine.run(pipeline, "go");
     expect(result.status).toBe("blocked");
     expect(result.stage).toBe("measure");
-    expect(result.reason).toMatch(/command failed/i);
+    expect(result.reason).toMatch(/Command exec failed/i);
+    expect(result.reason).toContain("exit 1");
+  });
+
+  it("runs a multi-line fold-style command as one script (issue #57)", async () => {
+    const pipeline: PipelineConfig = {
+      name: "cmd-pipeline",
+      stages: [{ name: "measure", command: "echo\n  ok_line1 > {artifact_dir}/out.txt" }],
+    };
+    const engine = new Engine({
+      provider: createStubProvider(() => {}),
+      roles: {},
+      artifactBaseDir: tmpDir,
+    });
+    const result = await engine.run(pipeline, "go");
+    expect(result.status).toBe("done");
+    expect(fs.readFileSync(path.join(tmpDir, "measure", "out.txt"), "utf-8").trim()).toBe("ok_line1");
+  });
+
+  it("includes full prepared command on multi-line exec failure (issue #57)", async () => {
+    const pipeline: PipelineConfig = {
+      name: "cmd-pipeline",
+      stages: [{ name: "measure", command: "exit\n  1" }],
+    };
+    const engine = new Engine({
+      provider: createStubProvider(() => {}),
+      roles: {},
+      artifactBaseDir: tmpDir,
+    });
+    const result = await engine.run(pipeline, "go");
+    expect(result.status).toBe("blocked");
+    expect(result.reason).toMatch(/Command exec failed/i);
+    expect(result.reason).toContain("exit 1");
+  });
+
+  it("blocks with Command config failed when command is empty after normalize", async () => {
+    const pipeline: PipelineConfig = {
+      name: "cmd-pipeline",
+      stages: [{ name: "measure", command: "   \n  " }],
+    };
+    const engine = new Engine({
+      provider: createStubProvider(() => {}),
+      roles: {},
+      artifactBaseDir: tmpDir,
+    });
+    const result = await engine.run(pipeline, "go");
+    expect(result.status).toBe("blocked");
+    expect(result.reason).toMatch(/Command config failed/i);
+  });
+
+  it("uses Command gate failed prefix when exit 0 but gate rejects (issue #57)", async () => {
+    const pipeline: PipelineConfig = {
+      name: "cmd-pipeline",
+      stages: [
+        {
+          name: "measure",
+          command: `echo '{"ok": false}' > {artifact_dir}/result.json`,
+          gate: {
+            id: "measured",
+            evidence: {
+              path: "{stage}/result.json",
+              check: { field: "ok", equals: true },
+            },
+          },
+        },
+      ],
+    };
+    const engine = new Engine({
+      provider: createStubProvider(() => {}),
+      roles: {},
+      artifactBaseDir: tmpDir,
+    });
+    const result = await engine.run(pipeline, "go");
+    expect(result.status).toBe("blocked");
+    expect(result.reason).toMatch(/Command gate failed/i);
+    expect(result.reason).not.toMatch(/Command exec failed/i);
   });
 
   it("substitutes {artifact_dir} and creates the command stage artifact dir", async () => {
