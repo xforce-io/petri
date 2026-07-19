@@ -264,6 +264,30 @@ petri run --skip-to unit_test --resume-run 002
 `run.json` 会记录 `resumedFrom`，Runs 详情页以可点击的「研发流程」链路展示
 来源 run 和本次续跑；旧 run 没有该字段时仍可照常查看，但不会被推断为有链路。
 
+未传 `--input` / `--from` 且无 `.petri/goal.md` / `pipeline.goal` 时，会**继承来源
+run 的 input**，避免「只跑质量门」被 `No input provided` 挡住。
+
+### 仅跑质量门（已有实现时）
+
+实现已在工作区、只需确定性 `unit_test` 与后续 `review` 时，不必从 issue/design/develop
+重跑全链路：
+
+```bash
+# 推荐：从历史 run 续跑质量门（input 默认继承来源 run）
+petri run --skip-to unit_test --resume-run 001
+
+# 无 resume 来源时仍可 skip-to，但需自行提供 input
+petri run --skip-to unit_test --from .petri/goal.md
+# 或
+petri run --skip-to unit_test --input "reuse prior goal text"
+```
+
+`petri run --help` 中 `--skip-to` / `--resume-run` 说明了同一路径。CLI 文案：
+
+```bash
+petri run --help
+```
+
 ### Exploration Branches
 
 A branch is a named, independent line of investigation. Use branches when several optimization directions should each have their own run history instead of sharing one global `run-001`, `run-002`, ... sequence.

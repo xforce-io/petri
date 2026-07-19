@@ -46,6 +46,27 @@ export function resolveResumeSource(
   return { runId: source.runId, stage: skipTo };
 }
 
+/**
+ * Inherit pipeline input from a prior run's run.json (issue #58).
+ * Used when --resume-run is set and the operator did not pass --input/--from.
+ */
+export function inheritInputFromResumeRun(
+  petriDir: string,
+  resumeRun?: string,
+): string | undefined {
+  if (!resumeRun) return undefined;
+  const runDirName = normalizeRunId(resumeRun);
+  const source = loadRunLog(path.join(petriDir, "runs", runDirName));
+  if (!source) return undefined;
+  const text = typeof source.input === "string" ? source.input.trim() : "";
+  return text || undefined;
+}
+
+/** Actionable error when no input source is available (including resume inherit). */
+export const NO_INPUT_MESSAGE =
+  "No input provided. Use --input, --from, set .petri/goal.md or pipeline 'goal', " +
+  "or pass --resume-run <id> with --skip-to to inherit the source run's input.";
+
 export async function runCommand(opts: RunOptions): Promise<void> {
   const cwd = process.cwd();
   let executionCwd = cwd;
@@ -100,10 +121,23 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     ? pipelineDir
     : cwd;
 
-  // 2. Resolve input: --input > --from > persisted goal > pipeline goal
+  // 2. Resolve resume source early so input can inherit from the source run (issue #58)
+  const petriDir = runRootForBranch(cwd, opts.branch);
+  let resumedFrom: { runId: string; stage: string } | undefined;
+  try {
+    resumedFrom = resolveResumeSource(petriDir, opts.resumeRun, opts.skipTo);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(message));
+    process.exit(1);
+  }
+
+  // 3. Resolve input: --input > --from > goal.md > pipeline.goal > resume run input
   let input: string | undefined;
+  let inputSource: "input" | "from" | "goal.md" | "pipeline.goal" | "resume" | undefined;
   if (opts.input) {
     input = opts.input;
+    inputSource = "input";
   } else if (opts.from) {
     const inputPath = path.resolve(cwd, opts.from);
     if (!fs.existsSync(inputPath)) {
@@ -111,18 +145,32 @@ export async function runCommand(opts: RunOptions): Promise<void> {
       process.exit(1);
     }
     input = fs.readFileSync(inputPath, "utf-8");
+    inputSource = "from";
   } else {
     const persistedGoal = path.join(cwd, ".petri", "goal.md");
     if (fs.existsSync(persistedGoal)) {
       input = fs.readFileSync(persistedGoal, "utf-8");
+      inputSource = "goal.md";
     } else if (pipelineConfig.goal) {
       input = pipelineConfig.goal;
+      inputSource = "pipeline.goal";
+    } else if (opts.resumeRun) {
+      input = inheritInputFromResumeRun(petriDir, opts.resumeRun);
+      if (input) inputSource = "resume";
     }
   }
 
   if (!input) {
-    console.error(chalk.red("No input provided. Use --input, --from, or set 'goal' in pipeline.yaml."));
+    console.error(chalk.red(NO_INPUT_MESSAGE));
     process.exit(1);
+  }
+
+  if (inputSource === "resume") {
+    console.log(
+      chalk.blue(
+        `Inheriting input from resume run-${resumedFrom?.runId ?? normalizeRunId(opts.resumeRun!)}`,
+      ),
+    );
   }
 
   try {
@@ -152,11 +200,11 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     }
   }
 
-  // 3. Collect all role names from pipeline stages (recursing into nested
+  // 4. Collect all role names from pipeline stages (recursing into nested
   //    repeats; command stages have no roles and are skipped)
   const roleNames = new Set<string>(collectRoleNames(pipelineConfig.stages));
 
-  // 4. Load all roles (from pipeline.yaml's directory if it has a roles/ sibling, else cwd)
+  // 5. Load all roles (from pipeline.yaml's directory if it has a roles/ sibling, else cwd)
   const defaultModel = petriConfig.defaults.model;
   const roles: Record<string, LoadedRole> = {};
   for (const name of roleNames) {
@@ -164,20 +212,11 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   }
   validateRoleProviderConfig(Object.values(roles), petriConfig);
 
-  // 5. Create every configured provider; Engine resolves the role's named one.
+  // 6. Create every configured provider; Engine resolves the role's named one.
   const providerRegistry = createProviderRegistryFromConfig(cwd);
 
-  // 6. Create logger and engine
-  const petriDir = runRootForBranch(cwd, opts.branch);
+  // 7. Create logger and engine
   const artifactBaseDir = path.join(petriDir, "artifacts");
-  let resumedFrom: { runId: string; stage: string } | undefined;
-  try {
-    resumedFrom = resolveResumeSource(petriDir, opts.resumeRun, opts.skipTo);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(chalk.red(message));
-    process.exit(1);
-  }
   const logger = new RunLogger(petriDir, pipelineConfig.name, input, pipelineConfig.goal, {
     branchId: branchConfig?.branch_id,
     branchObjective: branchConfig?.objective,
