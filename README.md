@@ -288,6 +288,14 @@ petri run --skip-to unit_test --input "reuse prior goal text"
 petri run --help
 ```
 
+### Command stage 多行 YAML
+
+`command:` 支持 YAML `>` / `|` 折行。引擎在执行前会**归一化**多行字符串：无 shell
+控制结构时把 argv 续行拼成一条命令；含 `if/then/fi` 等时保留真多行脚本。失败时
+reason 带 `Command exec failed` / `Command gate failed` / `Command config failed`
+前缀，且 exec 失败会附带完整 prepared command。写法约定见
+[docs/safe-yaml-command.md](docs/safe-yaml-command.md)。
+
 ### Exploration Branches
 
 A branch is a named, independent line of investigation. Use branches when several optimization directions should each have their own run history instead of sharing one global `run-001`, `run-002`, ... sequence.
