@@ -18,8 +18,14 @@ program
   .option("-p, --pipeline <file>", "Pipeline file", "pipeline.yaml")
   .option("-i, --input <text>", "Input text")
   .option("--from <file>", "Read input from file")
-  .option("--skip-to <stage>", "Resume from a stage, skipping earlier stages (reuses existing artifacts)")
-  .option("--resume-run <run-id>", "Record the source run for --skip-to (e.g. 001 or run-001)")
+  .option(
+    "--skip-to <stage>",
+    "Skip earlier stages for quality-gate / resume (reuses artifacts). Example: unit_test",
+  )
+  .option(
+    "--resume-run <run-id>",
+    "Source run for --skip-to lineage (e.g. 001); inherits that run's input when --input/--from not set",
+  )
   .option("--require-clean", "Ensure git working tree is clean before running")
   .option("--worktree [name]", "Run in a temporary git worktree to isolate changes")
   .option("--branch <id>", "Run under a named exploration branch")
