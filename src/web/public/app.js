@@ -1142,7 +1142,14 @@ function buildStageSummaries(trace) {
       status,
       reason: gatePassed === false ? (node.stageGate?.reason || matching.find((s) => s.gatePassed === false)?.gateReason || "Stage gate failed") : "",
       durationMs: Number.isFinite(start) && Number.isFinite(end) ? end - start : undefined,
-      roles: node.roles || matching.map((s) => ({ role: s.role, model: s.model, provider: s.provider, gatePassed: s.gatePassed, gateReason: s.gateReason })),
+      roles: node.roles || matching.map((s) => ({
+        role: s.role,
+        model: s.model,
+        provider: s.provider,
+        gatePassed: s.gatePassed,
+        gateReason: s.gateReason,
+        artifacts: s.artifacts,
+      })),
       rawId: node.id,
     };
   });
@@ -1168,11 +1175,60 @@ function summarizeStageReason(reason, stage) {
 
 /**
  * Map workbench selection → run.stages[] index (issue #55).
- * Same algorithm as src/web/stage-index.ts (kept inlined for the static public UI).
- * Repeat loops reuse attempt numbers; use occurrence among same stage+attempt.
+ * Same algorithm as src/web/stage-index.ts (inlined for static public UI).
+ * Prefer artifactHint so sparse stages[] (ghost timed-out attempts only in
+ * trace) do not shift later iteration I/O bindings.
  */
+function extractArtifactHint(paths) {
+  if (!paths || paths.length === 0) return null;
+  for (const raw of paths) {
+    const p = String(raw).replace(/\\/g, "/");
+    const idx = p.lastIndexOf("/artifacts/");
+    const rel = idx >= 0 ? p.slice(idx + "/artifacts/".length) : p;
+    const m = rel.match(/^(\d+-[^/]+\/[^/]+)/);
+    if (m) return m[1];
+    const m2 = rel.match(/^(\d+-[^/]+)\//);
+    if (m2) return m2[1];
+  }
+  return null;
+}
+
+function artifactHintFromRoles(roles) {
+  if (!roles) return null;
+  for (const r of roles) {
+    const hint = extractArtifactHint(r.artifacts || undefined);
+    if (hint) return hint;
+  }
+  return null;
+}
+
+function rolesHaveArtifacts(roles) {
+  return (roles || []).some((r) => (r.artifacts || []).length > 0);
+}
+
 function resolveStageLogIndex(stages, query) {
   if (!stages || stages.length === 0 || !query?.stage) return -1;
+  if (query.hasRoleArtifacts === false) return -1;
+
+  const hint = query.artifactHint ? String(query.artifactHint).replace(/\\/g, "/") : "";
+  if (hint) {
+    for (let i = 0; i < stages.length; i++) {
+      const s = stages[i];
+      if (s.stage !== query.stage) continue;
+      if (
+        query.attempt != null
+        && query.attempt !== ""
+        && String(s.attempt ?? "") !== String(query.attempt)
+      ) {
+        continue;
+      }
+      if (query.role && s.role && s.role !== query.role) continue;
+      const arts = s.artifacts || [];
+      if (arts.some((a) => String(a).replace(/\\/g, "/").includes(hint))) return i;
+    }
+    return -1;
+  }
+
   const matches = [];
   for (let i = 0; i < stages.length; i++) {
     const s = stages[i];
@@ -1188,11 +1244,12 @@ function resolveStageLogIndex(stages, query) {
   return matches[occ];
 }
 
-function occurrenceAmongMatches(items, index) {
+function occurrenceAmongMatches(items, index, eligible) {
   const cur = items[index];
   if (!cur) return 0;
   let occ = 0;
   for (let i = 0; i < index; i++) {
+    if (eligible && !eligible(items[i], i)) continue;
     const s = items[i];
     if (s.stage === cur.stage && String(s.attempt ?? "") === String(cur.attempt ?? "")) occ += 1;
   }
@@ -1201,13 +1258,20 @@ function occurrenceAmongMatches(items, index) {
 
 function stageSummaryIndex(summary, role, summaries) {
   const list = summaries || [];
+  const hasArts = rolesHaveArtifacts(summary.roles);
+  const artifactHint = artifactHintFromRoles(summary.roles);
   const si = list.findIndex((s) => s.key === summary.key);
-  const occurrence = si >= 0 ? occurrenceAmongMatches(list, si) : 0;
+  const occurrence =
+    si >= 0
+      ? occurrenceAmongMatches(list, si, (_item, i) => rolesHaveArtifacts(list[i].roles))
+      : 0;
   return resolveStageLogIndex(currentRunData?.stages || [], {
     stage: summary.stage,
     attempt: summary.attempt,
     role,
-    occurrence,
+    occurrence: hasArts ? occurrence : 0,
+    artifactHint,
+    hasRoleArtifacts: hasArts,
   });
 }
 
