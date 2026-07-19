@@ -28,6 +28,10 @@ stages:
         # 4. Deterministic test stage (not agent self-report). The developer
         # works in its artifact directory, so run its actual Node/Python suite
         # there. Projects using another runner must replace this command.
+        #
+        # Multi-line command tips (issue #57): engine normalizes YAML fold /
+        # more-indented argv into one shell script. Prefer if/then/fi or
+        # && / ; for multi-statement scripts — see docs/safe-yaml-command.md.
         - name: unit_test
           command: >
             test_dir="$(dirname "{artifact_dir}")/develop/developer";

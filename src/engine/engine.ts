@@ -1,12 +1,18 @@
 // src/engine/engine.ts
 
 import { createHash } from "node:crypto";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, existsSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
 import { ArtifactManifest } from "./manifest.js";
 import { checkGates, resolveGatePath, type GateInput, type GateDetail } from "./gate.js";
 import { buildContext } from "./context.js";
+import {
+  formatCommandConfigFailure,
+  formatCommandExecFailure,
+  formatCommandGateFailure,
+  normalizeCommandScript,
+} from "./command-script.js";
 import { isRepeatBlock, isCommandStage } from "../types.js";
 import type { RunLogger } from "./logger.js";
 import type {
@@ -487,30 +493,59 @@ export class Engine {
   private async runCommandStage(stage: CommandStage): Promise<RunResult> {
     const artifactDir = join(this.artifactBaseDir, stage.name);
     mkdirSync(artifactDir, { recursive: true });
-    const command = stage.command.replaceAll("{artifact_dir}", artifactDir);
+    const rendered = stage.command.replaceAll("{artifact_dir}", artifactDir);
+    // Normalize YAML-folded / more-indented multi-line commands into one script (issue #57)
+    const prepared = normalizeCommandScript(rendered);
     const timeout = stage.timeout ?? this.defaultTimeout;
 
-    console.log(`  Command stage "${stage.name}": ${command}`);
+    console.log(`  Command stage "${stage.name}": ${prepared}`);
     this.logger?.logStageAttempt(stage.name, 1, 1);
     // Synthetic role so Run Trace / StageLog record the command as an execution node (issue #18)
     const cmdTimer = this.logger?.logRoleStart(stage.name, "command", "command");
     const startedMs = Date.now();
 
-    try {
-      execSync(command, { stdio: "inherit", timeout });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.log(`  Command stage "${stage.name}" FAILED: ${message}`);
+    if (!prepared) {
+      const reason = formatCommandConfigFailure(
+        "command is empty after normalization / substitution",
+      );
+      console.log(`  Command stage "${stage.name}" CONFIG FAILED: ${reason}`);
       if (cmdTimer) {
         this.logger?.logRoleEnd(cmdTimer, {
           gatePassed: false,
-          gateReason: `Command failed: ${message}`,
+          gateReason: reason,
           attempt: 1,
           artifacts: [],
         });
       }
-      this.logger?.logGateResult(stage.name, false, `Command failed: ${message}`);
-      return { status: "blocked", stage: stage.name, reason: `Command failed: ${message}` };
+      this.logger?.logGateResult(stage.name, false, reason);
+      return { status: "blocked", stage: stage.name, reason };
+    }
+
+    try {
+      // Explicit sh -c so the whole prepared string is one script (posix).
+      if (process.platform === "win32") {
+        execSync(prepared, { stdio: "inherit", timeout });
+      } else {
+        execFileSync("/bin/sh", ["-c", prepared], { stdio: "inherit", timeout });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const reason = formatCommandExecFailure(message, prepared);
+      console.log(`  Command stage "${stage.name}" EXEC FAILED`);
+      console.log(`  --- prepared command ---`);
+      console.log(`  ${prepared}`);
+      console.log(`  --- end command ---`);
+      console.log(`  ${message}`);
+      if (cmdTimer) {
+        this.logger?.logRoleEnd(cmdTimer, {
+          gatePassed: false,
+          gateReason: reason,
+          attempt: 1,
+          artifacts: [],
+        });
+      }
+      this.logger?.logGateResult(stage.name, false, reason);
+      return { status: "blocked", stage: stage.name, reason };
     }
 
     // Snapshot the command's output into the run directory before the gate
@@ -529,24 +564,33 @@ export class Engine {
       for (const detail of gateResult.details) {
         this.gateResults.set(detail.gateId, detail);
       }
-      if (cmdTimer) {
-        this.logger?.logRoleEnd(cmdTimer, {
-          gatePassed: gateResult.passed,
-          gateReason: gateResult.reason,
-          attempt: 1,
-          artifacts: cmdArtifacts,
-        });
-      }
-      this.logger?.logGateResult(stage.name, gateResult.passed, gateResult.reason);
       if (!gateResult.passed) {
         const detail = gateResult.details
           .filter((d) => !d.passed)
           .map((d) => d.reason)
           .join("; ");
-        const reason = detail || gateResult.reason;
+        const reason = formatCommandGateFailure(detail || gateResult.reason);
+        if (cmdTimer) {
+          this.logger?.logRoleEnd(cmdTimer, {
+            gatePassed: false,
+            gateReason: reason,
+            attempt: 1,
+            artifacts: cmdArtifacts,
+          });
+        }
+        this.logger?.logGateResult(stage.name, false, reason);
         console.log(`  Command stage "${stage.name}" gate FAILED: ${reason}`);
         return { status: "blocked", stage: stage.name, reason };
       }
+      if (cmdTimer) {
+        this.logger?.logRoleEnd(cmdTimer, {
+          gatePassed: true,
+          gateReason: gateResult.reason,
+          attempt: 1,
+          artifacts: cmdArtifacts,
+        });
+      }
+      this.logger?.logGateResult(stage.name, true, gateResult.reason);
     } else if (cmdTimer) {
       this.logger?.logRoleEnd(cmdTimer, {
         gatePassed: true,
