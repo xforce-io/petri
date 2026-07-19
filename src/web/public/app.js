@@ -1142,7 +1142,14 @@ function buildStageSummaries(trace) {
       status,
       reason: gatePassed === false ? (node.stageGate?.reason || matching.find((s) => s.gatePassed === false)?.gateReason || "Stage gate failed") : "",
       durationMs: Number.isFinite(start) && Number.isFinite(end) ? end - start : undefined,
-      roles: node.roles || matching.map((s) => ({ role: s.role, model: s.model, provider: s.provider, gatePassed: s.gatePassed, gateReason: s.gateReason })),
+      roles: node.roles || matching.map((s) => ({
+        role: s.role,
+        model: s.model,
+        provider: s.provider,
+        gatePassed: s.gatePassed,
+        gateReason: s.gateReason,
+        artifacts: s.artifacts,
+      })),
       rawId: node.id,
     };
   });
@@ -1166,12 +1173,106 @@ function summarizeStageReason(reason, stage) {
   return text.length > 110 ? `${text.slice(0, 107)}…` : text;
 }
 
-function stageSummaryIndex(summary, role) {
-  return (currentRunData?.stages || []).findIndex((s) =>
-    s.stage === summary.stage
-    && String(s.attempt) === String(summary.attempt)
-    && (!role || s.role === role),
-  );
+/**
+ * Map workbench selection → run.stages[] index (issue #55).
+ * Same algorithm as src/web/stage-index.ts (inlined for static public UI).
+ * Prefer artifactHint so sparse stages[] (ghost timed-out attempts only in
+ * trace) do not shift later iteration I/O bindings.
+ */
+function extractArtifactHint(paths) {
+  if (!paths || paths.length === 0) return null;
+  for (const raw of paths) {
+    const p = String(raw).replace(/\\/g, "/");
+    const idx = p.lastIndexOf("/artifacts/");
+    const rel = idx >= 0 ? p.slice(idx + "/artifacts/".length) : p;
+    const m = rel.match(/^(\d+-[^/]+\/[^/]+)/);
+    if (m) return m[1];
+    const m2 = rel.match(/^(\d+-[^/]+)\//);
+    if (m2) return m2[1];
+  }
+  return null;
+}
+
+function artifactHintFromRoles(roles) {
+  if (!roles) return null;
+  for (const r of roles) {
+    const hint = extractArtifactHint(r.artifacts || undefined);
+    if (hint) return hint;
+  }
+  return null;
+}
+
+function rolesHaveArtifacts(roles) {
+  return (roles || []).some((r) => (r.artifacts || []).length > 0);
+}
+
+function resolveStageLogIndex(stages, query) {
+  if (!stages || stages.length === 0 || !query?.stage) return -1;
+  if (query.hasRoleArtifacts === false) return -1;
+
+  const hint = query.artifactHint ? String(query.artifactHint).replace(/\\/g, "/") : "";
+  if (hint) {
+    for (let i = 0; i < stages.length; i++) {
+      const s = stages[i];
+      if (s.stage !== query.stage) continue;
+      if (
+        query.attempt != null
+        && query.attempt !== ""
+        && String(s.attempt ?? "") !== String(query.attempt)
+      ) {
+        continue;
+      }
+      if (query.role && s.role && s.role !== query.role) continue;
+      const arts = s.artifacts || [];
+      if (arts.some((a) => String(a).replace(/\\/g, "/").includes(hint))) return i;
+    }
+    return -1;
+  }
+
+  const matches = [];
+  for (let i = 0; i < stages.length; i++) {
+    const s = stages[i];
+    if (s.stage !== query.stage) continue;
+    if (String(s.attempt ?? "") !== String(query.attempt ?? "")) continue;
+    if (query.role && s.role !== query.role) continue;
+    matches.push(i);
+  }
+  if (matches.length === 0) return -1;
+  const occ = query.occurrence ?? 0;
+  if (occ < 0) return matches[0];
+  if (occ >= matches.length) return matches[matches.length - 1];
+  return matches[occ];
+}
+
+function occurrenceAmongMatches(items, index, eligible) {
+  const cur = items[index];
+  if (!cur) return 0;
+  let occ = 0;
+  for (let i = 0; i < index; i++) {
+    if (eligible && !eligible(items[i], i)) continue;
+    const s = items[i];
+    if (s.stage === cur.stage && String(s.attempt ?? "") === String(cur.attempt ?? "")) occ += 1;
+  }
+  return occ;
+}
+
+function stageSummaryIndex(summary, role, summaries) {
+  const list = summaries || [];
+  const hasArts = rolesHaveArtifacts(summary.roles);
+  const artifactHint = artifactHintFromRoles(summary.roles);
+  const si = list.findIndex((s) => s.key === summary.key);
+  const occurrence =
+    si >= 0
+      ? occurrenceAmongMatches(list, si, (_item, i) => rolesHaveArtifacts(list[i].roles))
+      : 0;
+  return resolveStageLogIndex(currentRunData?.stages || [], {
+    stage: summary.stage,
+    attempt: summary.attempt,
+    role,
+    occurrence: hasArts ? occurrence : 0,
+    artifactHint,
+    hasRoleArtifacts: hasArts,
+  });
 }
 
 function renderWorkbenchStages(list, trace) {
@@ -1180,18 +1281,19 @@ function renderWorkbenchStages(list, trace) {
     list.innerHTML = '<p class="empty-state">No stages yet.</p>';
     return;
   }
-  list.innerHTML = summaries.map((summary) => {
-    const selected = stageSummaryIndex(summary) === currentStageIndex;
+  list.innerHTML = summaries.map((summary, summaryIndex) => {
+    const selected = stageSummaryIndex(summary, null, summaries) === currentStageIndex;
     const expanded = expandedStageKey === summary.key;
     const cycle = summary.repeatName ? `第 ${summary.iteration || 1} 轮` : "";
     const meta = [cycle, summary.durationMs != null ? formatDuration(summary.durationMs) : ""].filter(Boolean).join(" · ");
     const detailId = `stage-detail-${summary.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-    const roles = summary.roles.map((role) => `<button type="button" class="stage-role-row" data-stage="${escAttr(summary.stage)}" data-attempt="${escAttr(String(summary.attempt))}" data-role="${escAttr(role.role)}">
+    const occurrence = occurrenceAmongMatches(summaries, summaryIndex);
+    const roles = summary.roles.map((role) => `<button type="button" class="stage-role-row" data-key="${escAttr(summary.key)}" data-stage="${escAttr(summary.stage)}" data-attempt="${escAttr(String(summary.attempt))}" data-role="${escAttr(role.role)}" data-occurrence="${occurrence}">
       <span class="stage-dot ${role.gatePassed === true ? "passed" : role.gatePassed === false ? "failed" : "pending"}"></span>
       <span>${escHtml(role.role === "command" ? "测试命令" : role.role)}</span>
     </button>`).join("");
     return `<div class="stage-workbench">
-      <button type="button" class="stage-workbench-card${selected ? " active" : ""}" data-stage="${escAttr(summary.stage)}" data-attempt="${escAttr(String(summary.attempt))}" aria-pressed="${selected ? "true" : "false"}">
+      <button type="button" class="stage-workbench-card${selected ? " active" : ""}" data-key="${escAttr(summary.key)}" data-stage="${escAttr(summary.stage)}" data-attempt="${escAttr(String(summary.attempt))}" data-occurrence="${occurrence}" aria-pressed="${selected ? "true" : "false"}">
         <span class="stage-dot ${summary.status === "passed" ? "passed" : summary.status === "failed" ? "failed" : "pending"}"></span>
         <span class="stage-card-copy"><span class="stage-card-title">${escHtml(formatStageLabel(summary.stage))}</span><span class="stage-card-meta">${escHtml(meta || "—")}</span></span>
         <span class="stage-status ${summary.status}">${formatStageStatus(summary.status)}</span>
@@ -1207,8 +1309,8 @@ function renderWorkbenchStages(list, trace) {
   }).join("");
   list.querySelectorAll(".stage-workbench-card").forEach((el) => {
     el.addEventListener("click", () => {
-      const summary = summaries.find((s) => s.stage === el.dataset.stage && String(s.attempt) === String(el.dataset.attempt));
-      const idx = summary ? stageSummaryIndex(summary) : -1;
+      const summary = summaries.find((s) => s.key === el.dataset.key);
+      const idx = summary ? stageSummaryIndex(summary, null, summaries) : -1;
       if (idx >= 0) selectStage(idx);
     });
   });
@@ -1220,8 +1322,8 @@ function renderWorkbenchStages(list, trace) {
   });
   list.querySelectorAll(".stage-role-row").forEach((el) => {
     el.addEventListener("click", () => {
-      const summary = summaries.find((s) => s.stage === el.dataset.stage && String(s.attempt) === String(el.dataset.attempt));
-      const idx = summary ? stageSummaryIndex(summary, el.dataset.role) : -1;
+      const summary = summaries.find((s) => s.key === el.dataset.key);
+      const idx = summary ? stageSummaryIndex(summary, el.dataset.role, summaries) : -1;
       if (idx >= 0) selectStage(idx);
     });
   });
