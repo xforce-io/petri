@@ -1,4 +1,7 @@
 persona: soul.md
+# Codex GPT-5.6 Terra + high reasoning (provider.review.reasoning_effort).
+provider: review
+model: terra
 playbooks:
   - petri:file_operations
   - review

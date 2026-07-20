@@ -192,28 +192,31 @@ defaults:
 
 `role.yaml` 可用可选的 `provider` 选择 `petri.yaml.providers` 中的命名 Provider；未设置时沿用默认模型对应的 Provider（保持旧项目行为）。角色的 `model` 与该 Provider 的命名模型应匹配，错误引用会在 `petri validate` 或运行前报错，不会静默回退。
 
+内置 **code-dev** 模板：`issue` / `design` / `develop` 默认 **Grok**；**`code_reviewer`** 使用 **Codex** 模型 **`gpt-5.6-terra`**，并通过 `providers.review.reasoning_effort: high` 在每次 `codex exec` 上钉死 **reasoning effort high**（不依赖 `~/.codex/config.toml`）。已 `petri init` 的旧项目需手改 `petri.yaml` / `role.yaml` 才会生效。
+
 ```yaml
-# petri.yaml
+# petri.yaml — code-dev 风格：review 单独走 Codex terra high
 providers:
-  coding:
-    type: codex
-  review:
+  default:
     type: grok
-models:
-  coding:
-    provider: coding
-    model: default
   review:
-    provider: review
+    type: codex
+    reasoning_effort: high   # → codex -c model_reasoning_effort=high
+models:
+  default:
+    provider: default
     model: default
+  terra:
+    provider: review
+    model: gpt-5.6-terra     # → codex -m gpt-5.6-terra
 defaults:
-  model: coding
+  model: default
   gate_strategy: all
   max_retries: 3
 
 # roles/code_reviewer/role.yaml
 provider: review
-model: review
+model: terra
 ```
 
 没有 `provider` 配置时仍使用历史选择规则：**grok > codex > claude_code > milkie > pi**；空 `providers` 时为 **grok**。

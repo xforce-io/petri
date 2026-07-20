@@ -134,6 +134,11 @@ export type ProviderType = "pi" | "claude_code" | "codex" | "milkie" | "grok";
 
 export interface ProviderConfig {
   type: ProviderType;
+  /**
+   * Codex only: pin `model_reasoning_effort` on every `codex exec` invocation
+   * (e.g. `high`). Does not apply to other provider types.
+   */
+  reasoning_effort?: string;
 }
 
 export interface ModelConfig {

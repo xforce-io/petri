@@ -1,13 +1,20 @@
-# code-dev defaults to Grok. To route a specific role elsewhere, add another
-# named provider/model here and set `provider` + `model` in that role.yaml.
+# code-dev defaults to Grok for issue/design/develop. code_reviewer uses Codex
+# GPT-5.6 Terra with reasoning effort high (see roles/code_reviewer/role.yaml).
 providers:
   default:
     type: grok
+  review:
+    type: codex
+    # Pin effort on every codex exec — does not rely on ~/.codex/config.toml.
+    reasoning_effort: high
 
 models:
   default:
     provider: default
     model: default
+  terra:
+    provider: review
+    model: gpt-5.6-terra
 
 defaults:
   model: default

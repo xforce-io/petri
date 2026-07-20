@@ -32,6 +32,23 @@ describe("buildCodexArgs / planCodexCli", () => {
     expect(args).not.toContain("-m");
   });
 
+  it("maps model alias to CLI id and pins reasoning effort high", () => {
+    const args = buildCodexArgs({
+      artifactDir: "/tmp/art",
+      lastMessageFile: "/tmp/art/last.txt",
+      model: "terra",
+      modelMappings: { terra: "gpt-5.6-terra", default: "default" },
+      reasoningEffort: "high",
+    });
+    expect(args).toContain("-m");
+    expect(args).toContain("gpt-5.6-terra");
+    expect(args).not.toContain("terra");
+    const cIdx = args.indexOf("-c");
+    expect(cIdx).toBeGreaterThanOrEqual(0);
+    expect(args[cIdx + 1]).toBe("model_reasoning_effort=high");
+    expect(args.join(" ")).toContain("model_reasoning_effort=high");
+  });
+
   it("plans a command that cats the prompt into codex exec", () => {
     const plan = planCodexCli(
       { artifactDir: "/work/artifacts", model: "default" },
@@ -44,6 +61,22 @@ describe("buildCodexArgs / planCodexCli", () => {
     expect(plan.command).toContain("_prompt.md");
     expect(plan.command).toContain("exec");
     expect(plan.command).toContain("_codex_stdout.txt");
+  });
+
+  it("plans terra high command with mapped model and effort override", () => {
+    const plan = planCodexCli(
+      {
+        artifactDir: "/work/artifacts",
+        model: "terra",
+        modelMappings: { terra: "gpt-5.6-terra" },
+        reasoningEffort: "high",
+      },
+      "/usr/bin/true",
+    );
+    expect(plan.args).toContain("gpt-5.6-terra");
+    expect(plan.args).toContain("model_reasoning_effort=high");
+    expect(plan.command).toContain("gpt-5.6-terra");
+    expect(plan.command).toContain("model_reasoning_effort=high");
   });
 });
 
