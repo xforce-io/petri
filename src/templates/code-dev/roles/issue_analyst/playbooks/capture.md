@@ -3,8 +3,9 @@ Capture the user input as a structured issue brief.
 ## Steps
 
 1. **Read the input** — Treat the pipeline input as the raw issue / request. If
-   it begins with `# GitHub Issue Source`, preserve its source URL, metadata,
-   body, and comments; do not discard decisions made in comments.
+   it begins with `# Issue Source` or legacy `# GitHub Issue Source`, preserve its
+   source URL, platform metadata, body, and comments; do not discard decisions
+   made in comments.
 2. **Write `issue.md`** covering:
    - **Title** — one-line outcome
    - **Background** — why this matters
@@ -12,8 +13,8 @@ Capture the user input as a structured issue brief.
    - **Acceptance criteria** — checklist of observable pass conditions
    - **Out of scope** — explicit non-goals
    - **Open questions** — unknowns (or "none")
-   - **Source and discussion** — for a GitHub Issue input, include the source
-     URL plus the relevant comment decisions (or say that no comments exist)
+   - **Source and discussion** — for a forge Issue Source input, include the
+     source URL plus the relevant comment decisions (or say that no comments exist)
 3. **Write the gate artifact:**
 
 ```json
@@ -21,7 +22,7 @@ Capture the user input as a structured issue brief.
 {
   "accepted": true,
   "summary": "One-sentence summary of the issue",
-  "source_url": "https://github.com/owner/repo/issues/123",
+  "source_url": "https://host/group/project/-/issues/123",
   "comment_count": 2
 }
 ```
