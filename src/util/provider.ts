@@ -4,7 +4,7 @@ import { CodexProvider } from "../providers/codex.js";
 import { GrokProvider } from "../providers/grok.js";
 import { MilkieProvider, type MilkieModelMapping } from "../providers/milkie.js";
 import { PiProvider } from "../providers/pi.js";
-import type { AgentProvider, PetriConfig, ProviderType } from "../types.js";
+import type { AgentProvider, PetriConfig, ProviderConfig, ProviderType } from "../types.js";
 
 export interface ProviderRegistry {
   providers: Record<string, AgentProvider>;
@@ -48,7 +48,7 @@ export function createProviderRegistry(petriConfig: PetriConfig): ProviderRegist
   const providers: Record<string, AgentProvider> = {};
 
   for (const [name, config] of providerEntries) {
-    providers[name] = createProvider(config.type, petriConfig);
+    providers[name] = createProvider(config.type, petriConfig, config);
   }
 
   const defaultProviderName = resolveDefaultProviderName(petriConfig);
@@ -105,14 +105,27 @@ function resolveDefaultProviderName(petriConfig: PetriConfig): string {
   return providerEntries.find(([, config]) => config.type === selectedType)?.[0] ?? "default";
 }
 
-function createProvider(selected: ProviderType, petriConfig: PetriConfig): AgentProvider {
+function createProvider(
+  selected: ProviderType,
+  petriConfig: PetriConfig,
+  providerConfig?: ProviderConfig,
+): AgentProvider {
   const defaultModel = petriConfig.defaults.model;
 
   switch (selected) {
     case "grok":
       return new GrokProvider(defaultModel);
-    case "codex":
-      return new CodexProvider(defaultModel);
+    case "codex": {
+      const modelMappings: Record<string, string> = {};
+      for (const [alias, modelCfg] of Object.entries(petriConfig.models ?? {})) {
+        modelMappings[alias] = modelCfg.model;
+      }
+      return new CodexProvider({
+        defaultModel,
+        modelMappings,
+        reasoningEffort: providerConfig?.reasoning_effort,
+      });
+    }
     case "claude_code":
       return new ClaudeCodeProvider(defaultModel);
     case "milkie": {

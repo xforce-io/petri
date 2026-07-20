@@ -1,7 +1,7 @@
 Review the developer's code against the issue brief and design document.
-You run through the Agent Provider selected by this role's `role.yaml`; when no
-role provider is set, the project default applies (the bundled code-dev default
-is the **Grok CLI**).
+You run through the Agent Provider selected by this role's `role.yaml`. The
+bundled code-dev template routes this role to **Codex** (`gpt-5.6-terra`) with
+**reasoning effort high**; other roles keep the project default (Grok).
 
 ## Steps
 

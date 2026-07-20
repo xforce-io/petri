@@ -31,12 +31,15 @@ function walkStages(entries: StageEntry[], visit: (e: StageEntry) => void): void
 }
 
 describe("code-dev template topology (issue #42 flow)", () => {
-  it("loads real YAML with issue → design → develop → unit_test command → review + grok", () => {
+  it("loads real YAML with issue → design → develop → unit_test command → review + grok/codex", () => {
     const petri = loadPetriConfig(templateDir);
     const pipeline = loadPipelineConfig(templateDir);
 
-    // Grok is the template default provider; roles may now override it.
+    // Grok is the template default; code_reviewer uses named Codex (terra high).
     expect(Object.values(petri.providers).some((p) => p.type === "grok")).toBe(true);
+    expect(petri.providers.review?.type).toBe("codex");
+    expect(petri.providers.review?.reasoning_effort).toBe("high");
+    expect(petri.models.terra?.model).toBe("gpt-5.6-terra");
 
     const stageNames: string[] = [];
     let hasCommandUnitTest = false;
@@ -80,8 +83,11 @@ describe("code-dev template topology (issue #42 flow)", () => {
       fs.readFileSync(path.join(templateDir, "roles/developer/playbooks/implement.md"), "utf-8"),
     ).toMatch(/TDD|tests first/i);
     expect(
+      fs.readFileSync(path.join(templateDir, "roles/code_reviewer/role.yaml"), "utf-8"),
+    ).toMatch(/provider:\s*review/);
+    expect(
       fs.readFileSync(path.join(templateDir, "roles/code_reviewer/playbooks/review.md"), "utf-8"),
-    ).toMatch(/[Gg]rok/);
+    ).toMatch(/[Cc]odex|terra|gpt-5\.6-terra/i);
   });
 });
 
@@ -168,9 +174,11 @@ describe("Integration: code-dev pipeline end-to-end", () => {
       },
     };
 
-    // 4. Run the Engine with the real pipeline (includes real unit_test command stage)
+    // 4. Run the Engine with the real pipeline (includes real unit_test command stage).
+    // code_reviewer selects named provider "review"; map both names to the stub.
     const engine = new Engine({
-      provider: stubProvider,
+      providers: { default: stubProvider, review: stubProvider },
+      defaultProviderName: "default",
       roles,
       artifactBaseDir,
       defaultGateStrategy: petriConfig.defaults.gate_strategy,
@@ -276,7 +284,8 @@ describe("Integration: code-dev pipeline end-to-end", () => {
     };
 
     const engine = new Engine({
-      provider: stubProvider,
+      providers: { default: stubProvider, review: stubProvider },
+      defaultProviderName: "default",
       roles,
       artifactBaseDir,
       defaultGateStrategy: petriConfig.defaults.gate_strategy,

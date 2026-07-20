@@ -55,7 +55,17 @@ describe("applyTemplate", () => {
     expect(fs.existsSync(path.join(target, "roles", "developer", "role.yaml"))).toBe(true);
     expect(fs.existsSync(path.join(target, "roles", "designer", "soul.md"))).toBe(true);
     expect(fs.existsSync(path.join(target, "roles", "issue_analyst", "role.yaml"))).toBe(true);
-    expect(fs.readFileSync(path.join(target, "petri.yaml"), "utf-8")).toMatch(/type:\s*grok/);
+    const petriYaml = fs.readFileSync(path.join(target, "petri.yaml"), "utf-8");
+    expect(petriYaml).toMatch(/type:\s*grok/);
+    expect(petriYaml).toMatch(/type:\s*codex/);
+    expect(petriYaml).toMatch(/reasoning_effort:\s*high/);
+    expect(petriYaml).toMatch(/gpt-5\.6-terra/);
+    const reviewerRole = fs.readFileSync(
+      path.join(target, "roles", "code_reviewer", "role.yaml"),
+      "utf-8",
+    );
+    expect(reviewerRole).toMatch(/provider:\s*review/);
+    expect(reviewerRole).toMatch(/model:\s*terra/);
     expect(fs.readFileSync(path.join(target, "pipeline.yaml"), "utf-8")).toMatch(/unit_test/);
   });
 

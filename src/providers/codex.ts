@@ -11,6 +11,17 @@ export interface CodexProviderOptions {
   /** Override binary path (tests / PETRI_CODEX_BIN). */
   binary?: string;
   defaultModel?: string;
+  /**
+   * Map petri.yaml model alias → CLI model id (ModelConfig.model).
+   * When the agent config model is an alias present here, the mapped id is
+   * passed to `codex -m`.
+   */
+  modelMappings?: Record<string, string>;
+  /**
+   * When set, every invocation gets `-c model_reasoning_effort=<value>`
+   * so effort does not depend on ~/.codex/config.toml.
+   */
+  reasoningEffort?: string;
 }
 
 export interface CodexCliPlan {
@@ -22,11 +33,24 @@ export interface CodexCliPlan {
   command: string;
 }
 
+/** Resolve role/default model alias to the CLI model id for codex -m. */
+export function resolveCodexCliModel(
+  model: string | undefined,
+  modelMappings?: Record<string, string>,
+): string | undefined {
+  if (!model) return undefined;
+  const mapped = modelMappings?.[model];
+  if (mapped !== undefined) return mapped;
+  return model;
+}
+
 /** Pure: assemble `codex exec` argv (prompt is fed via stdin from prompt file). */
 export function buildCodexArgs(input: {
   artifactDir: string;
   lastMessageFile: string;
   model?: string;
+  modelMappings?: Record<string, string>;
+  reasoningEffort?: string;
 }): string[] {
   const args = [
     "exec",
@@ -39,8 +63,13 @@ export function buildCodexArgs(input: {
     input.lastMessageFile,
     "--dangerously-bypass-approvals-and-sandbox",
   ];
-  if (input.model && input.model !== "default") {
-    args.push("-m", input.model);
+  const cliModel = resolveCodexCliModel(input.model, input.modelMappings);
+  if (cliModel && cliModel !== "default") {
+    args.push("-m", cliModel);
+  }
+  if (input.reasoningEffort) {
+    // Codex accepts -c key=value overrides (see `codex exec --help`).
+    args.push("-c", `model_reasoning_effort=${input.reasoningEffort}`);
   }
   // Prompt read from stdin (piped from prompt file).
   args.push("-");
@@ -57,7 +86,10 @@ export function findCodexBinary(override?: string): string {
 }
 
 export function planCodexCli(
-  config: Pick<AgentConfig, "artifactDir" | "model">,
+  config: Pick<AgentConfig, "artifactDir" | "model"> & {
+    modelMappings?: Record<string, string>;
+    reasoningEffort?: string;
+  },
   binary?: string,
 ): CodexCliPlan {
   const bin = findCodexBinary(binary);
@@ -68,6 +100,8 @@ export function planCodexCli(
     artifactDir: config.artifactDir,
     lastMessageFile,
     model: config.model,
+    modelMappings: config.modelMappings,
+    reasoningEffort: config.reasoningEffort,
   });
   const quotedArgs = args.map((a) => shellQuote(a)).join(" ");
   // Feed prompt via stdin so long prompts avoid ARG_MAX / shell escaping issues.
@@ -82,13 +116,18 @@ function shellQuote(s: string): string {
 export class CodexProvider implements AgentProvider {
   private defaultModel: string;
   private binary?: string;
+  private modelMappings: Record<string, string>;
+  private reasoningEffort?: string;
 
   constructor(defaultModelOrOptions: string | CodexProviderOptions = "default") {
     if (typeof defaultModelOrOptions === "string") {
       this.defaultModel = defaultModelOrOptions;
+      this.modelMappings = {};
     } else {
       this.defaultModel = defaultModelOrOptions.defaultModel ?? "default";
       this.binary = defaultModelOrOptions.binary;
+      this.modelMappings = defaultModelOrOptions.modelMappings ?? {};
+      this.reasoningEffort = defaultModelOrOptions.reasoningEffort;
     }
   }
 
@@ -103,8 +142,14 @@ export class CodexProvider implements AgentProvider {
     const fullPrompt = `${systemPrompt}\n\n---\n\n${config.context}`;
 
     mkdirSync(config.artifactDir, { recursive: true });
+    const model = config.model || this.defaultModel;
     const plan = planCodexCli(
-      { artifactDir: config.artifactDir, model: config.model || this.defaultModel },
+      {
+        artifactDir: config.artifactDir,
+        model,
+        modelMappings: this.modelMappings,
+        reasoningEffort: this.reasoningEffort,
+      },
       this.binary,
     );
     writeFileSync(plan.promptFile, fullPrompt, "utf-8");
@@ -126,12 +171,15 @@ export class CodexProvider implements AgentProvider {
       : "";
     const stdout = existsSync(plan.stdoutFile) ? readFileSync(plan.stdoutFile, "utf-8") : "";
     const finishedAt = new Date();
+    const cliModel = resolveCodexCliModel(model, this.modelMappings) ?? model;
     writeFileSync(
       join(config.artifactDir, "_agent_run.json"),
       JSON.stringify(
         {
           provider: "codex",
-          model: config.model || this.defaultModel,
+          model,
+          cli_model: cliModel,
+          reasoning_effort: this.reasoningEffort ?? null,
           command: plan.command,
           cwd: config.artifactDir,
           stdout_path: plan.stdoutFile,
