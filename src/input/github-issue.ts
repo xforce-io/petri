@@ -173,7 +173,8 @@ function formatIssueInput(
       comment.body?.trim() || "(empty comment)",
     ].join("\n\n")).join("\n\n");
   return [
-    "# GitHub Issue Source",
+    "# Issue Source",
+    "Platform: github",
     `Source URL: ${source.url}`,
     `Repository: ${source.owner}/${source.repo}`,
     `Issue: #${source.number}`,

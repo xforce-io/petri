@@ -14,7 +14,7 @@ import { currentGeneratedHashes, loadGeneratedManifest, sha256 } from "../engine
 import { acquireLock, releaseLock, killProcessTree } from "../engine/lock.js";
 import { loadBranch, normalizeRunId, runRootForBranch } from "../engine/branch.js";
 import { createProviderRegistryFromConfig, validateRoleProviderConfig } from "../util/provider.js";
-import { resolveGitHubIssueInput } from "../input/github-issue.js";
+import { resolveIssueInput } from "../input/issue-input.js";
 import type { LoadedRole } from "../types.js";
 
 interface RunOptions {
@@ -174,7 +174,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   }
 
   try {
-    input = resolveGitHubIssueInput({ projectDir: cwd, input }).input;
+    input = resolveIssueInput({ projectDir: cwd, input }).input;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(chalk.red(message));

@@ -240,17 +240,21 @@ petri validate                     # Check configuration
 petri web [--port <number>]        # Web dashboard
 ```
 
-### 从 GitHub Issue 启动 code-dev
+### 从 GitHub / GitLab Issue 启动 code-dev
 
-可把当前项目仓库的 GitHub Issue URL 直接作为输入：
+可把当前项目仓库的 Issue URL 直接作为输入（**一条** code-dev 流程；按 forge 自动选 adapter）：
 
 ```bash
+# GitHub（需已登录的 gh CLI）
 petri run --input https://github.com/<owner>/<repo>/issues/<number>
+
+# GitLab（含自建 host；需 GITLAB_API_TOKEN，或已登录的 glab）
+petri run --input https://<gitlab-host>/<group>/<project>/-/issues/<number>
 ```
 
-Petri 会通过已登录的 `gh` CLI 读取 Issue 正文和全部评论，再将它们传给
-`issue_analyst`。URL 必须属于当前 Git `origin`；无权限、Issue 不存在或评论
-读取失败时，运行会在启动前明确失败，不会退化为不完整的纯文本需求。
+Petri 会读取 Issue 正文和全部评论，再传给 `issue_analyst`。URL 必须属于当前
+Git `origin`（GitHub：同 owner/repo；GitLab：同 host + project path）。无权限、
+Issue 不存在或评论读取失败时，运行会在启动前明确失败，不会退化为不完整的纯文本需求。
 
 ### 断点续跑与流程链路
 
