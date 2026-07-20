@@ -135,5 +135,5 @@ sequenceDiagram
 
 - Issue: #61
 - Related: #49, `docs/design/49-issue-url-context.md`
-- PR: （合并请求创建后回填）
+- PR: https://github.com/xforce-io/petri/pull/62
 - 模块：`src/input/*`、`src/cli/run.ts`、`src/web/routes/api.ts`、`src/templates/code-dev/roles/issue_analyst/`
