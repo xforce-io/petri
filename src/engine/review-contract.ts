@@ -2,6 +2,9 @@ export interface ReviewFinding {
   id: string;
   severity: string;
   description: string;
+  /** When true, this finding blocks approval (HIGH without this flag does not). */
+  blocks_approval?: boolean;
+  file?: string;
 }
 
 export interface PreviousFindingResolution {
@@ -15,11 +18,23 @@ export interface ReviewAcceptance {
   status: "passed" | "failed" | "not_tested";
 }
 
+export interface ReviewFollowUp {
+  id: string;
+  description: string;
+}
+
 export interface ReviewContractDocument {
   approved: boolean;
   findings: ReviewFinding[];
   previous_findings?: PreviousFindingResolution[];
   acceptance?: ReviewAcceptance[];
+  /** Residual items deferred after soft approve (last-round exit). */
+  followups?: ReviewFollowUp[];
+  /**
+   * When true, allow at most one blocking HIGH (listed in followups) while
+   * still setting approved: true. CRITICAL still always blocks.
+   */
+  approved_with_followups?: boolean;
 }
 
 export interface ReviewContractResult {
@@ -27,8 +42,32 @@ export interface ReviewContractResult {
   errors: string[];
 }
 
+export interface ExhaustionPatchItem {
+  id: string;
+  severity: string;
+  description: string;
+  file?: string;
+}
+
+export interface ExhaustionReport {
+  reason: string;
+  resume_hint: string;
+  minimal_patch: ExhaustionPatchItem[];
+  max_iterations: number;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Whether a finding alone blocks harness approval (#69).
+ * CRITICAL always blocks. HIGH/MEDIUM/LOW block only with blocks_approval: true.
+ */
+export function findingBlocksApproval(finding: ReviewFinding): boolean {
+  const sev = finding.severity.toUpperCase();
+  if (sev === "CRITICAL") return true;
+  return finding.blocks_approval === true;
 }
 
 function asFindings(value: unknown, errors: string[]): ReviewFinding[] {
@@ -49,7 +88,18 @@ function asFindings(value: unknown, errors: string[]): ReviewFinding[] {
       errors.push(`finding ${raw.id} requires severity and description`);
       continue;
     }
-    findings.push({ id: raw.id, severity: raw.severity, description: raw.description });
+    const finding: ReviewFinding = {
+      id: raw.id,
+      severity: raw.severity,
+      description: raw.description,
+    };
+    if (typeof raw.blocks_approval === "boolean") {
+      finding.blocks_approval = raw.blocks_approval;
+    }
+    if (typeof raw.file === "string") {
+      finding.file = raw.file;
+    }
+    findings.push(finding);
   }
   return findings;
 }
@@ -66,9 +116,33 @@ function asHistoricalFindings(value: unknown): ReviewFinding[] {
   return errors.length === 0 ? findings : [];
 }
 
+function asFollowups(value: unknown, errors: string[]): ReviewFollowUp[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    errors.push("followups must be an array when present");
+    return [];
+  }
+  const out: ReviewFollowUp[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.description !== "string") {
+      errors.push("each followup requires id and description");
+      continue;
+    }
+    out.push({ id: raw.id, description: raw.description });
+  }
+  return out;
+}
+
 /**
  * Validate only the deterministic shape and state relationships of a review.
  * It deliberately does not decide whether a finding is factually correct.
+ *
+ * Approval rules (#69):
+ * - acceptance all passed; previous findings all fixed
+ * - CRITICAL always blocks
+ * - HIGH/MEDIUM/LOW block only when blocks_approval: true
+ * - approved_with_followups: at most one blocking HIGH, each blocking finding
+ *   must appear in followups; CRITICAL still disallowed
  */
 export function validateReviewContract(currentRaw: unknown, previousRaw?: unknown): ReviewContractResult {
   const errors: string[] = [];
@@ -99,7 +173,11 @@ export function validateReviewContract(currentRaw: unknown, previousRaw?: unknow
       if (raw.status === "deferred" && (typeof raw.reason !== "string" || raw.reason.trim() === "")) {
         errors.push(`deferred finding ${raw.id} requires a reason`);
       }
-      resolutions.set(raw.id, { id: raw.id, status: raw.status as PreviousFindingResolution["status"], reason: typeof raw.reason === "string" ? raw.reason : undefined });
+      resolutions.set(raw.id, {
+        id: raw.id,
+        status: raw.status as PreviousFindingResolution["status"],
+        reason: typeof raw.reason === "string" ? raw.reason : undefined,
+      });
     }
   }
   for (const finding of previousFindings) {
@@ -127,13 +205,14 @@ export function validateReviewContract(currentRaw: unknown, previousRaw?: unknow
     }
   }
 
+  const followups = asFollowups(currentRaw.followups, errors);
+  const softApprove = currentRaw.approved_with_followups === true;
+  const followupIds = new Set(followups.map((f) => f.id));
+
   if (currentRaw.approved) {
     for (const item of acceptance) {
-      if (item.status !== "passed") errors.push(`approved review has incomplete acceptance: ${item.id}`);
-    }
-    for (const finding of currentFindings) {
-      if (["CRITICAL", "HIGH"].includes(finding.severity.toUpperCase())) {
-        errors.push(`approved review contains ${finding.severity} finding: ${finding.id}`);
+      if (item.status !== "passed") {
+        errors.push(`approved review has incomplete acceptance: ${item.id}`);
       }
     }
     for (const resolution of resolutions.values()) {
@@ -141,7 +220,98 @@ export function validateReviewContract(currentRaw: unknown, previousRaw?: unknow
         errors.push(`approved review has ${resolution.status} previous finding: ${resolution.id}`);
       }
     }
+
+    const blockers = currentFindings.filter(findingBlocksApproval);
+    const critical = blockers.filter((f) => f.severity.toUpperCase() === "CRITICAL");
+    const blockingHigh = blockers.filter((f) => f.severity.toUpperCase() === "HIGH");
+    const otherBlockers = blockers.filter(
+      (f) => !["CRITICAL", "HIGH"].includes(f.severity.toUpperCase()),
+    );
+
+    if (critical.length > 0) {
+      for (const f of critical) {
+        errors.push(`approved review contains CRITICAL finding: ${f.id}`);
+      }
+    }
+
+    if (softApprove) {
+      if (blockingHigh.length > 1) {
+        errors.push(
+          `approved_with_followups allows at most 1 blocking HIGH (found ${blockingHigh.length})`,
+        );
+      }
+      for (const f of blockingHigh) {
+        if (!followupIds.has(f.id)) {
+          errors.push(`blocking finding ${f.id} must be listed in followups for soft approve`);
+        }
+      }
+      for (const f of otherBlockers) {
+        if (!followupIds.has(f.id)) {
+          errors.push(`blocking finding ${f.id} must be listed in followups for soft approve`);
+        }
+      }
+      // Soft path still requires followups when residual blockers exist
+      if (blockers.length > 0 && followups.length === 0) {
+        errors.push("approved_with_followups requires followups for residual blockers");
+      }
+    } else {
+      for (const f of blockers) {
+        const label =
+          f.severity.toUpperCase() === "CRITICAL"
+            ? "CRITICAL"
+            : f.blocks_approval
+              ? "blocking"
+              : f.severity;
+        errors.push(`approved review contains ${label} finding: ${f.id}`);
+      }
+    }
   }
 
   return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Machine/human-usable report when develop-review-cycle hits max_iterations (#69).
+ */
+export function buildExhaustionReport(
+  lastReview: unknown,
+  maxIterations: number,
+): ExhaustionReport {
+  const resume_hint =
+    "petri run --skip-to develop  # or --skip-to unit_test after applying the minimal patch";
+  const minimal_patch: ExhaustionPatchItem[] = [];
+
+  if (isRecord(lastReview) && Array.isArray(lastReview.findings)) {
+    const errors: string[] = [];
+    const findings = asFindings(lastReview.findings, errors);
+    for (const f of findings) {
+      if (!findingBlocksApproval(f)) continue;
+      minimal_patch.push({
+        id: f.id,
+        severity: f.severity,
+        description: f.description,
+        file: f.file,
+      });
+    }
+  }
+
+  const patchSummary =
+    minimal_patch.length === 0
+      ? "no explicit blocking findings in last review (check acceptance / previous_findings)"
+      : minimal_patch
+          .map((p) => `${p.id} [${p.severity}] ${p.description}${p.file ? ` (${p.file})` : ""}`)
+          .join("; ");
+
+  const reason = [
+    `Max iterations (${maxIterations}) exhausted`,
+    `minimal patch: ${patchSummary}`,
+    `resume: ${resume_hint}`,
+  ].join(" — ");
+
+  return {
+    reason,
+    resume_hint,
+    minimal_patch,
+    max_iterations: maxIterations,
+  };
 }

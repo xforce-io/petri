@@ -7,7 +7,7 @@ Implement the project with **TDD**, based on the issue brief and design artifact
 3. **Write tests first (TDD red)** — Implement the tests described in the design's test plan. Tests should fail initially when there is no implementation yet.
 4. **Write the implementation (TDD green)** — Build each component according to the design. Run tests frequently as you go.
 5. **Run all tests** — Execute the full test suite. Every test must pass.
-6. **Leave the real project runnable** — The deterministic `unit_test` stage runs from the source workspace root. Ensure its `package.json` test script or Python `pytest` suite works there; otherwise configure `unit_test.command` for the project runner. Write only the role gate artifact to the evidence directory.
+6. **Leave the real project runnable** — The deterministic `unit_test` stage runs a **pure** suite from the source workspace root (`npm test` or `python -m pytest`). Do not rely on lint-bundled wrappers (e.g. `tests/run_tests.sh unit` that runs full-repo ruff first) for the harness gate; if the project needs a custom pure command, configure `unit_test.command` in the pipeline. Write only the role gate artifact to the evidence directory.
 7. **Write the gate artifact:**
 
 ```json
