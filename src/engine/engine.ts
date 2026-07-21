@@ -7,7 +7,7 @@ import { basename, isAbsolute, join } from "node:path";
 import { ArtifactManifest } from "./manifest.js";
 import { checkGates, resolveGatePath, type GateInput, type GateDetail } from "./gate.js";
 import { buildContext } from "./context.js";
-import { validateReviewContract } from "./review-contract.js";
+import { buildExhaustionReport, validateReviewContract } from "./review-contract.js";
 import {
   formatCommandConfigFailure,
   formatCommandExecFailure,
@@ -745,11 +745,85 @@ export class Engine {
       this.logger?.endRepeatIteration("failed");
     }
 
+    // #69: max-iterations exit includes minimal patch list + resume guidance
+    const exhaustion = this.buildRepeatExhaustion(block, manifest);
     return {
       status: "blocked",
       stage: block.name,
-      reason: `Max iterations (${block.max_iterations}) exhausted`,
+      reason: exhaustion.reason,
     };
+  }
+
+  /**
+   * Collect last review evidence for until-gate (including archived attempts)
+   * and format exhaustion report with minimal patch + resume guidance.
+   */
+  private buildRepeatExhaustion(
+    block: {
+      name: string;
+      max_iterations: number;
+      until: string;
+      stages: import("../types.js").StageEntry[];
+    },
+    manifest: ArtifactManifest,
+  ): { reason: string } {
+    let lastReview: unknown;
+    for (const entry of block.stages) {
+      if (isRepeatBlock(entry) || isCommandStage(entry)) continue;
+      for (const roleName of entry.roles) {
+        const role = this.roles[roleName];
+        const gate = role?.gate;
+        if (!gate || gate.id !== block.until) continue;
+        if (gate.contract?.type !== "review") continue;
+
+        // Prefer live path; then manifest latest; then scan archived attempts/
+        // (gate failures archive evidence even when agents omit paths from collect).
+        const livePath = join(
+          this.artifactBaseDir,
+          resolveGatePath(gate.evidence.path, entry.name, roleName),
+        );
+        const fromManifest = manifest.latestPath(entry.name, roleName, "review.json");
+        const fromArchive = this.findLatestArchivedReview(entry.name, roleName);
+        const reviewPath = [livePath, fromManifest, fromArchive].find(
+          (p): p is string => typeof p === "string" && existsSync(p),
+        );
+        if (!reviewPath) continue;
+        try {
+          lastReview = JSON.parse(readFileSync(reviewPath, "utf-8"));
+        } catch {
+          lastReview = undefined;
+        }
+      }
+    }
+
+    const report = buildExhaustionReport(lastReview, block.max_iterations);
+    try {
+      const outDir = join(this.artifactBaseDir, block.name);
+      mkdirSync(outDir, { recursive: true });
+      writeFileSync(
+        join(outDir, "exhaustion.json"),
+        JSON.stringify(report, null, 2) + "\n",
+        "utf-8",
+      );
+    } catch {
+      // best-effort artifact; reason string still carries the guidance
+    }
+    return { reason: report.reason };
+  }
+
+  /** Highest-numbered archived review.json under role attempts directory. */
+  private findLatestArchivedReview(stage: string, role: string): string | null {
+    const attemptsDir = join(this.artifactBaseDir, stage, role, "attempts");
+    if (!existsSync(attemptsDir)) return null;
+    let best: { n: number; path: string } | null = null;
+    for (const name of readdirSync(attemptsDir)) {
+      const n = Number(name);
+      if (!Number.isInteger(n) || n < 1) continue;
+      const candidate = join(attemptsDir, name, "review.json");
+      if (!existsSync(candidate)) continue;
+      if (!best || n > best.n) best = { n, path: candidate };
+    }
+    return best?.path ?? null;
   }
 
   private detectRepeatStagnation(

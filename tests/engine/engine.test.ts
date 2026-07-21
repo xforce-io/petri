@@ -1121,4 +1121,79 @@ describe("Engine", () => {
     expect(cmdEntry.artifacts.length).toBeGreaterThan(0);
     expect(cmdEntry.artifacts.some((a: string) => a.includes("result.json"))).toBe(true);
   });
+
+  it("on max_iterations exhaust emits minimal patch list and resume guidance (#69)", async () => {
+    const reviewGate: GateConfig = {
+      id: "review-approved",
+      contract: { type: "review" },
+      evidence: {
+        path: "{stage}/{role}/review.json",
+        check: { field: "approved", equals: true },
+      },
+    };
+    const roles: Record<string, LoadedRole> = {
+      reviewer: makeRole("reviewer", reviewGate),
+    };
+
+    const provider = createStubProvider(() => {
+      const dir = path.join(tmpDir, "review", "reviewer");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, "review.json"),
+        JSON.stringify({
+          approved: false,
+          findings: [
+            {
+              id: "F-007",
+              severity: "HIGH",
+              description: "export blocked",
+              blocks_approval: true,
+              file: "src/export.ts",
+            },
+            { id: "F-006", severity: "MEDIUM", description: "nit" },
+          ],
+          previous_findings: [],
+          acceptance: [{ id: "S1", status: "passed" }],
+        }),
+      );
+    });
+
+    const pipeline: PipelineConfig = {
+      name: "exhaust-pipeline",
+      stages: [
+        {
+          repeat: {
+            name: "develop-review-cycle",
+            max_iterations: 2,
+            until: "review-approved",
+            stages: [{ name: "review", roles: ["reviewer"], max_retries: 0 }],
+          },
+        },
+      ],
+    };
+
+    const engine = new Engine({
+      provider,
+      roles,
+      artifactBaseDir: tmpDir,
+    });
+
+    const result = await engine.run(pipeline, "Exhaust");
+    expect(result.status).toBe("blocked");
+    expect(result.stage).toBe("develop-review-cycle");
+    expect(result.reason).toMatch(/Max iterations \(2\) exhausted/i);
+    expect(result.reason).toMatch(/F-007/);
+    expect(result.reason).toMatch(/skip-to develop|--skip-to/i);
+    expect(result.reason).not.toMatch(/F-006/);
+
+    const exhaustionPath = path.join(tmpDir, "develop-review-cycle", "exhaustion.json");
+    expect(fs.existsSync(exhaustionPath)).toBe(true);
+    const report = JSON.parse(fs.readFileSync(exhaustionPath, "utf-8"));
+    expect(report.minimal_patch).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "F-007", severity: "HIGH" }),
+      ]),
+    );
+    expect(report.resume_hint).toMatch(/--skip-to develop/);
+  });
 });

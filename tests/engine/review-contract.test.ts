@@ -38,10 +38,17 @@ describe("validateReviewContract", () => {
     expect(result.errors.join("\n")).toMatch(/F-2/);
   });
 
-  it("rejects approval with incomplete acceptance or unresolved high finding", () => {
+  it("rejects approval with incomplete acceptance or unresolved blocking finding", () => {
     const result = validateReviewContract({
       approved: true,
-      findings: [{ id: "F-3", severity: "HIGH", description: "still broken" }],
+      findings: [
+        {
+          id: "F-3",
+          severity: "HIGH",
+          description: "still broken",
+          blocks_approval: true,
+        },
+      ],
       previous_findings: [
         { id: "F-1", status: "fixed" },
         { id: "F-2", status: "deferred", reason: "needs product decision" },
@@ -50,7 +57,7 @@ describe("validateReviewContract", () => {
     }, previous);
     expect(result.valid).toBe(false);
     expect(result.errors.join("\n")).toMatch(/acceptance.*S1/i);
-    expect(result.errors.join("\n")).toMatch(/HIGH/i);
+    expect(result.errors.join("\n")).toMatch(/F-3|blocking|HIGH/i);
     expect(result.errors.join("\n")).toMatch(/deferred/i);
   });
 
