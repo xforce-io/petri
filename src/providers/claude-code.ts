@@ -37,7 +37,8 @@ export class ClaudeCodeProvider implements AgentProvider {
     const timeoutMin = Math.round(agentTimeout / 60_000);
     const startedAt = new Date();
     const startedMs = Date.now();
-    console.log(`  [claude-code] Running ${model} in ${config.artifactDir} (timeout: ${timeoutMin}m)...`);
+    const workspaceDir = config.workspaceDir ?? config.artifactDir;
+    console.log(`  [claude-code] Running ${model} in ${workspaceDir} (timeout: ${timeoutMin}m)...`);
 
     // Spawn in a new process group (detached) so we can SIGKILL the entire
     // group on timeout. execSync's default SIGTERM goes to the immediate child
@@ -51,7 +52,7 @@ export class ClaudeCodeProvider implements AgentProvider {
     try {
       await new Promise<void>((resolve, reject) => {
         const child = spawn("/bin/bash", ["-c", cmd], {
-          cwd: config.artifactDir,
+          cwd: workspaceDir,
           env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1" },
           stdio: ["ignore", "ignore", "inherit"],
           detached: true, // new process group
@@ -114,7 +115,7 @@ export class ClaudeCodeProvider implements AgentProvider {
       provider: "claude_code",
       model,
       command: `cat "${promptFile}" | "${claudeBin}" -p --model ${model} --output-format json --dangerously-skip-permissions`,
-      cwd: config.artifactDir,
+      cwd: workspaceDir,
       stdout_path: stdoutFile,
       exit_code: exitCode,
       timed_out: timedOut,

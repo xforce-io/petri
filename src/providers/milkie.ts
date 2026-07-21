@@ -50,7 +50,7 @@ export class MilkieProvider implements AgentProvider {
 
     const milkie = new Milkie({
       stateStore: new MemoryStore(),
-      tools: buildTools(config.artifactDir),
+      tools: buildTools(config.artifactDir, config.workspaceDir ?? config.artifactDir),
       gateway,
     });
 
@@ -121,7 +121,7 @@ function wrapGateway(base: IModelGateway, tally: UsageTally): IModelGateway {
   };
 }
 
-function buildTools(artifactDir: string): ToolDefinition[] {
+function buildTools(artifactDir: string, workspaceDir: string): ToolDefinition[] {
   return [
     {
       name: "shell_run",
@@ -138,7 +138,7 @@ function buildTools(artifactDir: string): ToolDefinition[] {
       handler: async (input) => {
         const { command, timeout } = input as { command: string; timeout?: number };
         try {
-          return execSync(command, { cwd: artifactDir, timeout, encoding: "utf-8" });
+          return execSync(command, { cwd: workspaceDir, timeout, encoding: "utf-8" });
         } catch (err) {
           return err instanceof Error ? err.message : String(err);
         }

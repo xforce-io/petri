@@ -3,11 +3,11 @@ Implement the project with **TDD**, based on the issue brief and design artifact
 ## Steps
 
 1. **Read the issue and design** — In the `Available artifacts` context, open the listed **absolute** paths for `issue.md` and `design.md`. Understand acceptance criteria, architecture, components, and the test plan before writing production code.
-2. **Create the project** — Set up structure, dependencies, and configuration if missing.
+2. **Work in the source workspace** — The context names a **Source workspace** and a separate evidence artifact directory. Read and modify project source, dependencies, and configuration only in the source workspace. Do not create a replacement project inside the artifact directory.
 3. **Write tests first (TDD red)** — Implement the tests described in the design's test plan. Tests should fail initially when there is no implementation yet.
 4. **Write the implementation (TDD green)** — Build each component according to the design. Run tests frequently as you go.
 5. **Run all tests** — Execute the full test suite. Every test must pass.
-6. **Leave a runnable test project** — The deterministic `unit_test` stage runs from your artifact directory. Provide `package.json` with a working `test` script, or a Python test suite discoverable by `pytest`; otherwise configure `unit_test.command` for the project runner. Also keep your role gate artifact.
+6. **Leave the real project runnable** — The deterministic `unit_test` stage runs from the source workspace root. Ensure its `package.json` test script or Python `pytest` suite works there; otherwise configure `unit_test.command` for the project runner. Write only the role gate artifact to the evidence directory.
 7. **Write the gate artifact:**
 
 ```json

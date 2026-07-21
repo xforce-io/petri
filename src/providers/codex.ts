@@ -47,6 +47,7 @@ export function resolveCodexCliModel(
 /** Pure: assemble `codex exec` argv (prompt is fed via stdin from prompt file). */
 export function buildCodexArgs(input: {
   artifactDir: string;
+  workspaceDir?: string;
   lastMessageFile: string;
   model?: string;
   modelMappings?: Record<string, string>;
@@ -58,7 +59,7 @@ export function buildCodexArgs(input: {
     "--color",
     "never",
     "-C",
-    input.artifactDir,
+    input.workspaceDir ?? input.artifactDir,
     "-o",
     input.lastMessageFile,
     "--dangerously-bypass-approvals-and-sandbox",
@@ -86,7 +87,7 @@ export function findCodexBinary(override?: string): string {
 }
 
 export function planCodexCli(
-  config: Pick<AgentConfig, "artifactDir" | "model"> & {
+  config: Pick<AgentConfig, "artifactDir" | "workspaceDir" | "model"> & {
     modelMappings?: Record<string, string>;
     reasoningEffort?: string;
   },
@@ -97,7 +98,8 @@ export function planCodexCli(
   const stdoutFile = join(config.artifactDir, "_codex_stdout.txt");
   const lastMessageFile = join(config.artifactDir, "_codex_last_message.txt");
   const args = buildCodexArgs({
-    artifactDir: config.artifactDir,
+      artifactDir: config.artifactDir,
+      workspaceDir: config.workspaceDir,
     lastMessageFile,
     model: config.model,
     modelMappings: config.modelMappings,
@@ -146,6 +148,7 @@ export class CodexProvider implements AgentProvider {
     const plan = planCodexCli(
       {
         artifactDir: config.artifactDir,
+        workspaceDir: config.workspaceDir,
         model,
         modelMappings: this.modelMappings,
         reasoningEffort: this.reasoningEffort,
@@ -158,9 +161,13 @@ export class CodexProvider implements AgentProvider {
     const timeoutMin = Math.round(agentTimeout / 60_000);
     const startedAt = new Date();
     const startedMs = Date.now();
-    console.log(`  [codex] Running in ${config.artifactDir} (timeout: ${timeoutMin}m)...`);
+    const workspaceDir = config.workspaceDir ?? config.artifactDir;
+    console.log(`  [codex] Running in ${workspaceDir} (timeout: ${timeoutMin}m)...`);
 
     const { exitCode, timedOut, exitErr } = await spawnCliCommand(plan.command, {
+      // Codex receives its actual source cwd through `-C workspaceDir` above.
+      // Keep the wrapper shell in artifactDir so provider-side stdout helpers
+      // and relative evidence output cannot leak into the source workspace.
       cwd: config.artifactDir,
       timeoutMs: agentTimeout,
       signal,
@@ -181,7 +188,7 @@ export class CodexProvider implements AgentProvider {
           cli_model: cliModel,
           reasoning_effort: this.reasoningEffort ?? null,
           command: plan.command,
-          cwd: config.artifactDir,
+          cwd: workspaceDir,
           stdout_path: plan.stdoutFile,
           last_message_path: plan.lastMessageFile,
           exit_code: exitCode,

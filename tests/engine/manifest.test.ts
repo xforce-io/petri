@@ -52,6 +52,22 @@ describe("ArtifactManifest", () => {
     expect(manifest.entries()).toHaveLength(1);
   });
 
+  it("relocates collected entries when a failed attempt is archived", () => {
+    const manifest = new ArtifactManifest(tmpDir);
+    const before = path.join(tmpDir, "review", "reviewer", "review.json");
+    const after = path.join(tmpDir, "review", "reviewer", "attempts", "1", "review.json");
+    manifest.collect("review", "reviewer", [before]);
+
+    manifest.relocate(before, after);
+
+    expect(manifest.entries()).toEqual([{
+      stage: "review",
+      role: "reviewer",
+      path: "review/reviewer/attempts/1/review.json",
+    }]);
+    expect(manifest.formatForContext()).toContain(after);
+  });
+
   it("returns a copy from entries()", () => {
     const manifest = new ArtifactManifest(tmpDir);
     const absPath = path.join(tmpDir, "code", "main.ts");

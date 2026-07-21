@@ -5,3 +5,5 @@ evidence:
   check:
     field: approved
     equals: true
+contract:
+  type: review

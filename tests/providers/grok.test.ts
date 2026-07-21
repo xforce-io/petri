@@ -24,6 +24,16 @@ describe("buildGrokArgs / planGrokCli", () => {
     ]);
   });
 
+  it("uses workspace as the Grok cwd while keeping prompt output in artifacts", () => {
+    const args = buildGrokArgs({
+      promptFile: "/tmp/art/p.md",
+      artifactDir: "/tmp/art",
+      workspaceDir: "/repo/worktree",
+      model: "default",
+    });
+    expect(args[args.indexOf("--cwd") + 1]).toBe("/repo/worktree");
+  });
+
   it("omits -m when model is default", () => {
     const args = buildGrokArgs({
       promptFile: "/tmp/p.md",

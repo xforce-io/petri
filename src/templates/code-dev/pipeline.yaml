@@ -25,22 +25,21 @@ stages:
           roles: [developer]
           max_retries: 5
 
-        # 4. Deterministic test stage (not agent self-report). The developer
-        # works in its artifact directory, so run its actual Node/Python suite
-        # there. Projects using another runner must replace this command.
+        # 4. Deterministic test stage (not agent self-report). Engine runs this
+        # command in the source workspace, never in a developer artifact dir.
+        # Projects using another runner replace unit_test.command in pipeline.
         #
         # Multi-line command tips (issue #57): engine normalizes YAML fold /
         # more-indented argv into one shell script. Prefer if/then/fi or
         # && / ; for multi-statement scripts — see docs/safe-yaml-command.md.
         - name: unit_test
           command: >
-            test_dir="$(dirname "{artifact_dir}")/develop/developer";
-            if [ -f "$test_dir/package.json" ]; then
-              (cd "$test_dir" && npm test) && printf '%s\n' '{"tests_passed":true,"runner":"npm test"}' > "{artifact_dir}/result.json";
-            elif [ -f "$test_dir/pytest.ini" ] || [ -f "$test_dir/pyproject.toml" ] || [ -d "$test_dir/tests" ]; then
-              (cd "$test_dir" && python -m pytest) && printf '%s\n' '{"tests_passed":true,"runner":"python -m pytest"}' > "{artifact_dir}/result.json";
+            if [ -f package.json ]; then
+              npm test && printf '%s\n' '{"tests_passed":true,"runner":"npm test"}' > "{artifact_dir}/result.json";
+            elif [ -f pytest.ini ] || [ -f pyproject.toml ] || [ -d tests ]; then
+              python -m pytest && printf '%s\n' '{"tests_passed":true,"runner":"python -m pytest"}' > "{artifact_dir}/result.json";
             else
-              echo "unit_test: no supported test runner found in $test_dir; configure unit_test.command for this project" >&2;
+              echo "unit_test: no supported test runner found in source workspace; configure unit_test.command for this project" >&2;
               exit 1;
             fi
           timeout: 600000

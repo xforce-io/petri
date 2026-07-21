@@ -5,6 +5,7 @@ export interface ContextInput {
   goal?: string;
   requirements?: string[];
   artifactDir: string;
+  workspaceDir?: string;
   manifestText: string;
   failureContext: string;
   attemptHistory: AttemptRecord[];
@@ -24,9 +25,17 @@ export function buildContext(ctx: ContextInput): string {
     sections.push(`Requirements:\n${reqLines.join("\n")}`);
   }
 
-  // Working directory and instruction
-  sections.push(`Working directory: ${ctx.artifactDir}`);
-  sections.push(`Write all artifacts to ${ctx.artifactDir}.`);
+  // Source and evidence locations are intentionally separate. Older callers
+  // may omit workspaceDir; their process cwd remains the execution default.
+  if (ctx.workspaceDir) {
+    sections.push(`Source workspace: ${ctx.workspaceDir}`);
+    sections.push(`Edit project source files only in ${ctx.workspaceDir}.`);
+    sections.push(`Evidence artifact directory: ${ctx.artifactDir}`);
+    sections.push(`Write gate JSON, logs, and other evidence only to ${ctx.artifactDir}.`);
+  } else {
+    sections.push(`Working directory: ${ctx.artifactDir}`);
+    sections.push(`Write all artifacts to ${ctx.artifactDir}.`);
+  }
 
   // Available artifacts from manifest
   if (ctx.manifestText) {

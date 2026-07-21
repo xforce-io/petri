@@ -60,6 +60,7 @@ export function startRun(opts: StartRunOpts): StartRunResult {
     defaultGateStrategy: petriConfig.defaults.gate_strategy,
     defaultMaxRetries: petriConfig.defaults.max_retries,
     logger,
+    workspaceDir: projectDir,
   });
 
   // 6. Register in activeRuns
