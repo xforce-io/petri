@@ -26,6 +26,7 @@ export interface GrokCliPlan {
 export function buildGrokArgs(input: {
   promptFile: string;
   artifactDir: string;
+  workspaceDir?: string;
   model?: string;
 }): string[] {
   const args = [
@@ -35,7 +36,7 @@ export function buildGrokArgs(input: {
     "--output-format",
     "plain",
     "--cwd",
-    input.artifactDir,
+    input.workspaceDir ?? input.artifactDir,
   ];
   if (input.model && input.model !== "default") {
     args.push("-m", input.model);
@@ -58,7 +59,7 @@ export function findGrokBinary(override?: string): string {
 }
 
 export function planGrokCli(
-  config: Pick<AgentConfig, "artifactDir" | "model">,
+  config: Pick<AgentConfig, "artifactDir" | "workspaceDir" | "model">,
   binary?: string,
 ): GrokCliPlan {
   const bin = findGrokBinary(binary);
@@ -67,6 +68,7 @@ export function planGrokCli(
   const args = buildGrokArgs({
     promptFile,
     artifactDir: config.artifactDir,
+    workspaceDir: config.workspaceDir,
     model: config.model,
   });
   const quotedArgs = args.map((a) => shellQuote(a)).join(" ");
@@ -103,7 +105,7 @@ export class GrokProvider implements AgentProvider {
 
     mkdirSync(config.artifactDir, { recursive: true });
     const plan = planGrokCli(
-      { artifactDir: config.artifactDir, model: config.model || this.defaultModel },
+      { artifactDir: config.artifactDir, workspaceDir: config.workspaceDir, model: config.model || this.defaultModel },
       this.binary,
     );
     writeFileSync(plan.promptFile, fullPrompt, "utf-8");
@@ -112,9 +114,12 @@ export class GrokProvider implements AgentProvider {
     const timeoutMin = Math.round(agentTimeout / 60_000);
     const startedAt = new Date();
     const startedMs = Date.now();
-    console.log(`  [grok] Running in ${config.artifactDir} (timeout: ${timeoutMin}m)...`);
+    const workspaceDir = config.workspaceDir ?? config.artifactDir;
+    console.log(`  [grok] Running in ${workspaceDir} (timeout: ${timeoutMin}m)...`);
 
     const { exitCode, timedOut, exitErr } = await spawnCliCommand(plan.command, {
+      // Grok receives its actual source cwd through `--cwd workspaceDir`.
+      // The wrapper stays in artifactDir to preserve evidence isolation.
       cwd: config.artifactDir,
       timeoutMs: agentTimeout,
       signal,
@@ -129,7 +134,7 @@ export class GrokProvider implements AgentProvider {
           provider: "grok",
           model: config.model || this.defaultModel,
           command: plan.command,
-          cwd: config.artifactDir,
+          cwd: workspaceDir,
           stdout_path: plan.stdoutFile,
           exit_code: exitCode,
           timed_out: timedOut,

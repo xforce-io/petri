@@ -42,7 +42,7 @@ export class PiProvider implements AgentProvider {
         systemPrompt,
         model,
         thinkingLevel: "low",
-        tools: buildTools(config.artifactDir),
+        tools: buildTools(config.artifactDir, config.workspaceDir ?? config.artifactDir),
       },
     });
 
@@ -80,7 +80,7 @@ export class PiProvider implements AgentProvider {
   }
 }
 
-function buildTools(artifactDir: string) {
+function buildTools(artifactDir: string, workspaceDir: string) {
   return [
     {
       name: "shell_run",
@@ -96,7 +96,7 @@ function buildTools(artifactDir: string) {
       ) => {
         try {
           const output = execSync(params.command, {
-            cwd: artifactDir,
+            cwd: workspaceDir,
             timeout: params.timeout,
             encoding: "utf-8",
           });

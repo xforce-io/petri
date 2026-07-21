@@ -26,6 +26,33 @@ export class ArtifactManifest {
     return [...this.artifacts];
   }
 
+  /**
+   * Update a collected path after Engine archives a failed attempt. Keeping the
+   * manifest pointed at the moved file lets subsequent repeat iterations read
+   * the actual prior evidence instead of a stale, missing path.
+   */
+  relocate(fromAbsolutePath: string, toAbsolutePath: string): void {
+    const from = path.relative(this.baseDir, fromAbsolutePath);
+    const to = path.relative(this.baseDir, toAbsolutePath);
+    if (from.startsWith("..") || to.startsWith("..") || path.isAbsolute(from) || path.isAbsolute(to)) {
+      throw new Error("Artifact relocation must stay within the artifact base directory");
+    }
+    for (const artifact of this.artifacts) {
+      if (artifact.path === from) artifact.path = to;
+    }
+  }
+
+  /** Return the most recently collected artifact matching the stage/role/file. */
+  latestPath(stage: string, role: string, fileName: string): string | undefined {
+    for (let index = this.artifacts.length - 1; index >= 0; index--) {
+      const artifact = this.artifacts[index];
+      if (artifact.stage === stage && artifact.role === role && path.basename(artifact.path) === fileName) {
+        return path.join(this.baseDir, artifact.path);
+      }
+    }
+    return undefined;
+  }
+
   formatForContext(): string {
     if (this.artifacts.length === 0) {
       return "No artifacts.";

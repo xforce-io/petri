@@ -232,6 +232,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     defaultMaxRetries: petriConfig.defaults.max_retries,
     logger,
     skipTo: opts.skipTo,
+    workspaceDir: executionCwd,
   });
 
   // 7. Acquire lock to prevent concurrent runs

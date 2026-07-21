@@ -108,6 +108,12 @@ describe("Integration: code-dev pipeline end-to-end", () => {
     // 2. Load config, pipeline, and all roles using the real config loader
     const petriConfig = loadPetriConfig(tmpDir);
     const pipeline = loadPipelineConfig(tmpDir);
+    const unitTest = pipeline.stages.flatMap((entry) => isRepeatBlock(entry) ? entry.repeat.stages : [entry])
+      .find((entry) => isCommandStage(entry) && entry.name === "unit_test");
+    if (!unitTest || !isCommandStage(unitTest)) throw new Error("missing unit_test stage");
+    // Keep this integration fixture independent of a host-installed npm while
+    // preserving the template's workspace execution path.
+    unitTest.command = 'test -f package.json && printf \'%s\\n\' \'{"tests_passed":true,"runner":"fixture"}\' > "{artifact_dir}/result.json"';
     const defaultModel = petriConfig.models[petriConfig.defaults.model].model;
 
     const roles: Record<string, LoadedRole> = {};
@@ -153,14 +159,19 @@ describe("Integration: code-dev pipeline end-to-end", () => {
               );
               artifacts.push(resultJson);
               fs.writeFileSync(
-                path.join(config.artifactDir, "package.json"),
+                path.join(config.workspaceDir!, "package.json"),
                 JSON.stringify({ scripts: { test: "node -e \"process.exit(0)\"" } }),
               );
             } else if (config.persona.includes("reviewer")) {
               const reviewJson = path.join(config.artifactDir, "review.json");
               fs.writeFileSync(
                 reviewJson,
-                JSON.stringify({ approved: true, findings: [], summary: "ok" }),
+                JSON.stringify({
+                  approved: true,
+                  findings: [],
+                  acceptance: [{ id: "S1", status: "passed" }],
+                  summary: "ok",
+                }),
               );
               artifacts.push(reviewJson);
             }
@@ -183,6 +194,7 @@ describe("Integration: code-dev pipeline end-to-end", () => {
       artifactBaseDir,
       defaultGateStrategy: petriConfig.defaults.gate_strategy,
       defaultMaxRetries: petriConfig.defaults.max_retries,
+      workspaceDir: tmpDir,
     });
 
     const result = await engine.run(
@@ -233,7 +245,7 @@ describe("Integration: code-dev pipeline end-to-end", () => {
       fs.readFileSync(path.join(artifactBaseDir, "unit_test", "result.json"), "utf-8"),
     );
     expect(unitTestJson.tests_passed).toBe(true);
-    expect(unitTestJson.runner).toBe("npm test");
+    expect(unitTestJson.runner).toBe("fixture");
 
     const reviewJson = JSON.parse(
       fs.readFileSync(
@@ -246,7 +258,7 @@ describe("Integration: code-dev pipeline end-to-end", () => {
     expect(fs.existsSync(path.join(artifactBaseDir, "manifest.json"))).toBe(true);
   });
 
-  it("blocks when the developer artifact has no supported test runner", async () => {
+  it("blocks when the source workspace has no supported test runner", async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "petri-integration-"));
     fs.cpSync(templateDir, tmpDir, { recursive: true });
 
@@ -290,6 +302,7 @@ describe("Integration: code-dev pipeline end-to-end", () => {
       artifactBaseDir,
       defaultGateStrategy: petriConfig.defaults.gate_strategy,
       defaultMaxRetries: petriConfig.defaults.max_retries,
+      workspaceDir: tmpDir,
     });
 
     await expect(engine.run(pipeline, "Build a CLI tool")).resolves.toMatchObject({

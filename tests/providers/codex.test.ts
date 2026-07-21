@@ -23,6 +23,16 @@ describe("buildCodexArgs / planCodexCli", () => {
     expect(args[args.length - 1]).toBe("-"); // stdin prompt
   });
 
+  it("uses workspace as the Codex execution directory while keeping output in artifacts", () => {
+    const args = buildCodexArgs({
+      artifactDir: "/tmp/art",
+      workspaceDir: "/repo/worktree",
+      lastMessageFile: "/tmp/art/last.txt",
+      model: "default",
+    });
+    expect(args[args.indexOf("-C") + 1]).toBe("/repo/worktree");
+  });
+
   it("omits -m when model is default", () => {
     const args = buildCodexArgs({
       artifactDir: "/tmp/art",

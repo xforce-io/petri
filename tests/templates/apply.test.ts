@@ -9,6 +9,7 @@ import {
   TemplateError,
 } from "../../src/templates/apply.js";
 import { listPresetTemplates } from "../../src/templates/list.js";
+import { loadRole } from "../../src/config/loader.js";
 
 describe("listPresetTemplates", () => {
   it("includes code-dev preset with stages and roles", () => {
@@ -66,7 +67,13 @@ describe("applyTemplate", () => {
     );
     expect(reviewerRole).toMatch(/provider:\s*review/);
     expect(reviewerRole).toMatch(/model:\s*terra/);
-    expect(fs.readFileSync(path.join(target, "pipeline.yaml"), "utf-8")).toMatch(/unit_test/);
+    const pipeline = fs.readFileSync(path.join(target, "pipeline.yaml"), "utf-8");
+    expect(pipeline).toMatch(/unit_test/);
+    expect(pipeline).not.toMatch(/develop\/developer/);
+    expect(fs.readFileSync(path.join(target, "README.md"), "utf-8")).toMatch(/适用范围/);
+    expect(fs.readFileSync(path.join(target, "roles", "code_reviewer", "gate.yaml"), "utf-8"))
+      .toMatch(/type:\s*review/);
+    expect(loadRole(target, "code_reviewer", "default").gate?.contract).toEqual({ type: "review" });
   });
 
   it("throws NOT_FOUND for unknown template", () => {

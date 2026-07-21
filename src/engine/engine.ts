@@ -7,6 +7,7 @@ import { basename, isAbsolute, join } from "node:path";
 import { ArtifactManifest } from "./manifest.js";
 import { checkGates, resolveGatePath, type GateInput, type GateDetail } from "./gate.js";
 import { buildContext } from "./context.js";
+import { validateReviewContract } from "./review-contract.js";
 import {
   formatCommandConfigFailure,
   formatCommandExecFailure,
@@ -38,6 +39,8 @@ export interface EngineOptions {
   defaultTimeout?: number;  // agent execution timeout in ms (default: 600000 = 10 min)
   logger?: RunLogger;
   skipTo?: string;  // stage name to resume from — skips all stages before it
+  /** Source workspace shared by agents and command stages. Defaults to cwd. */
+  workspaceDir?: string;
 }
 
 export class Engine {
@@ -50,6 +53,7 @@ export class Engine {
   private readonly defaultTimeout: number;
   private readonly logger?: RunLogger;
   private readonly skipTo?: string;
+  private readonly workspaceDir: string;
 
   // Gate registry: maps gate id → latest result
   private gateResults: Map<string, GateDetail> = new Map();
@@ -70,6 +74,7 @@ export class Engine {
     this.defaultTimeout = opts.defaultTimeout ?? 600_000;
     this.logger = opts.logger;
     this.skipTo = opts.skipTo;
+    this.workspaceDir = opts.workspaceDir ?? process.cwd();
   }
 
   async run(pipeline: PipelineConfig, input: string): Promise<RunResult> {
@@ -246,6 +251,18 @@ export class Engine {
       let agentTimedOut = false;
       let timeoutMessage = "";
       const attemptAbort = new AbortController();
+      const previousReviewEvidence = new Map<string, unknown>();
+      for (const roleName of stage.roles) {
+        const gate = this.roles[roleName]?.gate;
+        if (gate?.contract?.type !== "review") continue;
+        const previousPath = manifest.latestPath(stage.name, roleName, "review.json");
+        if (!previousPath) continue;
+        try {
+          previousReviewEvidence.set(roleName, JSON.parse(readFileSync(previousPath, "utf-8")));
+        } catch {
+          previousReviewEvidence.set(roleName, undefined);
+        }
+      }
       // Track in-flight runs so we can await a bounded settle after abort.
       const inflightRuns: Array<Promise<unknown>> = [];
 
@@ -267,6 +284,7 @@ export class Engine {
               goal: this.goal,
               requirements: this.requirements,
               artifactDir,
+              workspaceDir: this.workspaceDir,
               manifestText: manifest.formatForContext(),
               failureContext,
               attemptHistory,
@@ -280,12 +298,13 @@ export class Engine {
             }
             const timer = this.logger?.logRoleStart(stage.name, roleName, model, providerName);
 
-              const agent = provider.createAgent({
-                persona: role.persona,
-                playbooks: role.playbooks,
-                context,
-                artifactDir,
-                model,
+            const agent = provider.createAgent({
+              persona: role.persona,
+              playbooks: role.playbooks,
+              context,
+              artifactDir,
+              workspaceDir: this.workspaceDir,
+              model,
               timeout: effectiveTimeout,
             });
 
@@ -372,7 +391,7 @@ export class Engine {
       // If agent timed out, treat as a failed attempt
       if (agentTimedOut) {
         for (const roleName of stage.roles) {
-          archiveAttempt(`${this.artifactBaseDir}/${stage.name}/${roleName}`, attempt + 1);
+          this.archiveRoleAttempt(manifest, stage.name, roleName, attempt + 1);
         }
 
         const failureReason = timeoutMessage;
@@ -416,6 +435,31 @@ export class Engine {
         strategy,
       );
 
+      for (const { gate, roleName } of gateInputs) {
+        if (gate.contract?.type !== "review") continue;
+        const reviewPath = join(this.artifactBaseDir, resolveGatePath(gate.evidence.path, stage.name, roleName));
+        let review: unknown;
+        try {
+          review = JSON.parse(readFileSync(reviewPath, "utf-8"));
+        } catch {
+          review = undefined;
+        }
+        const contract = validateReviewContract(review, previousReviewEvidence.get(roleName));
+        if (!contract.valid) {
+          const detail = gateResult.details.find((candidate) => candidate.roleName === roleName && candidate.gateId === gate.id);
+          const reason = `Review contract failed: ${contract.errors.join("; ")}`;
+          if (detail) {
+            const gateReason = detail.reason;
+            detail.passed = false;
+            detail.reason = `${gateReason}; ${reason}`;
+          } else {
+            gateResult.details.push({ gateId: gate.id, roleName, passed: false, reason });
+          }
+          gateResult.passed = false;
+          gateResult.reason = reason;
+        }
+      }
+
       // Record gate results in registry
       for (const detail of gateResult.details) {
         this.gateResults.set(detail.gateId, detail);
@@ -452,7 +496,7 @@ export class Engine {
 
       // Archive failed attempt artifacts
       for (const roleName of stage.roles) {
-        archiveAttempt(`${this.artifactBaseDir}/${stage.name}/${roleName}`, attempt + 1);
+        this.archiveRoleAttempt(manifest, stage.name, roleName, attempt + 1);
       }
 
       // Gate failed — build a full failure description including details
@@ -524,9 +568,9 @@ export class Engine {
     try {
       // Explicit sh -c so the whole prepared string is one script (posix).
       if (process.platform === "win32") {
-        execSync(prepared, { stdio: "inherit", timeout });
+        execSync(prepared, { stdio: "inherit", timeout, cwd: this.workspaceDir });
       } else {
-        execFileSync("/bin/sh", ["-c", prepared], { stdio: "inherit", timeout });
+        execFileSync("/bin/sh", ["-c", prepared], { stdio: "inherit", timeout, cwd: this.workspaceDir });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -832,6 +876,16 @@ export class Engine {
     return copied;
   }
 
+  private archiveRoleAttempt(
+    manifest: ArtifactManifest,
+    stage: string,
+    role: string,
+    attempt: number,
+  ): void {
+    const moved = archiveAttempt(join(this.artifactBaseDir, stage, role), attempt);
+    for (const { from, to } of moved) manifest.relocate(from, to);
+  }
+
   /**
    * Snapshot a command stage's output artifacts into the run directory.
    * Command stages have no role dimension, so the snapshot directory is
@@ -926,21 +980,23 @@ function uniqueDestination(dir: string, name: string): string {
  * Move files from artifactDir into artifactDir/attempts/{attemptNum}/.
  * Only moves top-level files, skips the "attempts" directory itself.
  */
-function archiveAttempt(artifactDir: string, attemptNum: number): void {
-  if (!existsSync(artifactDir)) return;
+function archiveAttempt(artifactDir: string, attemptNum: number): Array<{ from: string; to: string }> {
+  if (!existsSync(artifactDir)) return [];
 
   const archiveDir = join(artifactDir, "attempts", String(attemptNum));
-  let hasFiles = false;
+  const moved: Array<{ from: string; to: string }> = [];
 
   for (const entry of readdirSync(artifactDir)) {
     if (entry === "attempts" || entry.startsWith(".")) continue;
     const fullPath = join(artifactDir, entry);
     try {
       if (statSync(fullPath).isFile()) {
-        hasFiles = true;
         mkdirSync(archiveDir, { recursive: true });
-        renameSync(fullPath, join(archiveDir, entry));
+        const destination = join(archiveDir, entry);
+        renameSync(fullPath, destination);
+        moved.push({ from: fullPath, to: destination });
       }
     } catch { /* skip */ }
   }
+  return moved;
 }

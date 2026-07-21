@@ -116,6 +116,10 @@ export interface GateConfig {
     path: string;
     check?: GateCheck;
   };
+  /** Optional deterministic contract layered on top of evidence checks. */
+  contract?: {
+    type: "review";
+  };
 }
 
 // --- Global config ---
@@ -175,6 +179,9 @@ export interface AgentConfig {
   persona: string;
   playbooks: string[];
   context: string;
+  /** Source workspace where the agent reads and edits the project. */
+  workspaceDir?: string;
+  /** Evidence and model-output directory; this is not the source workspace. */
   artifactDir: string;
   model: string;
   timeout?: number;  // ms — passed from stage timeout, provider should respect this

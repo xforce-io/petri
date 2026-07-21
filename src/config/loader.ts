@@ -138,10 +138,16 @@ export function loadRole(
     if (raw.evidence.check !== undefined) {
       validateGateCheck(raw.evidence.check);
     }
+    if (raw.contract !== undefined) {
+      if (!raw.contract || typeof raw.contract !== "object" || raw.contract.type !== "review") {
+        throw new Error("gate.yaml: 'contract.type' currently supports only 'review'");
+      }
+    }
     gate = {
       id: gateId,
       description: raw.description,
       evidence: raw.evidence,
+      contract: raw.contract,
     };
   }
 
