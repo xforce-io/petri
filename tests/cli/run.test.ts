@@ -5,8 +5,10 @@ import * as path from "node:path";
 import { RunLogger } from "../../src/engine/logger.js";
 import {
   inheritInputFromResumeRun,
+  IN_PLACE_WORKTREE_CONFLICT,
   NO_INPUT_MESSAGE,
   resolveResumeSource,
+  resolveWorkspaceMode,
 } from "../../src/cli/run.js";
 
 describe("petri run --resume-run", () => {
@@ -69,5 +71,53 @@ describe("petri run input inheritance for quality-gate resume (issue #58)", () =
     expect(NO_INPUT_MESSAGE).toMatch(/--from/);
     expect(NO_INPUT_MESSAGE).toMatch(/resume-run/);
     expect(NO_INPUT_MESSAGE).toMatch(/inherit/i);
+  });
+});
+
+describe("petri run workspace mode (issue #71)", () => {
+  it("defaults to worktree with auto name when no flags are set", () => {
+    expect(resolveWorkspaceMode({}, () => 1_700_000_000_000)).toEqual({
+      mode: "worktree",
+      name: "run-1700000000000",
+    });
+  });
+
+  it("defaults to worktree when --worktree is passed without a name", () => {
+    expect(resolveWorkspaceMode({ worktree: true }, () => 42)).toEqual({
+      mode: "worktree",
+      name: "run-42",
+    });
+  });
+
+  it("uses an explicit worktree directory name", () => {
+    expect(resolveWorkspaceMode({ worktree: "experiment-a" })).toEqual({
+      mode: "worktree",
+      name: "experiment-a",
+    });
+  });
+
+  it("uses in-place (trunk) only when --in-place is set", () => {
+    expect(resolveWorkspaceMode({ inPlace: true })).toEqual({ mode: "in-place" });
+  });
+
+  it("rejects combining --in-place with --worktree", () => {
+    expect(() => resolveWorkspaceMode({ inPlace: true, worktree: true })).toThrow(
+      IN_PLACE_WORKTREE_CONFLICT,
+    );
+    expect(() =>
+      resolveWorkspaceMode({ inPlace: true, worktree: "named" }),
+    ).toThrow(/--in-place cannot be combined/);
+  });
+
+  it("rejects path-traversing or multi-segment worktree names", () => {
+    expect(() => resolveWorkspaceMode({ worktree: "../escape" })).toThrow(
+      /Invalid --worktree name/,
+    );
+    expect(() => resolveWorkspaceMode({ worktree: "a/b" })).toThrow(
+      /Invalid --worktree name/,
+    );
+    expect(() => resolveWorkspaceMode({ worktree: ".." })).toThrow(
+      /Invalid --worktree name/,
+    );
   });
 });
