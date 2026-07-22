@@ -28,6 +28,11 @@ interface RunOptions {
   worktree?: string | boolean;
   /** Run in the current working tree (main/trunk). Overrides default worktree isolation. */
   inPlace?: boolean;
+  /**
+   * Reuse an existing `.worktrees/<name>` directory (keep WIP).
+   * Resume (`--resume-run`) also enables reuse when the named path exists (issue #74).
+   */
+  reuseWorktree?: boolean;
   branch?: string;
 }
 
@@ -78,6 +83,158 @@ export function resolveWorkspaceMode(
       : `run-${now()}`;
   assertWorktreeDirName(name);
   return { mode: "worktree", name };
+}
+
+/** Decision for create vs reuse vs refuse when resolving a named worktree (issue #74). */
+export type WorktreeLifecycle =
+  | { action: "create"; path: string; name: string }
+  | { action: "reuse"; path: string; name: string; reason: "resume" | "flag" }
+  | { action: "refuse"; path: string; name: string };
+
+/**
+ * Pure policy: existing worktree is reused only with `--resume-run` or
+ * `--reuse-worktree`; otherwise refuse (never silent overwrite). Missing path → create.
+ */
+export function resolveWorktreeLifecycle(opts: {
+  cwd: string;
+  name: string;
+  pathExists: boolean;
+  resumeRun?: string;
+  reuseWorktree?: boolean;
+}): WorktreeLifecycle {
+  const worktreePath = path.resolve(opts.cwd, ".worktrees", opts.name);
+  if (!opts.pathExists) {
+    return { action: "create", path: worktreePath, name: opts.name };
+  }
+  if (opts.resumeRun) {
+    return { action: "reuse", path: worktreePath, name: opts.name, reason: "resume" };
+  }
+  if (opts.reuseWorktree) {
+    return { action: "reuse", path: worktreePath, name: opts.name, reason: "flag" };
+  }
+  return { action: "refuse", path: worktreePath, name: opts.name };
+}
+
+/** Actionable error when an existing worktree would be clobbered (issue #74 S2). */
+export function buildWorktreeRefuseMessage(decision: {
+  path: string;
+  name: string;
+}): string {
+  return [
+    `Error: Worktree directory already exists at ${decision.path}`,
+    `Refusing to recreate from HEAD (would risk losing WIP). To continue with existing sources:`,
+    `  petri run --reuse-worktree --worktree ${decision.name} ...`,
+    `  petri run --resume-run <id> --skip-to <stage> --worktree ${decision.name} ...`,
+    `Or pick a new name: --worktree <other-name>`,
+    `To discard and recreate: git worktree remove ${decision.path}  (only if WIP is safe to drop)`,
+  ].join("\n");
+}
+
+/** Parsed WIP signal for a worktree (issue #74 S3). */
+export type WorktreeWip = {
+  path: string;
+  hasChanges: boolean;
+  fileCount: number;
+  /** Raw `git diff --stat` (may be empty when only untracked files exist). */
+  diffStat: string;
+  /** Paths from `git status --porcelain` (tracked + untracked). */
+  changedPaths: string[];
+};
+
+/**
+ * Derive WIP from git porcelain + diff --stat. Untracked-only trees count as
+ * non-empty even when `git diff --stat` is blank.
+ */
+export function parseWorktreeWip(opts: {
+  worktreePath: string;
+  porcelain: string;
+  diffStat: string;
+}): WorktreeWip {
+  const changedPaths: string[] = [];
+  for (const line of opts.porcelain.split("\n")) {
+    if (!line.trim()) continue;
+    // porcelain: XY PATH or XY ORIG -> PATH
+    const rest = line.slice(3);
+    const arrow = rest.indexOf(" -> ");
+    const filePath = (arrow >= 0 ? rest.slice(arrow + 4) : rest).trim();
+    if (filePath) changedPaths.push(filePath);
+  }
+  const fileCount = changedPaths.length;
+  const hasChanges = fileCount > 0 || opts.diffStat.trim().length > 0;
+  return {
+    path: opts.worktreePath,
+    hasChanges,
+    fileCount,
+    diffStat: opts.diffStat,
+    changedPaths,
+  };
+}
+
+/** Operator-visible lines for end-of-run worktree summary (issue #74 S3). */
+export function formatWorktreeWipReport(wip: WorktreeWip): string[] {
+  const lines: string[] = [`Path: ${wip.path}`];
+  if (!wip.hasChanges) {
+    lines.push("", "No code changes made.");
+    return lines;
+  }
+  lines.push("", `WIP: ${wip.fileCount} file(s) with uncommitted changes`);
+  if (wip.diffStat.trim()) {
+    lines.push("", "Changes:", wip.diffStat.trimEnd());
+  }
+  // When diff --stat is empty (typical untracked-only WIP), list paths so operators
+  // never see "Path + No code changes" while porcelain is non-empty.
+  if (!wip.diffStat.trim() && wip.changedPaths.length > 0) {
+    lines.push("", "Untracked / dirty paths:");
+    for (const p of wip.changedPaths) {
+      lines.push(`  ${p}`);
+    }
+  } else if (wip.diffStat.trim()) {
+    const missingFromStat = wip.changedPaths.filter(
+      (p) => !wip.diffStat.includes(p) && !wip.diffStat.includes(path.basename(p)),
+    );
+    if (missingFromStat.length > 0) {
+      lines.push("", "Also untracked / unstaged paths:");
+      for (const p of missingFromStat) {
+        lines.push(`  ${p}`);
+      }
+    }
+  }
+  return lines;
+}
+
+/** Collect WIP via git in a worktree directory; empty on failure. */
+export function collectWorktreeWip(worktreePath: string): WorktreeWip {
+  let porcelain = "";
+  let diffStat = "";
+  try {
+    porcelain = execFileSync("git", ["status", "--porcelain"], {
+      encoding: "utf8",
+      cwd: worktreePath,
+    });
+  } catch {
+    porcelain = "";
+  }
+  try {
+    diffStat = execFileSync("git", ["diff", "--stat"], {
+      encoding: "utf8",
+      cwd: worktreePath,
+    });
+  } catch {
+    diffStat = "";
+  }
+  // Also include staged+unstaged in diff --stat for a fuller picture
+  try {
+    const all = execFileSync("git", ["diff", "--stat", "HEAD"], {
+      encoding: "utf8",
+      cwd: worktreePath,
+    });
+    if (all.trim().length > diffStat.trim().length) {
+      diffStat = all;
+    }
+  } catch {
+    // ignore
+  }
+  return parseWorktreeWip({ worktreePath, porcelain, diffStat });
 }
 
 /** Validate and normalize the source run that an explicit resume continues from. */
@@ -145,40 +302,58 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   }
 
   if (workspaceMode.mode === "worktree") {
-    try {
-      const status = execSync("git status --porcelain", { encoding: "utf8", cwd });
-      if (status.trim() !== "") {
-        console.log(
-          chalk.yellow(
-            "Warning: You have uncommitted changes in your working tree. The worktree is created from HEAD and will not include them.",
-          ),
-        );
-      }
-    } catch {
-      // Not a git repo or git unavailable — worktree add below will fail with guidance.
+    const lifecycle = resolveWorktreeLifecycle({
+      cwd,
+      name: workspaceMode.name,
+      pathExists: fs.existsSync(path.resolve(cwd, ".worktrees", workspaceMode.name)),
+      resumeRun: opts.resumeRun,
+      reuseWorktree: opts.reuseWorktree,
+    });
+    worktreePath = lifecycle.path;
+
+    if (lifecycle.action === "refuse") {
+      console.error(chalk.red(buildWorktreeRefuseMessage(lifecycle)));
+      process.exit(1);
     }
 
-    worktreePath = path.resolve(cwd, ".worktrees", workspaceMode.name);
-    if (fs.existsSync(worktreePath)) {
-      console.error(chalk.red(`Error: Worktree directory already exists at ${worktreePath}`));
-      process.exit(1);
-    }
-    try {
-      fs.mkdirSync(path.join(cwd, ".worktrees"), { recursive: true });
-      console.log(chalk.blue(`Creating temporary worktree at ${worktreePath}...`));
-      execFileSync("git", ["worktree", "add", worktreePath, "HEAD"], {
-        stdio: "ignore",
-        cwd,
-      });
-      executionCwd = worktreePath;
-    } catch {
-      console.error(
-        chalk.red(
-          "Error: Failed to create git worktree (is this a git repository?). " +
-            "Use --in-place to run in the current working tree.",
+    if (lifecycle.action === "reuse") {
+      console.log(
+        chalk.blue(
+          `Reusing existing worktree at ${worktreePath} (${lifecycle.reason === "resume" ? "resume" : "--reuse-worktree"}; keeping WIP)...`,
         ),
       );
-      process.exit(1);
+      executionCwd = worktreePath;
+    } else {
+      try {
+        const status = execSync("git status --porcelain", { encoding: "utf8", cwd });
+        if (status.trim() !== "") {
+          console.log(
+            chalk.yellow(
+              "Warning: You have uncommitted changes in your working tree. The worktree is created from HEAD and will not include them.",
+            ),
+          );
+        }
+      } catch {
+        // Not a git repo or git unavailable — worktree add below will fail with guidance.
+      }
+
+      try {
+        fs.mkdirSync(path.join(cwd, ".worktrees"), { recursive: true });
+        console.log(chalk.blue(`Creating temporary worktree at ${worktreePath}...`));
+        execFileSync("git", ["worktree", "add", worktreePath, "HEAD"], {
+          stdio: "ignore",
+          cwd,
+        });
+        executionCwd = worktreePath;
+      } catch {
+        console.error(
+          chalk.red(
+            "Error: Failed to create git worktree (is this a git repository?). " +
+              "Use --in-place to run in the current working tree.",
+          ),
+        );
+        process.exit(1);
+      }
     }
   }
 
@@ -352,17 +527,23 @@ export async function runCommand(opts: RunOptions): Promise<void> {
 
     if (worktreePath) {
       console.log(chalk.blue(`\n--- Worktree Summary ---`));
-      console.log(`Path: ${worktreePath}`);
-      try {
-        const diff = execSync("git diff --stat", { encoding: "utf8", cwd: worktreePath });
-        if (diff.trim()) {
-          console.log(`\nChanges:`);
-          console.log(diff);
-        } else {
-          console.log(`\nNo code changes made.`);
-        }
-      } catch (e) {}
+      const wip = collectWorktreeWip(worktreePath);
+      for (const line of formatWorktreeWipReport(wip)) {
+        console.log(line);
+      }
       console.log(chalk.gray(`To keep these changes, commit them or merge the branch.`));
+      if (wip.hasChanges) {
+        console.log(
+          chalk.gray(
+            `To continue with this WIP: petri run --reuse-worktree --worktree ${path.basename(worktreePath)} ...`,
+          ),
+        );
+        console.log(
+          chalk.gray(
+            `  or: petri run --resume-run ${logger.runId} --skip-to <stage> --worktree ${path.basename(worktreePath)} ...`,
+          ),
+        );
+      }
       console.log(chalk.gray(`To discard, run: git worktree remove ${worktreePath}`));
     }
 

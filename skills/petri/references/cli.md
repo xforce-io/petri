@@ -35,10 +35,13 @@ petri init --template code-dev   # 默认即为 code-dev
 | `--resume-run <run-id>` | 续跑来源（如 `001`）；**必须与 `--skip-to` 同用**；未给 input 时继承该 run 的 input |
 | `--require-clean` | 要求 git 工作区干净 |
 | `--worktree [name]` | **默认**隔离：在 `.worktrees/` 下建临时 git worktree；可传目录名 |
+| `--reuse-worktree` | 复用已有 `.worktrees/<name>`（保留 WIP）；`--resume-run` 且路径存在时也会复用 |
 | `--in-place` | 在**当前工作树（主干）**跑，不创建 worktree；与 `--worktree` 互斥 |
 | `--branch <id>` | 在命名探索分支下跑 |
 
 **工作区默认（issue #71）**：无标志时等价于 worktree 模式。要动当前 checkout 必须显式 `--in-place`。非 git 仓库创建 worktree 会失败并提示改用 `--in-place`。
+
+**Worktree 复用（issue #74）**：同名 `.worktrees/<name>` 已存在时，默认**拒绝**从 HEAD 重建（防丢 WIP）。续跑用 `--resume-run … --skip-to … --worktree <name>` 自动复用；或显式 `--reuse-worktree --worktree <name>`。结束摘要会打印 path + 非零 WIP（含 untracked）。
 
 ### 常用配方
 
@@ -58,6 +61,12 @@ petri run --skip-to unit_test --resume-run 002
 
 # 从 develop 续（修 review findings 后）
 petri run --skip-to develop --resume-run 002
+
+# 续跑并复用命名 worktree 中的 WIP（超时/中断后）
+petri run --skip-to develop --resume-run 003 --worktree issue-63
+
+# 显式复用既有 worktree（非 resume 场景）
+petri run --reuse-worktree --worktree issue-63 --input "..."
 
 # 探索分支
 petri run --branch factor-weight-search
