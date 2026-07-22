@@ -7,8 +7,9 @@ Implement the project with **TDD**, based on the issue brief and design artifact
 3. **Write tests first (TDD red)** — Implement the tests described in the design's test plan. Tests should fail initially when there is no implementation yet.
 4. **Write the implementation (TDD green)** — Build each component according to the design. Run tests frequently as you go.
 5. **Run all tests** — Execute the full test suite. Every test must pass.
-6. **Leave the real project runnable** — The deterministic `unit_test` stage runs a **pure** suite from the source workspace root (`npm test` or `python -m pytest`). Do not rely on lint-bundled wrappers (e.g. `tests/run_tests.sh unit` that runs full-repo ruff first) for the harness gate; if the project needs a custom pure command, configure `unit_test.command` in the pipeline. Write only the role gate artifact to the evidence directory.
-7. **Write the gate artifact:**
+6. **Leave the real project runnable** — The deterministic **in-loop** `unit_test` stage is a **targeted pure** suite (Stories-related / project-configured path). Prefer a narrow command when the monorepo is large (configure `unit_test.command`, e.g. `python -m pytest tests/test_foo.py`). Do not rely on lint-bundled wrappers for the harness gate. Write only the role gate artifact to the evidence directory.
+7. **Do not chase out-of-scope failures** (issue #79) — Failures outside this issue's Stories (unrelated modules, flaky env, full-suite noise) are **not** the default develop goal. Record them as deviation / note for humans; do **not** rewrite historical tests or broad contracts just to green an optional full suite. The optional `full_test` stage runs **once after** the develop–review cycle (or via `--skip-to full_test`); fixing full-suite failures is out of scope unless the issue requires it.
+8. **Write the gate artifact:**
 
 ```json
 // {stage}/{role}/result.json
@@ -25,6 +26,6 @@ If tests fail and you are retried (or review rejected the last iteration):
 1. Read the error / review findings carefully.
 2. State a hypothesis for why it failed.
 3. Make the minimal change needed to fix it.
-4. Run the tests again to verify.
+4. Run the **targeted** tests again to verify.
 
 Do not rewrite large sections of code on retry. Targeted fixes are more reliable than rewrites.

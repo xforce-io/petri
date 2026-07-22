@@ -1,7 +1,7 @@
 name: code-dev
 description: |
-  Issue → design → TDD develop → deterministic unit_test → agent review,
-  iterating develop+test+review until review-approved.
+  Issue → design → TDD develop → targeted unit_test → agent review
+  (repeat until review-approved) → optional full_test once at the end.
 
 stages:
   # 1. Issue: capture / normalize the requirement into artifacts
@@ -14,7 +14,8 @@ stages:
     roles: [designer]
     max_retries: 2
 
-  # 3–6. TDD develop → deterministic tests → review; iterate until approved
+  # 3–5. TDD develop → TARGETED unit gate → review; iterate until approved
+  # (issue #79: loop must not implicitly re-run the full monorepo suite)
   - repeat:
       name: develop-review-cycle
       max_iterations: 5
@@ -25,22 +26,18 @@ stages:
           roles: [developer]
           max_retries: 5
 
-        # 4. Deterministic PURE unit gate (not agent self-report). Engine runs
-        # this in the source workspace, never in a developer artifact dir.
-        # Prefer npm test / python -m pytest only — never default to
-        # lint-bundled wrappers such as `tests/run_tests.sh unit` (full-repo
-        # ruff before pytest). Override unit_test.command for project runners.
-        # See issue #69 / src/engine/unit-test-command.ts.
+        # 4. TARGETED pure unit gate (in-loop). Override `command` for issue-scoped
+        # suites, e.g. `python -m pytest tests/test_foo.py -q` or `npm test -- foo`.
+        # Evidence includes scope:"targeted". Never default to lint-bundled wrappers.
+        # See issue #69 / #79 / src/engine/unit-test-command.ts.
         #
-        # Multi-line command tips (issue #57): engine normalizes YAML fold /
-        # more-indented argv into one shell script. Prefer if/then/fi or
-        # && / ; for multi-statement scripts — see docs/safe-yaml-command.md.
+        # Multi-line command tips (issue #57): see docs/safe-yaml-command.md.
         - name: unit_test
           command: >
             if [ -f package.json ] && node -e "const p=require('./package.json'); process.exit(p.scripts&&p.scripts.test?0:1)" 2>/dev/null; then
-              npm test && printf '%s\n' '{"tests_passed":true,"runner":"npm test"}' > "{artifact_dir}/result.json";
+              npm test && printf '%s\n' '{"tests_passed":true,"runner":"npm test","scope":"targeted"}' > "{artifact_dir}/result.json";
             elif [ -f pytest.ini ] || [ -f pyproject.toml ] || [ -d tests ]; then
-              python -m pytest && printf '%s\n' '{"tests_passed":true,"runner":"python -m pytest"}' > "{artifact_dir}/result.json";
+              python -m pytest && printf '%s\n' '{"tests_passed":true,"runner":"python -m pytest","scope":"targeted"}' > "{artifact_dir}/result.json";
             else
               echo "unit_test: no supported pure test runner found in source workspace; configure unit_test.command for this project (do not use lint-bundled wrappers as the harness unit gate)" >&2;
               exit 1;
@@ -48,7 +45,7 @@ stages:
           timeout: 600000
           gate:
             id: unit-tests-pass
-            description: Deterministic pure unit tests must pass (command stage; not lint)
+            description: Targeted pure unit tests must pass (in-loop; not full monorepo)
             evidence:
               path: "{stage}/result.json"
               check:
@@ -59,3 +56,28 @@ stages:
         - name: review
           roles: [code_reviewer]
           max_retries: 2
+
+  # 6. FULL suite once after the develop-review cycle converges (issue #79).
+  # Not inside the repeat — so it is not re-run every develop/review iteration.
+  # Trigger alone: petri run --skip-to full_test --resume-run <id>
+  # To skip on a project, replace command with a no-op that still writes
+  # tests_passed:true and scope:"full" (or remove this stage).
+  - name: full_test
+    command: >
+      if [ -f package.json ] && node -e "const p=require('./package.json'); process.exit(p.scripts&&p.scripts.test?0:1)" 2>/dev/null; then
+        npm test && printf '%s\n' '{"tests_passed":true,"runner":"npm test","scope":"full"}' > "{artifact_dir}/result.json";
+      elif [ -f pytest.ini ] || [ -f pyproject.toml ] || [ -d tests ]; then
+        python -m pytest && printf '%s\n' '{"tests_passed":true,"runner":"python -m pytest","scope":"full"}' > "{artifact_dir}/result.json";
+      else
+        echo "full_test: no supported pure test runner; configure full_test.command or remove this stage" >&2;
+        exit 1;
+      fi
+    timeout: 600000
+    gate:
+      id: full-tests-pass
+      description: Optional full pure suite after cycle (not lint); scope=full in evidence
+      evidence:
+        path: "{stage}/result.json"
+        check:
+          field: tests_passed
+          equals: true
