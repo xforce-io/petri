@@ -4,11 +4,14 @@
  * wrappers such as `tests/run_tests.sh unit` that run full-repo ruff first.
  *
  * Python interpreter discovery for worktrees / monorepos (#75):
- * VIRTUAL_ENV → workspace/.venv → git toplevel/.venv.
+ * VIRTUAL_ENV → workspace/.venv → **main repo** `.venv` (via git-common-dir).
+ *
+ * Note: `git rev-parse --show-toplevel` in a linked worktree returns the
+ * worktree path, NOT the primary checkout — so we use git-common-dir.
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 
 export type UnitTestResolution =
@@ -22,7 +25,7 @@ const LINT_MARKERS =
 /** Candidate locations for a project Python interpreter (issue #75). */
 export type PythonInterpreterHit = {
   python: string;
-  source: "VIRTUAL_ENV" | "workspace.venv" | "git.toplevel.venv";
+  source: "VIRTUAL_ENV" | "workspace.venv" | "git.main.venv";
 };
 
 export type PythonInterpreterMiss = {
@@ -39,14 +42,54 @@ export function isPythonInterpreterHit(
 }
 
 /**
+ * Primary (main) worktree root for a git checkout or linked worktree.
+ * Uses `git rev-parse --path-format=absolute --git-common-dir` then dirname
+ * of the `.git` directory — unlike `--show-toplevel`, this is the main repo
+ * when cwd is a linked worktree.
+ */
+export function resolveGitMainWorktreeRoot(cwd: string): string | null {
+  try {
+    let common = "";
+    try {
+      common = execFileSync(
+        "git",
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        { encoding: "utf8", cwd },
+      ).trim();
+    } catch {
+      // Older git without --path-format
+      common = execFileSync("git", ["rev-parse", "--git-common-dir"], {
+        encoding: "utf8",
+        cwd,
+      }).trim();
+      if (common && !common.startsWith("/")) {
+        common = resolve(cwd, common);
+      }
+    }
+    if (!common) return null;
+    const normalized = resolve(common);
+    // common-dir is typically <main>/.git
+    if (basename(normalized) === ".git") {
+      return dirname(normalized);
+    }
+    return dirname(normalized);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Resolve project Python for unit gates.
- * Order: VIRTUAL_ENV → workspaceDir/.venv → git rev-parse --show-toplevel/.venv.
+ * Order: VIRTUAL_ENV → workspaceDir/.venv → main-repo/.venv (git-common-dir).
  * Checks bin/python and Windows Scripts/python.exe.
  */
 export function resolvePythonInterpreter(opts: {
   workspaceDir: string;
   env?: NodeJS.ProcessEnv;
   fileExists?: (path: string) => boolean;
+  /** Inject main-repo root; default uses resolveGitMainWorktreeRoot (not show-toplevel). */
+  gitMainRoot?: (cwd: string) => string | null;
+  /** @deprecated Use gitMainRoot — kept for tests that still pass this name. */
   gitToplevel?: (cwd: string) => string | null;
 }): PythonInterpreterResult {
   const exists = opts.fileExists ?? existsSync;
@@ -72,36 +115,23 @@ export function resolvePythonInterpreter(opts: {
     },
   );
 
-  const toplevel =
-    opts.gitToplevel?.(workspaceDir) ??
-    (() => {
-      try {
-        return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-          encoding: "utf8",
-          cwd: workspaceDir,
-        }).trim();
-      } catch {
-        return null;
-      }
-    })();
+  const resolveMain =
+    opts.gitMainRoot ?? opts.gitToplevel ?? resolveGitMainWorktreeRoot;
+  const mainRoot = resolveMain(workspaceDir);
 
-  if (toplevel) {
-    const top = resolve(toplevel);
-    // Avoid duplicating workspace path when worktree IS the toplevel
-    if (top !== workspaceDir) {
+  if (mainRoot) {
+    const main = resolve(mainRoot);
+    if (main !== workspaceDir) {
       candidates.push(
-        { path: join(top, ".venv", "bin", "python"), source: "git.toplevel.venv" },
+        { path: join(main, ".venv", "bin", "python"), source: "git.main.venv" },
         {
-          path: join(top, ".venv", "Scripts", "python.exe"),
-          source: "git.toplevel.venv",
+          path: join(main, ".venv", "Scripts", "python.exe"),
+          source: "git.main.venv",
         },
       );
-    } else {
-      // Still list git root candidates after workspace when same dir (order already tried workspace)
-      // No extra — workspace.venv already covers it
     }
   } else {
-    tried.push("(git rev-parse --show-toplevel failed or not a git repo)");
+    tried.push("(git main worktree root unresolved — not a git repo or git-common-dir failed)");
   }
 
   for (const c of candidates) {
@@ -114,14 +144,17 @@ export function resolvePythonInterpreter(opts: {
   return {
     error:
       "unit_test: no project Python venv found for pytest. " +
-      "Tried: VIRTUAL_ENV, workspace/.venv, git-toplevel/.venv. " +
+      "Tried: VIRTUAL_ENV, workspace/.venv, main-repo/.venv (via git-common-dir). " +
       "Create a venv with project deps, activate it, or set unit_test.command to an absolute interpreter " +
       "(e.g. /path/to/.venv/bin/python -m pytest).",
     tried,
   };
 }
 
-/** Shell snippet: set PY to discovered project python or exit with diagnostics (#75). */
+/**
+ * Shell snippet: set PY to discovered project python or exit with diagnostics (#75).
+ * Main-repo root via git-common-dir (not show-toplevel) so linked worktrees see main .venv.
+ */
 export function renderPythonDiscoveryShell(): string {
   return [
     `PY="";`,
@@ -130,13 +163,21 @@ export function renderPythonDiscoveryShell(): string {
     `elif [ -x .venv/bin/python ]; then PY=".venv/bin/python";`,
     `elif [ -x .venv/Scripts/python.exe ]; then PY=".venv/Scripts/python.exe";`,
     `else`,
-    `  TOP=\$(git rev-parse --show-toplevel 2>/dev/null || true);`,
-    `  if [ -n "\$TOP" ] && [ -x "\$TOP/.venv/bin/python" ]; then PY="\$TOP/.venv/bin/python";`,
-    `  elif [ -n "\$TOP" ] && [ -x "\$TOP/.venv/Scripts/python.exe" ]; then PY="\$TOP/.venv/Scripts/python.exe";`,
+    `  COMMON=\$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || git rev-parse --git-common-dir 2>/dev/null || true);`,
+    `  MAIN="";`,
+    `  if [ -n "\$COMMON" ]; then`,
+    `    case "\$COMMON" in`,
+    `      /*) ;;`,
+    `      *) COMMON="\$(pwd)/\$COMMON" ;;`,
+    `    esac;`,
+    `    MAIN=\$(dirname "\$COMMON");`,
+    `  fi;`,
+    `  if [ -n "\$MAIN" ] && [ -x "\$MAIN/.venv/bin/python" ]; then PY="\$MAIN/.venv/bin/python";`,
+    `  elif [ -n "\$MAIN" ] && [ -x "\$MAIN/.venv/Scripts/python.exe" ]; then PY="\$MAIN/.venv/Scripts/python.exe";`,
     `  fi;`,
     `fi;`,
     `if [ -z "\$PY" ]; then`,
-    `  echo "unit_test: no project Python venv found. Tried: VIRTUAL_ENV/bin/python, .venv/bin/python, \$(git rev-parse --show-toplevel 2>/dev/null)/.venv/bin/python (and Windows Scripts/python.exe). Configure unit_test.command to an absolute interpreter (e.g. /path/to/.venv/bin/python -m pytest)." >&2;`,
+    `  echo "unit_test: no project Python venv found. Tried: VIRTUAL_ENV, .venv, main-repo/.venv via git-common-dir. Configure unit_test.command to an absolute interpreter (e.g. /path/to/.venv/bin/python -m pytest)." >&2;`,
     `  exit 1;`,
     `fi;`,
   ].join(" ");

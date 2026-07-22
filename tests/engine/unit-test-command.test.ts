@@ -7,9 +7,11 @@ import { execFileSync } from "node:child_process";
 import {
   isLintBundledTestWrapper,
   isPythonInterpreterHit,
+  resolveGitMainWorktreeRoot,
   resolvePythonInterpreter,
   resolveUnitTestRunner,
   renderUnitTestCommandScript,
+  renderPythonDiscoveryShell,
   runResolvedUnitTest,
 } from "../../src/engine/unit-test-command.js";
 
@@ -168,18 +170,18 @@ python -m pytest
 });
 
 describe("Python interpreter discovery (#75)", () => {
-  it("prefers VIRTUAL_ENV over workspace and git toplevel .venv", () => {
+  it("prefers VIRTUAL_ENV over workspace and main-repo .venv", () => {
     const workspace = tmpWorkspace("petri-py-ws-");
     const ve = tmpWorkspace("petri-py-ve-");
-    const top = tmpWorkspace("petri-py-top-");
+    const main = tmpWorkspace("petri-py-main-");
     try {
       const vePy = plantVenvPython(ve, path.join("bin", "python"));
       plantVenvPython(workspace);
-      plantVenvPython(top);
+      plantVenvPython(main);
       const hit = resolvePythonInterpreter({
         workspaceDir: workspace,
         env: { VIRTUAL_ENV: ve },
-        gitToplevel: () => top,
+        gitMainRoot: () => main,
       });
       expect(isPythonInterpreterHit(hit)).toBe(true);
       if (!isPythonInterpreterHit(hit)) return;
@@ -188,20 +190,20 @@ describe("Python interpreter discovery (#75)", () => {
     } finally {
       fs.rmSync(workspace, { recursive: true, force: true });
       fs.rmSync(ve, { recursive: true, force: true });
-      fs.rmSync(top, { recursive: true, force: true });
+      fs.rmSync(main, { recursive: true, force: true });
     }
   });
 
-  it("uses workspace .venv before git toplevel", () => {
+  it("uses workspace .venv before main-repo .venv", () => {
     const workspace = tmpWorkspace("petri-py-ws2-");
-    const top = tmpWorkspace("petri-py-top2-");
+    const main = tmpWorkspace("petri-py-main2-");
     try {
       const wsPy = plantVenvPython(workspace);
-      plantVenvPython(top);
+      plantVenvPython(main);
       const hit = resolvePythonInterpreter({
         workspaceDir: workspace,
         env: {},
-        gitToplevel: () => top,
+        gitMainRoot: () => main,
       });
       expect(isPythonInterpreterHit(hit)).toBe(true);
       if (!isPythonInterpreterHit(hit)) return;
@@ -209,27 +211,121 @@ describe("Python interpreter discovery (#75)", () => {
       expect(hit.python).toBe(wsPy);
     } finally {
       fs.rmSync(workspace, { recursive: true, force: true });
-      fs.rmSync(top, { recursive: true, force: true });
+      fs.rmSync(main, { recursive: true, force: true });
     }
   });
 
-  it("falls back to git toplevel .venv from a worktree-like workspace", () => {
-    const top = tmpWorkspace("petri-py-top3-");
-    const workspace = path.join(top, ".worktrees", "issue-63");
+  it("falls back to main-repo .venv via gitMainRoot inject", () => {
+    const main = tmpWorkspace("petri-py-main3-");
+    const workspace = path.join(main, ".worktrees", "issue-63");
     fs.mkdirSync(workspace, { recursive: true });
     try {
-      const topPy = plantVenvPython(top);
+      const mainPy = plantVenvPython(main);
       const hit = resolvePythonInterpreter({
         workspaceDir: workspace,
         env: {},
-        gitToplevel: () => top,
+        gitMainRoot: () => main,
       });
       expect(isPythonInterpreterHit(hit)).toBe(true);
       if (!isPythonInterpreterHit(hit)) return;
-      expect(hit.source).toBe("git.toplevel.venv");
-      expect(hit.python).toBe(topPy);
+      expect(hit.source).toBe("git.main.venv");
+      expect(hit.python).toBe(mainPy);
     } finally {
-      fs.rmSync(top, { recursive: true, force: true });
+      fs.rmSync(main, { recursive: true, force: true });
+    }
+  });
+
+  it("REAL git worktree: discovers main-repo .venv without mocked gitMainRoot", () => {
+    // Reproduces cortex case: deps in main .venv, unit_test cwd is linked worktree.
+    // show-toplevel would return the worktree path and miss main .venv.
+    const main = tmpWorkspace("petri-real-main-");
+    const wtPath = path.join(main, ".worktrees", "issue-75");
+    try {
+      execFileSync("git", ["init"], { cwd: main, stdio: "ignore" });
+      execFileSync("git", ["config", "user.email", "t@t.com"], {
+        cwd: main,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["config", "user.name", "t"], {
+        cwd: main,
+        stdio: "ignore",
+      });
+      fs.writeFileSync(path.join(main, "README.md"), "base\n");
+      fs.mkdirSync(path.join(main, "tests"), { recursive: true });
+      fs.writeFileSync(path.join(main, "tests", "test_ok.py"), "def test_ok():\n  assert True\n");
+      execFileSync("git", ["add", "."], { cwd: main, stdio: "ignore" });
+      execFileSync("git", ["commit", "-m", "init"], { cwd: main, stdio: "ignore" });
+
+      const mainPy = plantVenvPython(main);
+      fs.mkdirSync(path.join(main, ".worktrees"), { recursive: true });
+      execFileSync("git", ["worktree", "add", wtPath, "HEAD"], {
+        cwd: main,
+        stdio: "ignore",
+      });
+
+      const real = (p: string) => fs.realpathSync(path.resolve(p));
+
+      // Prove show-toplevel is the worktree (the bug class) while main root differs
+      const showTop = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+        encoding: "utf8",
+        cwd: wtPath,
+      }).trim();
+      expect(real(showTop)).toBe(real(wtPath));
+      expect(real(showTop)).not.toBe(real(main));
+
+      const mainFromGit = resolveGitMainWorktreeRoot(wtPath);
+      expect(mainFromGit).not.toBeNull();
+      expect(real(mainFromGit!)).toBe(real(main));
+
+      // Unmocked discovery from worktree cwd
+      const hit = resolvePythonInterpreter({
+        workspaceDir: wtPath,
+        env: {}, // no VIRTUAL_ENV
+      });
+      expect(isPythonInterpreterHit(hit)).toBe(true);
+      if (!isPythonInterpreterHit(hit)) return;
+      expect(hit.source).toBe("git.main.venv");
+      expect(real(hit.python)).toBe(real(mainPy));
+
+      // Shell discovery used by pipeline must use git-common-dir for main root
+      const shell = renderPythonDiscoveryShell();
+      expect(shell).toMatch(/git-common-dir/);
+      // Must not *invoke* show-toplevel for path resolution
+      expect(shell).not.toMatch(/rev-parse[^\n]*show-toplevel/);
+
+      // Execute the real shell snippet from the worktree (main has .venv only)
+      const script = `${shell} echo "PY=\$PY"`;
+      const out = execFileSync("/bin/sh", ["-c", script], {
+        encoding: "utf8",
+        cwd: wtPath,
+        env: { ...process.env, VIRTUAL_ENV: "" },
+      });
+      expect(out).toMatch(/PY=/);
+      const pyLine = out.trim().split("\n").find((l) => l.startsWith("PY="));
+      expect(pyLine).toBeDefined();
+      const pyPath = pyLine!.slice(3);
+      expect(real(pyPath)).toBe(real(mainPy));
+
+      // pipeline.yaml must not use show-toplevel for main .venv
+      const yaml = fs.readFileSync(
+        path.join(process.cwd(), "src/templates/code-dev/pipeline.yaml"),
+        "utf-8",
+      );
+      expect(yaml).toMatch(/git-common-dir/);
+      // Avoid show-toplevel in the discovery branch (comments may still mention it)
+      const discovery = yaml.slice(yaml.indexOf("PY=\"\";"), yaml.indexOf("\"$PY\" -m pytest"));
+      expect(discovery).not.toMatch(/show-toplevel/);
+      expect(discovery).toMatch(/git-common-dir/);
+    } finally {
+      try {
+        execFileSync("git", ["worktree", "remove", "--force", wtPath], {
+          cwd: main,
+          stdio: "ignore",
+        });
+      } catch {
+        /* ignore */
+      }
+      fs.rmSync(main, { recursive: true, force: true });
     }
   });
 
@@ -239,7 +335,7 @@ describe("Python interpreter discovery (#75)", () => {
       const miss = resolvePythonInterpreter({
         workspaceDir: workspace,
         env: {},
-        gitToplevel: () => "/nonexistent-git-root-petri-test",
+        gitMainRoot: () => "/nonexistent-git-root-petri-test",
         fileExists: () => false,
       });
       expect(isPythonInterpreterHit(miss)).toBe(false);
@@ -252,7 +348,7 @@ describe("Python interpreter discovery (#75)", () => {
       const resolved = resolveUnitTestRunner(workspace, {
         env: {},
         fileExists: () => false,
-        gitToplevel: () => null,
+        gitMainRoot: () => null,
       });
       expect(resolved.kind).toBe("none");
       if (resolved.kind !== "none") return;
