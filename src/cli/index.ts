@@ -32,6 +32,10 @@ program
     "Worktree isolation under .worktrees/ (default). Optional directory name",
   )
   .option(
+    "--reuse-worktree",
+    "Reuse existing .worktrees/<name> (keep WIP); implied by --resume-run when path exists",
+  )
+  .option(
     "--in-place",
     "Run in the current working tree (main/trunk), not a temporary worktree",
   )
