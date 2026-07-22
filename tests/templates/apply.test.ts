@@ -78,6 +78,42 @@ describe("applyTemplate", () => {
     expect(loadRole(target, "code_reviewer", "default").gate?.contract).toEqual({ type: "review" });
   });
 
+  it("issue #79: code-dev template layers targeted unit_test and optional full_test", () => {
+    const yamlPath = path.join(
+      process.cwd(),
+      "src/templates/code-dev/pipeline.yaml",
+    );
+    const yaml = fs.readFileSync(yamlPath, "utf-8");
+    // unit_test inside repeat with targeted scope evidence
+    expect(yaml).toMatch(/name: unit_test/);
+    expect(yaml).toMatch(/"scope":"targeted"/);
+    // full_test is a top-level stage after the cycle (not nested under repeat)
+    expect(yaml).toMatch(/name: full_test/);
+    expect(yaml).toMatch(/"scope":"full"/);
+    // full_test must not appear between develop and review inside the cycle only
+    const repeatBlock = yaml.slice(
+      yaml.indexOf("name: develop-review-cycle"),
+      yaml.indexOf("name: full_test"),
+    );
+    expect(repeatBlock).toMatch(/unit_test/);
+    expect(repeatBlock).not.toMatch(/name: full_test/);
+    expect(repeatBlock).toMatch(/"scope":"targeted"/);
+
+    const playbook = fs.readFileSync(
+      path.join(process.cwd(), "src/templates/code-dev/roles/developer/playbooks/implement.md"),
+      "utf-8",
+    );
+    expect(playbook).toMatch(/out-of-scope|范围外|not.*default develop/i);
+    expect(playbook).toMatch(/full_test|targeted/i);
+
+    const readme = fs.readFileSync(
+      path.join(process.cwd(), "src/templates/code-dev/README.md"),
+      "utf-8",
+    );
+    expect(readme).toMatch(/targeted|靶向/i);
+    expect(readme).toMatch(/full_test/);
+  });
+
   it("throws NOT_FOUND for unknown template", () => {
     expect(() => applyTemplate("no-such-template", path.join(tmp, "x"))).toThrow(TemplateError);
     try {
