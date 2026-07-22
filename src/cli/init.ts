@@ -1,7 +1,11 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
-import { applyTemplate, TemplateError } from "../templates/apply.js";
+import {
+  applyTemplate,
+  formatSkippedTemplateFiles,
+  TemplateError,
+} from "../templates/apply.js";
 import { listPresetTemplates } from "../templates/list.js";
 
 export async function initCommand(opts: { template?: string }) {
@@ -18,7 +22,10 @@ export async function initCommand(opts: { template?: string }) {
   const template = opts.template ?? "code-dev";
 
   try {
-    applyTemplate(template, projectDir);
+    const result = applyTemplate(template, projectDir);
+    for (const line of formatSkippedTemplateFiles(result.skipped)) {
+      console.log(chalk.yellow(`⚠ ${line}`));
+    }
   } catch (err) {
     if (err instanceof TemplateError) {
       console.log(chalk.red(`Error: ${err.message}`));

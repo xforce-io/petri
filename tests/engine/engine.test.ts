@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { Engine } from "../../src/engine/engine.js";
+import {
+  Engine,
+  formatTimeoutExhaustionReason,
+  shouldStagnateFailure,
+} from "../../src/engine/engine.js";
 import { RunLogger, loadRunLog } from "../../src/engine/logger.js";
 import type {
   AgentConfig,
@@ -393,7 +397,9 @@ describe("Engine", () => {
 
     const result = await engine.run(pipeline, "Do work");
     expect(result.status).toBe("blocked");
-    expect(result.reason).toMatch(/timed out|timeout|Stagnation/i);
+    // #76: consecutive timeouts exhaust retries without gate-style stagnation
+    expect(result.reason).toMatch(/timeout exhaustion|timed out|timeout/i);
+    expect(result.reason).not.toMatch(/Stagnation detected: same failure repeated/);
   }, 10_000);
 
   it("aborts the agent signal when a stage attempt times out", async () => {
@@ -471,8 +477,9 @@ describe("Engine", () => {
 
     const result = await engine.run(pipeline, "Do work");
     expect(result.status).toBe("blocked");
-    // With identical timeout failures, stagnation detection kicks in
-    expect(result.reason).toMatch(/timed out|timeout|Stagnation/i);
+    // #76: identical timeouts do not stagnate as "same failure repeated"
+    expect(result.reason).toMatch(/timeout exhaustion|timed out|timeout/i);
+    expect(result.reason).not.toMatch(/Stagnation detected: same failure repeated/);
   }, 10_000);
 
   it("settles a timed-out attempt within grace so the next attempt does not wait on the loser", async () => {
@@ -577,10 +584,90 @@ describe("Engine", () => {
     const elapsed = Date.now() - t0;
 
     expect(result.status).toBe("blocked");
-    expect(result.reason).toMatch(/timed out|timeout|Stagnation|budget|wall-clock/i);
+    expect(result.reason).toMatch(/timed out|timeout|timeout exhaustion|budget|wall-clock/i);
+    expect(result.reason).not.toMatch(/Stagnation detected: same failure repeated/);
     // With timeout=100 and max_retries=1, budget is a few seconds max.
     expect(elapsed).toBeLessThan(6_000);
   }, 15_000);
+
+  it("issue #76: two consecutive timeouts never report gate stagnation", async () => {
+    const gate = makeGate("{stage}/{role}/output.json", {
+      field: "approved",
+      equals: true,
+    });
+    const roles: Record<string, LoadedRole> = {
+      worker: makeRole("worker", gate),
+    };
+    const hangingProvider: AgentProvider = {
+      createAgent(): PetriAgent {
+        return {
+          run(): Promise<AgentResult> {
+            return new Promise(() => {});
+          },
+        };
+      },
+    };
+    const pipeline: PipelineConfig = {
+      name: "test-pipeline",
+      stages: [{ name: "develop", roles: ["worker"], max_retries: 2, timeout: 80 }],
+    };
+    const engine = new Engine({
+      provider: hangingProvider,
+      roles,
+      artifactBaseDir: tmpDir,
+    });
+    const result = await engine.run(pipeline, "implement");
+    expect(result.status).toBe("blocked");
+    expect(result.reason).toMatch(/timeout exhaustion/i);
+    expect(result.reason).toMatch(/--skip-to develop/);
+    expect(result.reason).toMatch(/--resume-run/);
+    expect(result.reason).not.toMatch(/Stagnation detected: same failure repeated/);
+  }, 15_000);
+
+  it("issue #76 policy helpers: timeout never stagnates; gate hash can", () => {
+    expect(
+      shouldStagnateFailure({
+        kind: "timeout",
+        sameAsPreviousGateHash: true,
+        attemptIndex: 1,
+      }),
+    ).toBe(false);
+    expect(
+      shouldStagnateFailure({
+        kind: "gate",
+        sameAsPreviousGateHash: true,
+        attemptIndex: 1,
+      }),
+    ).toBe(true);
+    expect(
+      shouldStagnateFailure({
+        kind: "gate",
+        sameAsPreviousGateHash: false,
+        attemptIndex: 1,
+      }),
+    ).toBe(false);
+    expect(formatTimeoutExhaustionReason("develop", 5)).toMatch(/timeout exhaustion/);
+    expect(formatTimeoutExhaustionReason("develop", 5)).toMatch(/--skip-to develop/);
+  });
+
+  it("issue #76: code-dev develop default timeout is at least 20 minutes", () => {
+    const yamlPath = path.resolve(
+      path.dirname(new URL(import.meta.url).pathname),
+      "../../src/templates/code-dev/pipeline.yaml",
+    );
+    // fileURL path on mac may need decode — use path from cwd relative
+    const yaml = fs.readFileSync(
+      path.join(process.cwd(), "src/templates/code-dev/pipeline.yaml"),
+      "utf-8",
+    );
+    // Find develop stage timeout
+    const developBlock = yaml.match(
+      /- name: develop\n(?:[^\n]*\n)*?\s+timeout:\s*(\d+)/,
+    );
+    expect(developBlock).not.toBeNull();
+    const ms = Number(developBlock![1]);
+    expect(ms).toBeGreaterThanOrEqual(1_200_000);
+  });
 
   it("runs nested repeat blocks", async () => {
     const innerGate: GateConfig = {
