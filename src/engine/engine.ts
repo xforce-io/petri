@@ -27,6 +27,35 @@ import type {
   GateStrategy,
 } from "../types.js";
 
+/**
+ * Operator-visible reason when an agent stage exhausts retries due to timeout
+ * (issue #76). Distinct from gate stagnation ("same failure repeated").
+ */
+export function formatTimeoutExhaustionReason(
+  stageName: string,
+  maxRetries: number,
+): string {
+  const attempts = maxRetries + 1;
+  return (
+    `Agent timeout exhaustion after ${attempts} attempt(s) at stage "${stageName}" ` +
+    `(not gate stagnation). Resume with: petri run --skip-to ${stageName} --resume-run <id> ` +
+    `(optionally --worktree <name> / --reuse-worktree to keep WIP).`
+  );
+}
+
+/**
+ * Pure policy: timeout fingerprints never stagnate as "same failure" (#76).
+ * Gate failures with identical consecutive hashes stagnate.
+ */
+export function shouldStagnateFailure(opts: {
+  kind: "timeout" | "gate";
+  sameAsPreviousGateHash: boolean;
+  attemptIndex: number;
+}): boolean {
+  if (opts.kind === "timeout") return false;
+  return opts.sameAsPreviousGateHash && opts.attemptIndex > 0;
+}
+
 export interface EngineOptions {
   /** Legacy single-provider form. Use providers for per-role routing. */
   provider?: AgentProvider;
@@ -228,6 +257,9 @@ export class Engine {
     const attemptHistory: AttemptRecord[] = [];
     let failureContext = "";
     let lastFailureHash = "";
+    /** Last non-timeout failure hash class — timeouts never share this for stagnation (#76). */
+    let lastGateFailureHash = "";
+    let lastFailureWasTimeout = false;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const remainingBudget = stageDeadline - Date.now();
@@ -388,27 +420,23 @@ export class Engine {
         ]);
       }
 
-      // If agent timed out, treat as a failed attempt
+      // If agent timed out, treat as a failed attempt.
+      // Issue #76: consecutive timeouts must NOT use gate-style stagnation
+      // ("same failure repeated"); burn remaining retries then exit with
+      // explicit timeout exhaustion + resume guidance.
       if (agentTimedOut) {
         for (const roleName of stage.roles) {
           this.archiveRoleAttempt(manifest, stage.name, roleName, attempt + 1);
         }
 
-        const failureReason = timeoutMessage;
+        const failureReason = timeoutMessage || `Agent timed out after ${effectiveTimeout}ms`;
         const failureHash = createHash("sha256")
-          .update(failureReason)
+          .update(`timeout:${failureReason}`)
           .digest("hex");
 
-        if (lastFailureHash === failureHash && attempt > 0) {
-          this.logger?.endStageAttempt("blocked");
-          return {
-            status: "blocked",
-            stage: stage.name,
-            reason: `Stagnation detected: same failure repeated`,
-          };
-        }
-
+        lastFailureWasTimeout = true;
         lastFailureHash = failureHash;
+        // Do not update lastGateFailureHash — timeouts never stagnate as "same failure".
         failureContext = failureReason;
         attemptHistory.push({
           attempt: attempt + 1,
@@ -508,8 +536,15 @@ export class Engine {
         .update(failureReason)
         .digest("hex");
 
-      // Stagnation detection: same hash as last attempt → blocked early
-      if (lastFailureHash === failureHash && attempt > 0) {
+      // Stagnation detection for gate failures only (issue #76): same gate
+      // fingerprint as the previous *gate* attempt → blocked early.
+      if (
+        shouldStagnateFailure({
+          kind: "gate",
+          sameAsPreviousGateHash: lastGateFailureHash === failureHash,
+          attemptIndex: attempt,
+        })
+      ) {
         return {
           status: "blocked",
           stage: stage.name,
@@ -517,7 +552,9 @@ export class Engine {
         };
       }
 
+      lastFailureWasTimeout = false;
       lastFailureHash = failureHash;
+      lastGateFailureHash = failureHash;
       failureContext = failureReason;
       attemptHistory.push({
         attempt: attempt + 1,
@@ -527,6 +564,13 @@ export class Engine {
     }
 
     this.logger?.endStageAttempt("blocked");
+    if (lastFailureWasTimeout) {
+      return {
+        status: "blocked",
+        stage: stage.name,
+        reason: formatTimeoutExhaustionReason(stage.name, maxRetries),
+      };
+    }
     return {
       status: "blocked",
       stage: stage.name,

@@ -21,9 +21,11 @@ stages:
       until: review-approved
       stages:
         # 3. TDD develop (playbook: tests first; self-report tests-pass)
+        # timeout ≥ 20m for mid-size monorepo TDD rounds (issue #76); yaml-overridable
         - name: develop
           roles: [developer]
           max_retries: 5
+          timeout: 1800000
 
         # 4. Deterministic PURE unit gate (not agent self-report). Engine runs
         # this in the source workspace, never in a developer artifact dir.
