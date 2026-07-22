@@ -4,10 +4,12 @@ import * as path from "node:path";
 import * as os from "node:os";
 import {
   applyTemplate,
+  formatSkippedTemplateFiles,
   isValidProjectName,
   resolveProjectPath,
   TemplateError,
 } from "../../src/templates/apply.js";
+import { createHash } from "node:crypto";
 import { listPresetTemplates } from "../../src/templates/list.js";
 import { loadRole } from "../../src/config/loader.js";
 
@@ -89,6 +91,49 @@ describe("applyTemplate", () => {
     const target = path.join(tmp, "exists");
     applyTemplate("code-dev", target);
     expect(() => applyTemplate("code-dev", target)).toThrow(TemplateError);
+  });
+
+  it("issue #77: does not overwrite existing custom README.md", () => {
+    const target = path.join(tmp, "biz");
+    fs.mkdirSync(target, { recursive: true });
+    const custom = "# Business Project\n\nDo not clobber me.\n";
+    const readmePath = path.join(target, "README.md");
+    fs.writeFileSync(readmePath, custom);
+    const beforeHash = createHash("sha256").update(fs.readFileSync(readmePath)).digest("hex");
+
+    const result = applyTemplate("code-dev", target);
+    const afterHash = createHash("sha256").update(fs.readFileSync(readmePath)).digest("hex");
+    expect(afterHash).toBe(beforeHash);
+    expect(fs.readFileSync(readmePath, "utf-8")).toBe(custom);
+    expect(result.skipped.some((p) => p.endsWith("README.md"))).toBe(true);
+    expect(fs.existsSync(path.join(target, "petri.yaml"))).toBe(true);
+    expect(fs.existsSync(path.join(target, "pipeline.yaml"))).toBe(true);
+    expect(fs.existsSync(path.join(target, "roles", "developer", "role.yaml"))).toBe(true);
+  });
+
+  it("issue #77: fills missing scaffold when no README conflict", () => {
+    const target = path.join(tmp, "empty-ish");
+    fs.mkdirSync(target, { recursive: true });
+    const result = applyTemplate("code-dev", target);
+    expect(result.created.length).toBeGreaterThan(0);
+    expect(fs.existsSync(path.join(target, "petri.yaml"))).toBe(true);
+    expect(fs.existsSync(path.join(target, "pipeline.yaml"))).toBe(true);
+  });
+
+  it("issue #77: skips existing pipeline.yaml with path-bearing message", () => {
+    const target = path.join(tmp, "partial");
+    fs.mkdirSync(target, { recursive: true });
+    const customPipe = "name: custom\nstages: []\n";
+    fs.writeFileSync(path.join(target, "pipeline.yaml"), customPipe);
+
+    const result = applyTemplate("code-dev", target);
+    expect(fs.readFileSync(path.join(target, "pipeline.yaml"), "utf-8")).toBe(customPipe);
+    expect(result.skipped.some((p) => p.endsWith("pipeline.yaml"))).toBe(true);
+    const msgs = formatSkippedTemplateFiles(result.skipped);
+    expect(msgs.some((m) => m.includes("pipeline.yaml") && m.includes("not overwritten"))).toBe(
+      true,
+    );
+    expect(fs.existsSync(path.join(target, "petri.yaml"))).toBe(true);
   });
 });
 
