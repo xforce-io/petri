@@ -27,7 +27,14 @@ program
     "Source run for --skip-to lineage (e.g. 001); inherits that run's input when --input/--from not set",
   )
   .option("--require-clean", "Ensure git working tree is clean before running")
-  .option("--worktree [name]", "Run in a temporary git worktree to isolate changes")
+  .option(
+    "--worktree [name]",
+    "Worktree isolation under .worktrees/ (default). Optional directory name",
+  )
+  .option(
+    "--in-place",
+    "Run in the current working tree (main/trunk), not a temporary worktree",
+  )
   .option("--branch <id>", "Run under a named exploration branch")
   .action(runCommand);
 

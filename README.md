@@ -227,7 +227,9 @@ CLI-backed providers (`grok`, `codex`, `claude_code`) spawn the local CLI, write
 
 ```bash
 petri init [--template <name>]     # Scaffold project
-petri run [--pipeline <file>]      # Execute pipeline
+petri run [--pipeline <file>]      # Execute pipeline (default: isolated git worktree)
+petri run --in-place               # Run in the current working tree (main/trunk)
+petri run --worktree [name]        # Worktree isolation (default); optional .worktrees/ name
 petri run --skip-to <stage> --resume-run <run-id> # Continue from a recorded run
 petri run --branch <id>             # Execute under a named exploration branch
 petri status                       # Latest run status
@@ -242,6 +244,8 @@ petri list playbooks               # Built-in playbooks
 petri validate                     # Check configuration
 petri web [--port <number>]        # Web dashboard
 ```
+
+`petri run` **defaults to a temporary git worktree** under `.worktrees/` so agents do not mutate your checked-out tree. Pass **`--in-place`** only when you intentionally want the current working tree (trunk). Non-git directories cannot create a worktree — use `--in-place` or initialize git first.
 
 ### 从 GitHub / GitLab Issue 启动 code-dev
 

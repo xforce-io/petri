@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import chalk from "chalk";
 import {
   loadPetriConfig,
@@ -24,8 +24,60 @@ interface RunOptions {
   skipTo?: string;
   resumeRun?: string;
   requireClean?: boolean;
+  /** Optional worktree directory name under .worktrees/; presence still implies worktree mode. */
   worktree?: string | boolean;
+  /** Run in the current working tree (main/trunk). Overrides default worktree isolation. */
+  inPlace?: boolean;
   branch?: string;
+}
+
+/** Resolved workspace execution mode for `petri run` (issue #71). */
+export type WorkspaceMode =
+  | { mode: "in-place" }
+  | { mode: "worktree"; name: string };
+
+export const IN_PLACE_WORKTREE_CONFLICT =
+  "--in-place cannot be combined with --worktree. Use --in-place for the current working tree, or omit it (optionally with --worktree [name]) for isolation.";
+
+/**
+ * Worktree names must be a single directory segment under `.worktrees/`
+ * (no path separators / traversal).
+ */
+export function assertWorktreeDirName(name: string): void {
+  if (
+    !name ||
+    name === "." ||
+    name === ".." ||
+    name.includes("/") ||
+    name.includes("\\") ||
+    name.includes("\0")
+  ) {
+    throw new Error(
+      `Invalid --worktree name "${name}". Use a single directory segment under .worktrees/ (no path separators).`,
+    );
+  }
+}
+
+/**
+ * Default is worktree isolation; only --in-place runs on the current tree (trunk).
+ * --worktree [name] remains for naming the auto worktree directory.
+ */
+export function resolveWorkspaceMode(
+  opts: { inPlace?: boolean; worktree?: string | boolean },
+  now: () => number = Date.now,
+): WorkspaceMode {
+  if (opts.inPlace) {
+    if (opts.worktree !== undefined) {
+      throw new Error(IN_PLACE_WORKTREE_CONFLICT);
+    }
+    return { mode: "in-place" };
+  }
+  const name =
+    typeof opts.worktree === "string" && opts.worktree.length > 0
+      ? opts.worktree
+      : `run-${now()}`;
+  assertWorktreeDirName(name);
+  return { mode: "worktree", name };
 }
 
 /** Validate and normalize the source run that an explicit resume continues from. */
@@ -83,16 +135,30 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   }
 
   let worktreePath: string | undefined;
-  if (opts.worktree) {
+  let workspaceMode: WorkspaceMode;
+  try {
+    workspaceMode = resolveWorkspaceMode(opts);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(message));
+    process.exit(1);
+  }
+
+  if (workspaceMode.mode === "worktree") {
     try {
       const status = execSync("git status --porcelain", { encoding: "utf8", cwd });
       if (status.trim() !== "") {
-        console.log(chalk.yellow("Warning: You have uncommitted changes in your working tree. The worktree is created from HEAD and will not include them."));
+        console.log(
+          chalk.yellow(
+            "Warning: You have uncommitted changes in your working tree. The worktree is created from HEAD and will not include them.",
+          ),
+        );
       }
-    } catch (e) {}
+    } catch {
+      // Not a git repo or git unavailable — worktree add below will fail with guidance.
+    }
 
-    const dirName = typeof opts.worktree === "string" ? opts.worktree : `run-${Date.now()}`;
-    worktreePath = path.resolve(cwd, ".worktrees", dirName);
+    worktreePath = path.resolve(cwd, ".worktrees", workspaceMode.name);
     if (fs.existsSync(worktreePath)) {
       console.error(chalk.red(`Error: Worktree directory already exists at ${worktreePath}`));
       process.exit(1);
@@ -100,10 +166,18 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     try {
       fs.mkdirSync(path.join(cwd, ".worktrees"), { recursive: true });
       console.log(chalk.blue(`Creating temporary worktree at ${worktreePath}...`));
-      execSync(`git worktree add ${worktreePath} HEAD`, { stdio: "ignore", cwd });
+      execFileSync("git", ["worktree", "add", worktreePath, "HEAD"], {
+        stdio: "ignore",
+        cwd,
+      });
       executionCwd = worktreePath;
-    } catch (e) {
-      console.error(chalk.red(`Error: Failed to create git worktree.`));
+    } catch {
+      console.error(
+        chalk.red(
+          "Error: Failed to create git worktree (is this a git repository?). " +
+            "Use --in-place to run in the current working tree.",
+        ),
+      );
       process.exit(1);
     }
   }
