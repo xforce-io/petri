@@ -1,10 +1,114 @@
+import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+  unlinkSync,
+} from "node:fs";
+import { basename, join, resolve } from "node:path";
 
-interface LockData {
+export interface LockData {
   pid: number;
   runId: string;
   startedAt: string;
+  /** Absolute workspace path this lock guards (issue #78). */
+  workspace?: string;
+}
+
+/**
+ * Stable lock / run-storage namespace for a source workspace (issue #78).
+ * Different worktrees get different keys so concurrent runs do not share one global lock.
+ */
+export function workspaceLockKey(workspaceAbs: string): string {
+  const abs = resolve(workspaceAbs);
+  const worktreeSeg = abs.match(/[/\\]\.worktrees[/\\]([^/\\]+)$/);
+  if (worktreeSeg) {
+    const name = worktreeSeg[1].replace(/[^a-zA-Z0-9._-]+/g, "-");
+    return `wt-${name}`;
+  }
+  return `ws-${createHash("sha256").update(abs).digest("hex").slice(0, 12)}`;
+}
+
+/**
+ * Where run artifacts + run.lock live for a given project root and execution workspace.
+ * - In-place (workspace === project root): `.petri`
+ * - Worktree / other path: `.petri/ws/<key>` so locks and artifacts do not collide
+ * - Named exploration branch: existing branch root (unchanged)
+ */
+export function resolveRunRoot(opts: {
+  projectRoot: string;
+  workspaceDir: string;
+  branchRoot?: string;
+}): string {
+  if (opts.branchRoot) return opts.branchRoot;
+  const projectRoot = resolve(opts.projectRoot);
+  const workspaceDir = resolve(opts.workspaceDir);
+  if (workspaceDir === projectRoot) {
+    return join(projectRoot, ".petri");
+  }
+  return join(projectRoot, ".petri", "ws", workspaceLockKey(workspaceDir));
+}
+
+export function lockFilePath(runRoot: string): string {
+  return join(runRoot, "run.lock");
+}
+
+export type LockInspection =
+  | { status: "absent"; lockFile: string }
+  | {
+      status: "active" | "stale" | "malformed";
+      lockFile: string;
+      pid?: number;
+      runId?: string;
+      startedAt?: string;
+      workspace?: string;
+      cleanupHint: string;
+    };
+
+/** Read and classify a lock file for status / diagnostics (issue #78 S3). */
+export function inspectLock(lockFile: string): LockInspection {
+  if (!existsSync(lockFile)) {
+    return { status: "absent", lockFile };
+  }
+  try {
+    const data = JSON.parse(readFileSync(lockFile, "utf-8")) as LockData;
+    const alive = isProcessAlive(data.pid);
+    return {
+      status: alive ? "active" : "stale",
+      lockFile,
+      pid: data.pid,
+      runId: data.runId,
+      startedAt: data.startedAt,
+      workspace: data.workspace,
+      cleanupHint: alive
+        ? `Wait for PID ${data.pid} to finish, or stop that process. Do not delete an active lock.`
+        : `Stale lock (PID ${data.pid} is dead). Safe to delete: rm ${lockFile}`,
+    };
+  } catch {
+    return {
+      status: "malformed",
+      lockFile,
+      cleanupHint: `Malformed lock file. Safe to delete: rm ${lockFile}`,
+    };
+  }
+}
+
+/** List lock files under a project `.petri` tree (root + ws/*). */
+export function listProjectLockFiles(projectPetriDir: string): string[] {
+  const files: string[] = [];
+  const rootLock = join(projectPetriDir, "run.lock");
+  if (existsSync(rootLock)) files.push(rootLock);
+  const wsDir = join(projectPetriDir, "ws");
+  if (existsSync(wsDir)) {
+    for (const name of readdirSync(wsDir)) {
+      const lf = join(wsDir, name, "run.lock");
+      if (existsSync(lf)) files.push(lf);
+    }
+  }
+  return files;
 }
 
 /**
@@ -93,17 +197,25 @@ export function killProcessTree(pid: number, signal: NodeJS.Signals = "SIGKILL")
 }
 
 /**
- * Acquire a run lock. Throws if another run is already active.
+ * Acquire a run lock. Throws if another run is already active on the same lock file.
  * Stale locks (dead PID) are automatically cleaned up, including orphaned child processes.
+ * Different workspaces use different lock files via resolveRunRoot (issue #78).
  */
-export function acquireLock(lockFile: string, runId: string): void {
+export function acquireLock(
+  lockFile: string,
+  runId: string,
+  opts?: { workspace?: string },
+): void {
+  mkdirSync(join(lockFile, ".."), { recursive: true });
   if (existsSync(lockFile)) {
     try {
       const existing: LockData = JSON.parse(readFileSync(lockFile, "utf-8"));
       if (isProcessAlive(existing.pid)) {
         throw new Error(
-          `Another pipeline run is already active (run-${existing.runId}, PID ${existing.pid}, started ${existing.startedAt}). ` +
-          `If this is stale, delete ${lockFile} and retry.`,
+          `Another pipeline run is already active (run-${existing.runId}, PID ${existing.pid}, started ${existing.startedAt}` +
+            (existing.workspace ? `, workspace ${existing.workspace}` : "") +
+            `). Lock file: ${lockFile}. ` +
+            `If this is stale, delete ${lockFile} and retry.`,
         );
       }
       // Stale lock — process is dead, but children may still be alive
@@ -120,6 +232,7 @@ export function acquireLock(lockFile: string, runId: string): void {
     pid: process.pid,
     runId,
     startedAt: new Date().toISOString(),
+    workspace: opts?.workspace,
   };
   writeFileSync(lockFile, JSON.stringify(lock, null, 2), "utf-8");
 }

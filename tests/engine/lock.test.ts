@@ -145,3 +145,110 @@ describe("isProcessAlive", () => {
     expect(isProcessAlive(process.pid)).toBe(true);
   });
 });
+
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import {
+  acquireLock,
+  inspectLock,
+  listProjectLockFiles,
+  releaseLock,
+  resolveRunRoot,
+  workspaceLockKey,
+} from "../../src/engine/lock.js";
+
+describe("per-workspace run locks (issue #78)", () => {
+  it("assigns different lock keys for different worktree paths", () => {
+    const a = workspaceLockKey("/repo/.worktrees/issue-60");
+    const b = workspaceLockKey("/repo/.worktrees/issue-63");
+    expect(a).not.toBe(b);
+    expect(a).toMatch(/^wt-issue-60$/);
+    expect(b).toMatch(/^wt-issue-63$/);
+  });
+
+  it("resolveRunRoot isolates worktree storage from in-place", () => {
+    const root = "/proj";
+    expect(resolveRunRoot({ projectRoot: root, workspaceDir: root })).toBe(
+      path.join(root, ".petri"),
+    );
+    expect(
+      resolveRunRoot({
+        projectRoot: root,
+        workspaceDir: path.join(root, ".worktrees", "issue-A"),
+      }),
+    ).toBe(path.join(root, ".petri", "ws", "wt-issue-A"));
+    expect(
+      resolveRunRoot({
+        projectRoot: root,
+        workspaceDir: path.join(root, ".worktrees", "issue-B"),
+      }),
+    ).toBe(path.join(root, ".petri", "ws", "wt-issue-B"));
+  });
+
+  it("allows two different lock files to be held concurrently", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "petri-lock-"));
+    try {
+      const lockA = path.join(tmp, "ws", "a", "run.lock");
+      const lockB = path.join(tmp, "ws", "b", "run.lock");
+      acquireLock(lockA, "001", { workspace: "/ws/a" });
+      acquireLock(lockB, "002", { workspace: "/ws/b" });
+      expect(fs.existsSync(lockA)).toBe(true);
+      expect(fs.existsSync(lockB)).toBe(true);
+      releaseLock(lockA);
+      releaseLock(lockB);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("same lock key still rejects a second active acquire", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "petri-lock2-"));
+    const lockFile = path.join(tmp, "run.lock");
+    try {
+      acquireLock(lockFile, "001", { workspace: "/same" });
+      expect(() => acquireLock(lockFile, "002", { workspace: "/same" })).toThrow(
+        /Another pipeline run is already active/,
+      );
+      expect(() => acquireLock(lockFile, "002")).toThrow(/Lock file:/);
+      releaseLock(lockFile);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("inspectLock reports active vs stale and cleanup hints", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "petri-lock3-"));
+    const lockFile = path.join(tmp, "run.lock");
+    try {
+      expect(inspectLock(lockFile).status).toBe("absent");
+      acquireLock(lockFile, "009", { workspace: "/w" });
+      const active = inspectLock(lockFile);
+      expect(active.status).toBe("active");
+      if (active.status === "active") {
+        expect(active.runId).toBe("009");
+        expect(active.cleanupHint).toMatch(/Wait for PID|Do not delete/i);
+      }
+      releaseLock(lockFile);
+      // Stale: write dead pid
+      fs.writeFileSync(
+        lockFile,
+        JSON.stringify({
+          pid: 99999999,
+          runId: "010",
+          startedAt: new Date().toISOString(),
+        }),
+      );
+      const stale = inspectLock(lockFile);
+      expect(stale.status).toBe("stale");
+      if (stale.status === "stale") {
+        expect(stale.cleanupHint).toMatch(/rm /);
+      }
+      const listed = listProjectLockFiles(tmp);
+      // listProjectLockFiles expects project .petri layout; root lock at tmp/run.lock
+      expect(listed).toContain(lockFile);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
