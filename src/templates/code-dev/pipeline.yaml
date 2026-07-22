@@ -27,10 +27,11 @@ stages:
 
         # 4. Deterministic PURE unit gate (not agent self-report). Engine runs
         # this in the source workspace, never in a developer artifact dir.
-        # Prefer npm test / python -m pytest only — never default to
+        # Prefer npm test / project-venv python -m pytest only — never default to
         # lint-bundled wrappers such as `tests/run_tests.sh unit` (full-repo
         # ruff before pytest). Override unit_test.command for project runners.
-        # See issue #69 / src/engine/unit-test-command.ts.
+        # Python discovery (#75): VIRTUAL_ENV → workspace/.venv → git toplevel/.venv.
+        # See issue #69 / #75 / src/engine/unit-test-command.ts.
         #
         # Multi-line command tips (issue #57): engine normalizes YAML fold /
         # more-indented argv into one shell script. Prefer if/then/fi or
@@ -40,7 +41,22 @@ stages:
             if [ -f package.json ] && node -e "const p=require('./package.json'); process.exit(p.scripts&&p.scripts.test?0:1)" 2>/dev/null; then
               npm test && printf '%s\n' '{"tests_passed":true,"runner":"npm test"}' > "{artifact_dir}/result.json";
             elif [ -f pytest.ini ] || [ -f pyproject.toml ] || [ -d tests ]; then
-              python -m pytest && printf '%s\n' '{"tests_passed":true,"runner":"python -m pytest"}' > "{artifact_dir}/result.json";
+              PY="";
+              if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then PY="$VIRTUAL_ENV/bin/python";
+              elif [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/Scripts/python.exe" ]; then PY="$VIRTUAL_ENV/Scripts/python.exe";
+              elif [ -x .venv/bin/python ]; then PY=".venv/bin/python";
+              elif [ -x .venv/Scripts/python.exe ]; then PY=".venv/Scripts/python.exe";
+              else
+                TOP=$(git rev-parse --show-toplevel 2>/dev/null || true);
+                if [ -n "$TOP" ] && [ -x "$TOP/.venv/bin/python" ]; then PY="$TOP/.venv/bin/python";
+                elif [ -n "$TOP" ] && [ -x "$TOP/.venv/Scripts/python.exe" ]; then PY="$TOP/.venv/Scripts/python.exe";
+                fi;
+              fi;
+              if [ -z "$PY" ]; then
+                echo "unit_test: no project Python venv found. Tried: VIRTUAL_ENV, .venv, \$(git toplevel)/.venv. Configure unit_test.command (e.g. /path/to/.venv/bin/python -m pytest)." >&2;
+                exit 1;
+              fi;
+              "$PY" -m pytest && printf '%s\n' "{\"tests_passed\":true,\"runner\":\"$PY -m pytest\"}" > "{artifact_dir}/result.json";
             else
               echo "unit_test: no supported pure test runner found in source workspace; configure unit_test.command for this project (do not use lint-bundled wrappers as the harness unit gate)" >&2;
               exit 1;
