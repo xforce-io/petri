@@ -11,7 +11,13 @@ import {
 import { Engine } from "../engine/engine.js";
 import { RunLogger, loadRunLog } from "../engine/logger.js";
 import { currentGeneratedHashes, loadGeneratedManifest, sha256 } from "../engine/manifest.js";
-import { acquireLock, releaseLock, killProcessTree } from "../engine/lock.js";
+import {
+  acquireLock,
+  releaseLock,
+  killProcessTree,
+  lockFilePath,
+  resolveRunRoot,
+} from "../engine/lock.js";
 import { loadBranch, normalizeRunId, runRootForBranch } from "../engine/branch.js";
 import { createProviderRegistryFromConfig, validateRoleProviderConfig } from "../util/provider.js";
 import { resolveIssueInput } from "../input/issue-input.js";
@@ -370,11 +376,30 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     ? pipelineDir
     : cwd;
 
-  // 2. Resolve resume source early so input can inherit from the source run (issue #58)
-  const petriDir = runRootForBranch(cwd, opts.branch);
+  // 2. Resolve run storage + lock namespace from the *execution* workspace (#78).
+  // Worktrees get `.petri/ws/<key>` so concurrent issue worktrees do not share one lock.
+  const branchRoot = opts.branch ? runRootForBranch(cwd, opts.branch) : undefined;
+  const petriDir = resolveRunRoot({
+    projectRoot: cwd,
+    workspaceDir: executionCwd,
+    branchRoot,
+  });
+  const legacyPetriDir = runRootForBranch(cwd, opts.branch);
+
+  // Resume source: prefer workspace-scoped runs, fall back to project `.petri` (pre-#78).
   let resumedFrom: { runId: string; stage: string } | undefined;
   try {
-    resumedFrom = resolveResumeSource(petriDir, opts.resumeRun, opts.skipTo);
+    if (opts.resumeRun) {
+      try {
+        resumedFrom = resolveResumeSource(petriDir, opts.resumeRun, opts.skipTo);
+      } catch (first) {
+        if (legacyPetriDir !== petriDir) {
+          resumedFrom = resolveResumeSource(legacyPetriDir, opts.resumeRun, opts.skipTo);
+        } else {
+          throw first;
+        }
+      }
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(chalk.red(message));
@@ -404,7 +429,11 @@ export async function runCommand(opts: RunOptions): Promise<void> {
       input = pipelineConfig.goal;
       inputSource = "pipeline.goal";
     } else if (opts.resumeRun) {
-      input = inheritInputFromResumeRun(petriDir, opts.resumeRun);
+      input =
+        inheritInputFromResumeRun(petriDir, opts.resumeRun) ??
+        (legacyPetriDir !== petriDir
+          ? inheritInputFromResumeRun(legacyPetriDir, opts.resumeRun)
+          : undefined);
       if (input) inputSource = "resume";
     }
   }
@@ -484,9 +513,12 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     workspaceDir: executionCwd,
   });
 
-  // 7. Acquire lock to prevent concurrent runs
-  const lockFile = path.join(petriDir, "run.lock");
-  acquireLock(lockFile, logger.runId);
+  // 7. Acquire per-workspace lock (issue #78) — different worktrees do not block each other
+  const lockFile = lockFilePath(petriDir);
+  acquireLock(lockFile, logger.runId, { workspace: executionCwd });
+  if (petriDir !== legacyPetriDir) {
+    console.log(chalk.gray(`Run storage: ${petriDir}`));
+  }
 
   // Ensure cleanup on signals — kill entire process tree so child processes (e.g. python training) are also terminated
   const cleanup = (signal: string) => {

@@ -2,6 +2,7 @@ import * as path from "node:path";
 import chalk from "chalk";
 import { latestRunDir, loadRunLog, listRuns } from "../engine/logger.js";
 import { loadBranch, runRootForBranch } from "../engine/branch.js";
+import { inspectLock, listProjectLockFiles } from "../engine/lock.js";
 
 interface StatusOptions {
   branch?: string;
@@ -10,12 +11,41 @@ interface StatusOptions {
 export async function statusCommand(opts: StatusOptions = {}): Promise<void> {
   const cwd = process.cwd();
   const branch = opts.branch ? loadBranch(cwd, opts.branch) : undefined;
-  const runsDir = path.join(runRootForBranch(cwd, opts.branch), "runs");
+  const projectPetri = path.join(cwd, ".petri");
+  const runRoot = runRootForBranch(cwd, opts.branch);
+  const runsDir = path.join(runRoot, "runs");
   const runs = listRuns(runsDir);
+
+  // Lock diagnostics (issue #78 S3): active vs stale for project + worktree namespaces
+  const lockFiles = listProjectLockFiles(projectPetri);
+  if (lockFiles.length > 0) {
+    console.log(chalk.bold("Locks:"));
+    for (const lf of lockFiles) {
+      const info = inspectLock(lf);
+      if (info.status === "absent") continue;
+      const label =
+        info.status === "active"
+          ? chalk.yellow("active")
+          : info.status === "stale"
+            ? chalk.gray("stale")
+            : chalk.red(info.status);
+      const id = info.runId ? `run-${info.runId}` : "?";
+      const pid = info.pid != null ? `PID ${info.pid}` : "";
+      console.log(`  ${label} ${id} ${pid}`.trim());
+      console.log(chalk.gray(`    ${info.lockFile}`));
+      if (info.workspace) console.log(chalk.gray(`    workspace: ${info.workspace}`));
+      console.log(chalk.gray(`    ${info.cleanupHint}`));
+    }
+    console.log("");
+  }
 
   if (runs.length === 0) {
     const hint = branch ? `petri run --branch ${branch.branch_id}` : "petri run";
-    console.log(chalk.gray(`No runs found. Use \`${hint}\` to start a pipeline.`));
+    if (lockFiles.length === 0) {
+      console.log(chalk.gray(`No runs found. Use \`${hint}\` to start a pipeline.`));
+    } else {
+      console.log(chalk.gray(`No runs under ${runsDir}. Use \`${hint}\` to start a pipeline.`));
+    }
     return;
   }
 
